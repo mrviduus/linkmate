@@ -3,7 +3,7 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'LinkMate',
-  version: '0.1.0',
+  version: '0.1.1',
   description: 'LinkedIn SSI growth assistant: track score, daily actions, AI comment drafts.',
   action: { default_title: 'LinkMate' },
   side_panel: { default_path: 'src/ui/panel/index.html' },
