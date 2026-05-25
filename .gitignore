@@ -1,0 +1,6 @@
+node_modules
+dist
+linkmate.zip
+.DS_Store
+*.log
+tsconfig.tsbuildinfo
