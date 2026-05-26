@@ -55,6 +55,31 @@ import {
 
 console.log('LinkMate background service worker loaded');
 
+// ─── Auto-open LinkedIn profile when stale (issue #16 follow-up) ────────────
+
+const AUTO_OPEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function autoOpenProfileIfStale(reason: 'install' | 'startup'): Promise<void> {
+  try {
+    const profile = await getProfile();
+    if (profile && Date.now() - profile.capturedAt < AUTO_OPEN_TTL_MS) return;
+    // Open a NEW tab rather than hijack whatever the user is on (especially
+    // important on Chrome startup when sessions are restoring). The popup's
+    // own auto-capture fires when the user clicks the LinkMate icon next.
+    await chrome.tabs.create({ url: 'https://www.linkedin.com/in/me/', active: true });
+    console.log(`[LinkMate] auto-opened /in/me/ (reason=${reason})`);
+  } catch (err) {
+    console.warn('[LinkMate] autoOpenProfileIfStale failed:', err);
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void autoOpenProfileIfStale('install');
+});
+chrome.runtime.onStartup.addListener(() => {
+  void autoOpenProfileIfStale('startup');
+});
+
 // ─── AI generation parameters ───────────────────────────────────────────────
 
 let aiTemperature = 0.85;
