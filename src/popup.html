@@ -14,9 +14,54 @@
       <header class="popup-hdr">
         <img id="logo" src="icons/icon-32.png" width="32" height="32" />
         <h1 class="brand">LinkMate</h1>
+        <div id="streakBadge" class="streak-badge" title="Consecutive weeks all quotas hit">
+          <i class="fa fa-fire"></i>
+          <span id="streakCount">0</span>
+        </div>
       </header>
 
       <div id="settings-content" class="settings-main">
+        <!-- Today: cadence quotas + 3 cards -->
+        <div class="settings-section" id="todaySection">
+          <h3>
+            <i class="fa fa-bolt"></i>
+            Today
+          </h3>
+          <p class="settings-description">
+            Rolling 7-day quotas. The recommender biases your actions toward the weakest pillar.
+          </p>
+
+          <div id="cadenceBars" class="cadence-bars">
+            <div class="cadence-row" data-pillar="brand">
+              <span class="cadence-label">Brand</span>
+              <div class="cadence-track"><div class="cadence-fill"></div></div>
+              <span class="cadence-num">0 / 1</span>
+            </div>
+            <div class="cadence-row" data-pillar="finding">
+              <span class="cadence-label">Finding</span>
+              <div class="cadence-track"><div class="cadence-fill"></div></div>
+              <span class="cadence-num">0 / 5</span>
+            </div>
+            <div class="cadence-row" data-pillar="engaging">
+              <span class="cadence-label">Engaging</span>
+              <div class="cadence-track"><div class="cadence-fill"></div></div>
+              <span class="cadence-num">0 / 3</span>
+            </div>
+            <div class="cadence-row" data-pillar="building">
+              <span class="cadence-label">Building</span>
+              <div class="cadence-track"><div class="cadence-fill"></div></div>
+              <span class="cadence-num">0 / 2</span>
+            </div>
+          </div>
+
+          <div id="recommendCards" class="recommend-cards"></div>
+
+          <div id="pendingChips" class="pending-chips" style="display: none">
+            <h4 class="pending-chips__hdr">Did this work?</h4>
+            <div id="pendingChipsList"></div>
+          </div>
+        </div>
+
         <!-- OpenAI key + model -->
         <div class="settings-section">
           <h3>
@@ -63,6 +108,41 @@
           </div>
 
           <div id="providerStatus" class="status-message" style="display: none"></div>
+        </div>
+
+        <!-- Weekly cadence targets -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-calendar-week"></i>
+            Weekly Targets
+          </h3>
+          <p class="settings-description">
+            How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.
+          </p>
+          <div class="cadence-targets-form">
+            <label class="provider-field">
+              <span>Posts (Brand)</span>
+              <input type="number" id="targetBrand" min="0" max="20" value="1" />
+            </label>
+            <label class="provider-field">
+              <span>Invites (Finding)</span>
+              <input type="number" id="targetFinding" min="0" max="50" value="5" />
+            </label>
+            <label class="provider-field">
+              <span>Comments (Engaging)</span>
+              <input type="number" id="targetEngaging" min="0" max="30" value="3" />
+            </label>
+            <label class="provider-field">
+              <span>Replies (Building)</span>
+              <input type="number" id="targetBuilding" min="0" max="20" value="2" />
+            </label>
+          </div>
+          <div class="provider-actions">
+            <button id="cadenceSaveBtn" class="btn btn-primary">
+              <i class="fa fa-save"></i> Save targets
+            </button>
+          </div>
+          <div id="cadenceStatus" class="status-message" style="display: none"></div>
         </div>
 
         <!-- Profile Context -->

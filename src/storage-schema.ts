@@ -24,6 +24,8 @@ export const STORAGE_KEYS = {
   connectionsSuggestions: 'linkmate.connections.suggestions.v1',
   connectionsDraftedThisWeek: 'linkmate.connections.draftedThisWeek.v1',
   provider: 'linkmate.provider.v1',
+  cadenceTargets: 'linkmate.cadence.targets.v1',
+  cadenceStreak: 'linkmate.cadence.streak.v1',
   schemaVersion: 'linkmate.schema.version',
 } as const;
 
@@ -285,4 +287,49 @@ export async function migrateIfNeeded(): Promise<void> {
     // future: run migrations from currentStored → SCHEMA_VERSION here
     await writeKey(STORAGE_KEYS.schemaVersion, SCHEMA_VERSION);
   }
+}
+
+// ─── Cadence targets + streak (weekly quotas) ───────────────────────────────
+
+export interface CadenceTargets {
+  /** Original posts per rolling 7d. */
+  brand: number;
+  /** Connection invites sent per rolling 7d. */
+  finding: number;
+  /** Comments on others' posts per rolling 7d. */
+  engaging: number;
+  /** Thread replies / congrats DMs per rolling 7d. */
+  building: number;
+}
+
+export const DEFAULT_CADENCE_TARGETS: CadenceTargets = {
+  brand: 1,
+  finding: 5,
+  engaging: 3,
+  building: 2,
+};
+
+/** Streak = consecutive past 7d-windows where ALL 4 quotas were hit. */
+export interface CadenceStreak {
+  count: number;
+  /** Timestamp of the last 7d window we credited. ms epoch. */
+  lastWindowEnd: number;
+}
+
+export async function getCadenceTargets(): Promise<CadenceTargets> {
+  const stored = await readKey<CadenceTargets>(STORAGE_KEYS.cadenceTargets);
+  return stored ?? { ...DEFAULT_CADENCE_TARGETS };
+}
+
+export async function setCadenceTargets(t: CadenceTargets): Promise<void> {
+  await writeKey(STORAGE_KEYS.cadenceTargets, t);
+}
+
+export async function getCadenceStreak(): Promise<CadenceStreak> {
+  const stored = await readKey<CadenceStreak>(STORAGE_KEYS.cadenceStreak);
+  return stored ?? { count: 0, lastWindowEnd: 0 };
+}
+
+export async function setCadenceStreak(s: CadenceStreak): Promise<void> {
+  await writeKey(STORAGE_KEYS.cadenceStreak, s);
 }
