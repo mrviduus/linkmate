@@ -30,6 +30,7 @@ export const STORAGE_KEYS = {
   retroLastShown: 'linkmate.retro.lastShown.v1',
   postDraftsState: 'linkmate.recommender.postDrafts.v1',
   captureFullProfile: 'linkmate.settings.captureFullProfile.v1',
+  onboardingCompleted: 'linkmate.settings.onboardingCompleted.v1',
   schemaVersion: 'linkmate.schema.version',
 } as const;
 
@@ -406,4 +407,15 @@ export async function getCaptureFullProfile(): Promise<boolean> {
 
 export async function setCaptureFullProfile(value: boolean): Promise<void> {
   await writeKey(STORAGE_KEYS.captureFullProfile, value);
+}
+
+// ─── Onboarding — completed-once flag (issue #16 Option-A welcome flow) ────
+
+/** True after the user has accepted/skipped the welcome screen. Default false. */
+export async function getOnboardingCompleted(): Promise<boolean> {
+  return (await readKey<boolean>(STORAGE_KEYS.onboardingCompleted)) ?? false;
+}
+
+export async function setOnboardingCompleted(value: boolean): Promise<void> {
+  await writeKey(STORAGE_KEYS.onboardingCompleted, value);
 }

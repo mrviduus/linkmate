@@ -41,6 +41,10 @@
     {
       "resources": ["linkedin-styles.css", "engagement-queue.css"],
       "matches": ["https://*.linkedin.com/*"]
+    },
+    {
+      "resources": ["welcome.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

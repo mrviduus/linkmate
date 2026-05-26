@@ -26,6 +26,7 @@ import {
   getCadenceTargets,
   setCadenceTargets,
   getCadenceStreak,
+  getOnboardingCompleted,
 } from './storage-schema';
 import type {
   ParsedPost,
@@ -55,64 +56,36 @@ import {
 
 console.log('LinkMate background service worker loaded');
 
-// ─── Auto-open LinkedIn profile when stale (issue #16 follow-up) ────────────
+// ─── Onboarding — Option A welcome flow (issue #16) ────────────────────────
+//
+// On first install, open welcome.html in a new tab. The user explicitly opts
+// in there before we touch their LinkedIn data. No auto-redirect or
+// auto-capture on Chrome startup — that would surprise existing users.
 
-const AUTO_OPEN_TTL_MS = 24 * 60 * 60 * 1000;
-
-async function autoOpenProfileIfStale(reason: 'install' | 'startup'): Promise<void> {
-  try {
-    const profile = await getProfile();
-    if (profile && Date.now() - profile.capturedAt < AUTO_OPEN_TTL_MS) return;
-    // Open a NEW tab rather than hijack whatever the user is on (important
-    // on Chrome startup when sessions are restoring).
-    const tab = await chrome.tabs.create({ url: 'https://www.linkedin.com/in/me/', active: true });
-    console.log(`[LinkMate] auto-opened /in/me/ (reason=${reason}, tabId=${tab.id})`);
-
-    // Wait for the new LinkedIn tab to finish loading before opening the popup
-    // — otherwise the popup's capture flow won't have a profile DOM to grab.
-    if (tab.id !== undefined) {
-      await waitForTabComplete(tab.id, 15000);
+function findWelcomePath(): string {
+  const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
+    web_accessible_resources?: Array<{ resources?: string[] }>;
+  };
+  for (const entry of manifest.web_accessible_resources ?? []) {
+    for (const r of entry.resources ?? []) {
+      if (r.startsWith('welcome') && r.endsWith('.html')) return r;
     }
-
-    // Configure side panel for the LinkedIn tab with ?targetTab=… so the
-    // panel's JS targets the right tab even when it isn't currently active.
-    // chrome.sidePanel.open() requires Chrome 116+; @types/chrome is stale,
-    // hence the `as any` casts.
-    const sidePanel = chrome.sidePanel as unknown as {
-      setOptions: (o: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>;
-      open: (o: { tabId?: number; windowId?: number }) => Promise<void>;
-      setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
-    };
-    if (tab.id !== undefined) {
-      // Parcel content-hashes popup.html (e.g. popup.dbddf994.html); the bare
-      // string would 404. Read the resolved name from the runtime manifest.
-      const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
-        side_panel?: { default_path?: string };
-      };
-      const sidePanelPath = manifest.side_panel?.default_path ?? 'popup.html';
-      try {
-        await sidePanel.setOptions({
-          tabId: tab.id,
-          path: `${sidePanelPath}?targetTab=${tab.id}&auto=1`,
-          enabled: true,
-        });
-      } catch (err) {
-        console.warn('[LinkMate] sidePanel.setOptions failed:', err);
-      }
-      try {
-        await sidePanel.open({ tabId: tab.id });
-        console.log('[LinkMate] side panel opened');
-      } catch (err) {
-        console.warn(
-          '[LinkMate] sidePanel.open requires user gesture — user can click the LinkMate icon to open it:',
-          err,
-        );
-      }
-    }
-  } catch (err) {
-    console.warn('[LinkMate] autoOpenProfileIfStale failed:', err);
   }
+  return 'welcome.html';
 }
+
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason !== 'install') return;
+  if (await getOnboardingCompleted()) return;
+  try {
+    await chrome.tabs.create({
+      url: chrome.runtime.getURL(findWelcomePath()),
+      active: true,
+    });
+  } catch (err) {
+    console.warn('[LinkMate] failed to open welcome tab:', err);
+  }
+});
 
 // Action icon click → open the side panel automatically (instead of a popup).
 (
@@ -154,30 +127,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // keep channel open for async sendResponse
   }
   return undefined;
-});
-
-function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, timeoutMs);
-    const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
-      if (id === tabId && info.status === 'complete') {
-        clearTimeout(timer);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-  });
-}
-
-chrome.runtime.onInstalled.addListener(() => {
-  void autoOpenProfileIfStale('install');
-});
-chrome.runtime.onStartup.addListener(() => {
-  void autoOpenProfileIfStale('startup');
 });
 
 // ─── AI generation parameters ───────────────────────────────────────────────

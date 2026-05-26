@@ -9,6 +9,7 @@ import {
 } from './ssi-tracker';
 import {
   getCaptureFullProfile,
+  getOnboardingCompleted,
   getSsiLastError,
   setCaptureFullProfile,
 } from './storage-schema';
@@ -212,6 +213,8 @@ const AUTO_CAPTURE_TTL_MS = 24 * 60 * 60 * 1000;
  * Inside handleCaptureProfile, ensureOnOwnProfile() handles the redirect.
  */
 async function maybeAutoCapture(): Promise<void> {
+  // Welcome screen handles the very first capture; don't pre-empt it.
+  if (!(await getOnboardingCompleted())) return;
   const existing = await profileService.get();
   if (existing && Date.now() - existing.capturedAt < AUTO_CAPTURE_TTL_MS) return;
   showProfileMessage('Profile stale — opening your LinkedIn profile to refresh…', 'info');
