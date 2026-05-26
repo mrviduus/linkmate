@@ -262,6 +262,20 @@ body {
   gap: 8px;
 }
 
+.profile-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.profile-toggle-row input[type='checkbox'] {
+  margin: 0;
+}
+
 /* ── SSI ──────────────────────────────────────────────────────────────── */
 
 .ssi-none {

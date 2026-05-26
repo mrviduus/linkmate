@@ -29,6 +29,7 @@ export const STORAGE_KEYS = {
   recommenderCards: 'linkmate.recommender.cards.v1',
   retroLastShown: 'linkmate.retro.lastShown.v1',
   postDraftsState: 'linkmate.recommender.postDrafts.v1',
+  captureFullProfile: 'linkmate.settings.captureFullProfile.v1',
   schemaVersion: 'linkmate.schema.version',
 } as const;
 
@@ -393,4 +394,16 @@ export async function getPostDraftsState(): Promise<PostDraftsState> {
 
 export async function setPostDraftsState(s: PostDraftsState): Promise<void> {
   await writeKey(STORAGE_KEYS.postDraftsState, s);
+}
+
+// ─── Settings: capture-full-profile toggle (Issue #16) ──────────────────────
+
+/** Whether the popup's Capture Profile button should also scrape activity. Default ON. */
+export async function getCaptureFullProfile(): Promise<boolean> {
+  const stored = await readKey<boolean>(STORAGE_KEYS.captureFullProfile);
+  return stored ?? true;
+}
+
+export async function setCaptureFullProfile(value: boolean): Promise<void> {
+  await writeKey(STORAGE_KEYS.captureFullProfile, value);
 }

@@ -28,10 +28,17 @@
  * Returns a typed Result; never throws. Caller (popup) renders an error chip.
  */
 
-import { parseProfileDom } from './profile-parser';
+import {
+  parseProfileDom,
+  parseUserProfile,
+  parseRecentPosts,
+  parseRecentComments,
+} from './profile-parser';
 import type { RawProfileFields } from './profile-parser';
-import { getProfile, setProfile } from './storage-schema';
+import { getCaptureFullProfile, getProfile, setProfile } from './storage-schema';
 import type { ProfileContext } from './storage-schema';
+import { getUserProfile, isFresh, saveUserProfile } from './user-profile-store';
+import type { UserProfile } from './lib/idb';
 
 const PROFILE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -48,7 +55,7 @@ export type CaptureFailureReason =
   | 'summary-failed';
 
 export type CaptureResult =
-  | { ok: true; profile: ProfileContext }
+  | { ok: true; profile: ProfileContext; cached?: boolean; userProfile?: UserProfile }
   | { ok: false; reason: CaptureFailureReason; message: string };
 
 interface ProfileCaptureResponse {
@@ -59,6 +66,23 @@ interface ProfileCaptureResponse {
 
 export class ProfileContextService {
   async capture(): Promise<CaptureResult> {
+    // Issue #16 — when full-capture is ON and IDB snapshot is <24h, short-circuit
+    // before doing any DOM grab. Falls through to full capture otherwise.
+    // IDB read is fail-soft: in environments without IndexedDB (jsdom tests,
+    // some service-worker contexts) we just proceed with the regular flow.
+    const fullProfileEnabled = await getCaptureFullProfile();
+    if (fullProfileEnabled) {
+      try {
+        const cached = await getUserProfile();
+        const existingProfile = await getProfile();
+        if (cached && existingProfile && isFresh(cached)) {
+          return { ok: true, profile: existingProfile, cached: true, userProfile: cached };
+        }
+      } catch (err) {
+        console.warn('[LinkMate] UserProfile cache check failed; proceeding with fresh capture:', err);
+      }
+    }
+
     // Step 1: active tab
     let activeTab: chrome.tabs.Tab | undefined;
     try {
@@ -179,7 +203,20 @@ export class ProfileContextService {
       capturedAt: Date.now(),
     };
     await setProfile(profile);
-    return { ok: true, profile };
+
+    // Issue #16 — full UserProfile capture (extended fields + recent activity).
+    // Soft-fail: never block the legacy ProfileContext capture on a parse error.
+    let userProfile: UserProfile | undefined;
+    if (fullProfileEnabled) {
+      try {
+        userProfile = await captureFullUserProfile(url, parsedDoc);
+        await saveUserProfile(userProfile);
+      } catch (err) {
+        console.warn('[LinkMate] Full profile capture failed:', err);
+      }
+    }
+
+    return { ok: true, profile, userProfile };
   }
 
   /** Read the currently-stored profile (or null). Cheap; no network/DOM access. */
@@ -193,4 +230,54 @@ export class ProfileContextService {
     if (!profile) return true;
     return Date.now() - profile.capturedAt > PROFILE_TTL_MS;
   }
+}
+
+// ─── Issue #16 — full-profile + recent-activity ─────────────────────────────
+
+function extractHandle(url: string): string | null {
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  return m ? m[1] : null;
+}
+
+async function fetchActivityHtml(handle: string, kind: 'all' | 'comments'): Promise<Document | null> {
+  const target = `https://www.linkedin.com/in/${encodeURIComponent(handle)}/recent-activity/${kind}/`;
+  try {
+    const res = await fetch(target, { credentials: 'include' });
+    if (!res.ok) return null;
+    const html = await res.text();
+    // Login-wall heuristic: returned HTML lacks the <main> we expect, or
+    // contains the auth-wall marker. Treat as empty rather than crashing.
+    if (!html || html.length < 1000 || /authwall|sign\s*in/i.test(html.slice(0, 5000)) &&
+        !html.includes('feed-shared-update-v2') && !html.includes('urn:li:activity')) {
+      return null;
+    }
+    return new DOMParser().parseFromString(html, 'text/html');
+  } catch (err) {
+    console.warn(`[LinkMate] fetch recent-activity/${kind} failed:`, err);
+    return null;
+  }
+}
+
+/**
+ * Build a UserProfile from the already-loaded main-profile DOM, then enrich
+ * with recent posts/comments via background fetch of the activity pages.
+ */
+async function captureFullUserProfile(
+  url: string,
+  parsedDoc: Document
+): Promise<UserProfile> {
+  const handle = extractHandle(url);
+  const canonical = handle ? `https://www.linkedin.com/in/${handle}/` : url;
+  const profile = parseUserProfile(parsedDoc, canonical);
+
+  if (handle) {
+    const [postsDoc, commentsDoc] = await Promise.all([
+      fetchActivityHtml(handle, 'all'),
+      fetchActivityHtml(handle, 'comments'),
+    ]);
+    if (postsDoc) profile.recentPosts = parseRecentPosts(postsDoc);
+    if (commentsDoc) profile.recentComments = parseRecentComments(commentsDoc);
+  }
+
+  return profile;
 }

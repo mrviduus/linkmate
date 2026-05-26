@@ -7,7 +7,11 @@ import {
   renderTrend as renderSsiTrend,
   getInsight as getSsiInsight,
 } from './ssi-tracker';
-import { getSsiLastError } from './storage-schema';
+import {
+  getCaptureFullProfile,
+  getSsiLastError,
+  setCaptureFullProfile,
+} from './storage-schema';
 import type { ProfileContext, SsiSnapshot } from './storage-schema';
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -102,6 +106,7 @@ const profileCapturedAt = $('profileCapturedAt');
 const profileSkillsCount = $('profileSkillsCount');
 const profileStaleChip = $('profileStaleChip');
 const profileMessage = $('profileMessage');
+const captureFullProfileToggle = $<HTMLInputElement>('captureFullProfile');
 const profileService = new ProfileContextService();
 
 function formatRelativeTime(timestamp: number): string {
@@ -155,7 +160,11 @@ async function handleCaptureProfile(): Promise<void> {
   try {
     const result = await profileService.capture();
     if (result.ok) {
-      showProfileMessage('Profile captured.', 'success');
+      if (result.cached) {
+        showProfileMessage('Profile is fresh (<24h). Using cached snapshot.', 'info');
+      } else {
+        showProfileMessage('Profile captured.', 'success');
+      }
       await refreshProfileDisplay();
     } else {
       showProfileMessage(result.message, 'error');
@@ -170,6 +179,16 @@ async function handleCaptureProfile(): Promise<void> {
 
 function handleOpenMyProfile(): void {
   chrome.tabs.update({ url: 'https://www.linkedin.com/in/me/' });
+}
+
+async function loadCaptureFullProfileToggle(): Promise<void> {
+  if (!captureFullProfileToggle) return;
+  captureFullProfileToggle.checked = await getCaptureFullProfile();
+}
+
+async function handleCaptureFullProfileToggle(): Promise<void> {
+  if (!captureFullProfileToggle) return;
+  await setCaptureFullProfile(captureFullProfileToggle.checked);
 }
 
 // ─── SSI Tracker ────────────────────────────────────────────────────────────
@@ -958,6 +977,7 @@ function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
   openMyProfileBtn?.addEventListener('click', handleOpenMyProfile);
+  captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
   ssiRefreshBtn?.addEventListener('click', () => void handleSsiRefresh());
   ssiOpenPageBtn?.addEventListener('click', handleSsiOpenPage);
   temperatureSlider?.addEventListener('input', handleTemperatureChange);
@@ -979,6 +999,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([
     loadProviderConfig(),
     refreshProfileDisplay(),
+    loadCaptureFullProfileToggle(),
     loadSsiData(),
     loadAIParameters(),
     loadPrompts(),
