@@ -178,21 +178,17 @@ async function ensureOnOwnProfile(): Promise<boolean> {
   return true;
 }
 
-const PROFILE_URL_RE = /^https?:\/\/(www\.)?linkedin\.com\/in\/[^/?#]+\/?(\?[^#]*)?(#.*)?$/;
 const AUTO_CAPTURE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
- * On popup open, if the active tab is already on a LinkedIn profile and our
- * cached snapshot is missing or older than 24h, fire Capture without a click.
- * Skips when user is anywhere else (feed, messaging, off-LinkedIn) — those
- * cases would require hijacking the tab, which we only do on explicit click.
+ * On popup open, if our cached snapshot is missing or older than 24h, fire
+ * Capture without a click — hijacking the active tab to /in/me/ if needed.
+ * Inside handleCaptureProfile, ensureOnOwnProfile() handles the redirect.
  */
 async function maybeAutoCapture(): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url || !PROFILE_URL_RE.test(tab.url)) return;
   const existing = await profileService.get();
   if (existing && Date.now() - existing.capturedAt < AUTO_CAPTURE_TTL_MS) return;
-  showProfileMessage('Profile stale — refreshing automatically…', 'info');
+  showProfileMessage('Profile stale — opening your LinkedIn profile to refresh…', 'info');
   await handleCaptureProfile();
 }
 
