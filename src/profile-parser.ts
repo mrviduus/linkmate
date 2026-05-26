@@ -117,8 +117,10 @@ export function parseProfileDom(doc: Document | DocumentFragment): RawProfileFie
     const section = h.closest('section, div[componentkey]');
     if (!section) continue;
     const sectionText = readText(section);
-    // Drop the leading "About" heading from the captured text.
-    const cleaned = sectionText.replace(/^about\s+/i, '').trim();
+    // Drop the leading "About" heading from the captured text. LinkedIn's
+    // textContent collapses without whitespace ("AboutAI Engineer …") so
+    // \s+ wasn't matching — use \s* + word boundary.
+    const cleaned = sectionText.replace(/^about\b\s*/i, '').trim();
     about = cleaned.slice(0, ABOUT_MAX_CHARS);
     break;
   }
@@ -310,48 +312,85 @@ function parseLanguages(root: Element | Document | DocumentFragment): string[] {
   return out;
 }
 
+/**
+ * Locate the topcard container — LinkedIn 2026 marks it with a componentkey
+ * containing the literal substring "Topcard". Multiple matches may exist
+ * (header + mobile variant); pick the first non-empty one.
+ */
+function findTopcard(
+  root: Element | Document | DocumentFragment
+): Element | null {
+  const candidates = Array.from(root.querySelectorAll('[componentkey*="Topcard" i]'));
+  return candidates.find((el) => el.querySelector('h2')) ?? candidates[0] ?? null;
+}
+
 function parseTopcardMeta(
-  root: Element | Document | DocumentFragment,
-  fullName: string
+  topcard: Element
 ): { location?: string; connectionsCount?: number; followersCount?: number } {
   let location: string | undefined;
   let connectionsCount: number | undefined;
   let followersCount: number | undefined;
 
-  const topcard =
-    Array.from(root.querySelectorAll('div[aria-label]')).find(
-      (d) => d.getAttribute('aria-label') === fullName
-    ) ?? null;
+  const texts = Array.from(topcard.querySelectorAll('p, span, li'))
+    .map((el) => readText(el))
+    .filter((t) => t && t.length < 120);
 
-  const scan = topcard ?? root;
-  const lines = Array.from(scan.querySelectorAll('p, span, li'));
-  for (const el of lines) {
-    const t = readText(el);
-    if (!t) continue;
-    if (
-      !location &&
-      /^[A-Za-zА-Яа-яЇЄІїєі' .-]+,\s*[A-Za-zА-Яа-яЇЄІїєі' .-]+(,\s*[A-Za-zА-Яа-яЇЄІїєі' .-]+)?$/.test(
-        t
-      ) &&
-      t.length < 100
-    ) {
-      location = t;
-    }
+  for (const t of texts) {
     if (!connectionsCount && /\bconnections?\b/i.test(t)) {
-      connectionsCount = parseIntFromLabel(t);
+      const m = t.match(/([\d,.]+\+?)\s*connection/i);
+      if (m) connectionsCount = parseIntFromLabel(m[1]);
     }
     if (!followersCount && /\bfollowers?\b/i.test(t)) {
-      followersCount = parseIntFromLabel(t);
+      const m = t.match(/([\d,.KM]+)\s*follower/i);
+      if (m) followersCount = parseIntFromLabel(m[1]);
+    }
+  }
+
+  // Location: the topcard renders the city/region/country as a short line
+  // that contains neither "connections", "followers", "Contact info", nor a "·".
+  // It also doesn't contain '|' (used by headlines). Pick the first such line
+  // up to 80 chars, AFTER the name h2.
+  const nameH2 = topcard.querySelector('h2');
+  const after = nameH2 ? walkSiblings(nameH2) : Array.from(topcard.querySelectorAll('p, span, div'));
+  for (const el of after) {
+    const t = readText(el);
+    if (!t || t.length > 80) continue;
+    if (/connection|follower|contact info|premium|•|·|\|/i.test(t)) continue;
+    if (/^[A-Za-zА-Яа-яЇЄІїєі' .-]{2,}(,\s*[A-Za-zА-Яа-яЇЄІїєі' .-]{2,}){0,2}$/.test(t)) {
+      location = t;
+      break;
     }
   }
   return { location, connectionsCount, followersCount };
 }
 
+function walkSiblings(start: Element): Element[] {
+  // Depth-first, in-order traversal of nodes AFTER `start` within the same root.
+  const root = start.closest('[componentkey]') ?? start.parentElement ?? start;
+  const all = Array.from(root.querySelectorAll('*'));
+  const idx = all.indexOf(start);
+  return idx < 0 ? all : all.slice(idx + 1);
+}
+
+/**
+ * Topcard chip line "Pinnacle · Kremenchuk State Polytechnical University" — the
+ * current-company + current-school summary. Used as a fallback 1-entry
+ * experience / education when /details/* sub-pages are empty.
+ */
+function parseTopcardChip(topcard: Element): { company?: string; school?: string } {
+  const lines = Array.from(topcard.querySelectorAll('p'))
+    .map((p) => readText(p))
+    .filter((t) => t && t.includes(' · ') && t.length < 200);
+  for (const t of lines) {
+    const [left, right] = t.split(' · ').map((s) => s.trim());
+    if (left && right) return { company: left, school: right };
+  }
+  return {};
+}
+
 /**
  * Parse a fully-loaded LinkedIn profile page into a UserProfile.
- * `profileUrl` is the canonical URL caller already knows (from active tab).
- * Activity arrays (`recentPosts`, `recentComments`) come from the recent-activity
- * pages — populated separately and merged by the caller.
+ * Activity / experience / education subpages are merged by the caller.
  */
 export function parseUserProfile(
   doc: Document | DocumentFragment,
@@ -359,20 +398,42 @@ export function parseUserProfile(
 ): UserProfile {
   const base = parseProfileDom(doc);
   const root: Document | DocumentFragment | Element = doc.querySelector('main') ?? doc;
-  const meta = parseTopcardMeta(root, base.fullName);
+  const topcard = findTopcard(root);
+
+  // Name: LinkedIn 2026 dropped <h1> from the topcard. The first <h2> inside
+  // the topcard is the visible name. Fall back to parseProfileDom result or
+  // og:title meta as last resort.
+  let name = topcard?.querySelector('h2') ? readText(topcard.querySelector('h2')) : '';
+  if (!name) name = base.fullName;
+  if (!name) {
+    const og = doc.querySelector('meta[property="og:title"]');
+    name = og?.getAttribute('content')?.split('|')[0].trim() ?? '';
+  }
+
+  const meta = topcard ? parseTopcardMeta(topcard) : {};
+  const chip = topcard ? parseTopcardChip(topcard) : {};
+
+  let experience = parseExperience(root);
+  if (experience.length === 0 && chip.company) {
+    experience = [{ company: chip.company, title: '', dateRange: '' }];
+  }
+  let education = parseEducation(root);
+  if (education.length === 0 && chip.school) {
+    education = [{ school: chip.school }];
+  }
 
   return {
     capturedAt: new Date().toISOString(),
     profileUrl,
-    name: base.fullName,
+    name,
     headline: base.headline,
     location: meta.location,
     connectionsCount: meta.connectionsCount,
     followersCount: meta.followersCount,
     about: base.about || undefined,
     skills: base.topSkills,
-    experience: parseExperience(root),
-    education: parseEducation(root),
+    experience,
+    education,
     certifications: parseCertifications(root),
     languages: parseLanguages(root),
     recentPosts: [],
@@ -399,42 +460,75 @@ function extractUrn(el: Element): string {
 }
 
 function parseEngagement(scope: Element): { likes: number; comments: number; reposts: number } | undefined {
-  // Look for "social-action" or generic count spans.
-  const text = readText(scope);
-  const likesM = text.match(/([\d.,KM]+)\s*(reactions?|likes?)/i);
-  const commentsM = text.match(/([\d.,KM]+)\s*comments?/i);
-  const repostsM = text.match(/([\d.,KM]+)\s*reposts?/i);
-  if (!likesM && !commentsM && !repostsM) return undefined;
-  const likes = likesM ? parseIntFromLabel(likesM[1]) : undefined;
-  const comments = commentsM ? parseIntFromLabel(commentsM[1]) : undefined;
-  const reposts = repostsM ? parseIntFromLabel(repostsM[1]) : undefined;
+  // LinkedIn 2026 exposes engagement counts as aria-label on the
+  // reactions / comments / reposts pills — e.g. "18 reactions", "5 comments".
+  // Body text is too noisy ("18 ... Like" mashed together) to regex reliably.
+  const labels = Array.from(scope.querySelectorAll('[aria-label]'))
+    .map((el) => el.getAttribute('aria-label') ?? '')
+    .filter((s) => s.length < 80);
+  let likes: number | undefined;
+  let comments: number | undefined;
+  let reposts: number | undefined;
+  for (const a of labels) {
+    if (likes === undefined) {
+      const m = a.match(/^([\d,.KM]+)\s*(?:reactions?|likes?)$/i);
+      if (m) likes = parseIntFromLabel(m[1]);
+    }
+    if (comments === undefined) {
+      const m = a.match(/^([\d,.KM]+)\s*comments?$/i);
+      if (m) comments = parseIntFromLabel(m[1]);
+    }
+    if (reposts === undefined) {
+      const m = a.match(/^([\d,.KM]+)\s*reposts?$/i);
+      if (m) reposts = parseIntFromLabel(m[1]);
+    }
+  }
   if (likes === undefined && comments === undefined && reposts === undefined) return undefined;
   return { likes: likes ?? 0, comments: comments ?? 0, reposts: reposts ?? 0 };
 }
 
+/**
+ * Extract the post body from an activity card.
+ * Live DOM has author name (~32 chars) duplicated as `[dir="ltr"]`, plus the
+ * actual post text (~hundreds of chars) also as `[dir="ltr"]`. Strategy:
+ * dedupe, then pick the LONGEST text — that's the post body.
+ */
+function pickPostBody(card: Element): string {
+  const dirLtrs = Array.from(card.querySelectorAll('[dir="ltr"]'))
+    .map((el) => readText(el))
+    .filter((t) => t.length > 0);
+  if (dirLtrs.length === 0) return '';
+  const unique = Array.from(new Set(dirLtrs)).sort((a, b) => b.length - a.length);
+  return unique[0] ?? '';
+}
+
+function pickRelativeTime(card: Element): string {
+  // LinkedIn renders "7mo • 7 months ago • Visible to anyone …" as one <span>.
+  // Look for the short form: "<digits><h|m|d|w|mo|y> •".
+  const spans = Array.from(card.querySelectorAll('span'));
+  for (const s of spans) {
+    const t = readText(s);
+    if (/\b\d+\s*(mo|h|m|d|w|s|y)\b\s*[•·]/i.test(t)) {
+      const m = t.match(/(\d+\s*(?:mo|h|m|d|w|s|y))/i);
+      return m ? m[1] : t.slice(0, 40);
+    }
+  }
+  return '';
+}
+
 export function parseRecentPosts(doc: Document | DocumentFragment): UserProfile['recentPosts'] {
   const out: UserProfile['recentPosts'] = [];
-  // Anchor on the stable `urn:li:activity:*` data attribute. Hash classes
-  // (`feed-shared-update-v2`, `update-components-*`) drift between releases
-  // and are intentionally avoided as primary selectors.
   const updates = doc.querySelectorAll(
     '[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
   );
   for (const el of Array.from(updates)) {
     const id = extractUrn(el);
     if (out.find((p) => p.id === id)) continue;
-    // Post body — prefer LinkedIn's data-test-id; fall back to dir="ltr"
-    // (which wraps user-authored text) or a long aria-labelled block.
-    const textEl =
-      el.querySelector('[data-test-id*="commentary" i]') ??
-      el.querySelector('[data-test-id*="activity-card" i] [dir="ltr"]') ??
-      el.querySelector('[dir="ltr"]');
-    const text = textEl ? readText(textEl) : '';
+    const text = pickPostBody(el);
     if (text.length < MIN_POST_TEXT_LEN) continue;
-    const tsEl = el.querySelector('time, [aria-label*="ago" i]');
-    const timestamp = tsEl ? readText(tsEl) || tsEl.getAttribute('datetime') || '' : '';
+    const timestamp = pickRelativeTime(el);
     const isRepost =
-      !!el.querySelector('[data-test-id*="repost" i], [aria-label*="reposted" i]') ||
+      !!el.querySelector('[aria-label*="reposted" i]') ||
       /\breposted\b/i.test(readText(el).slice(0, 200));
     const engagement = parseEngagement(el);
     out.push({ id, text, timestamp, engagement, isRepost });
@@ -444,12 +538,24 @@ export function parseRecentPosts(doc: Document | DocumentFragment): UserProfile[
   return out;
 }
 
+/**
+ * Parse the user's recent comments. Each card on the recent-activity/comments
+ * page bundles the parent post plus the user's reply (and sometimes other
+ * authors' comments). Strategy:
+ *   - parent post body = LONGEST unique `[dir="ltr"]` (this is the post they
+ *     commented on)
+ *   - user's comment   = LAST unique `[dir="ltr"]` after author lines —
+ *     in the DOM, the user's own reply is rendered chronologically last
+ *   - original author  = first /in/* link that isn't the profile's own handle
+ *
+ * Caller passes `selfHandle` extracted from the canonical profileUrl
+ * (e.g. "vasyl-vdovychenko"). Empty string disables self-filtering.
+ */
 export function parseRecentComments(
-  doc: Document | DocumentFragment
+  doc: Document | DocumentFragment,
+  selfHandle = ''
 ): UserProfile['recentComments'] {
   const out: UserProfile['recentComments'] = [];
-  // Each card on /recent-activity/comments/ wraps the parent post (a feedshare
-  // urn) and one or more comment urns inside it. Anchor on the activity urn.
   const cards = doc.querySelectorAll(
     '[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
   );
@@ -457,32 +563,39 @@ export function parseRecentComments(
     const id = extractUrn(card);
     if (out.find((c) => c.id === id)) continue;
 
-    // Two text regions live inside one card: the parent post (top) and the
-    // user's comment (bottom). LinkedIn marks each text block with dir="ltr".
-    // First [dir="ltr"] = parent post; last [dir="ltr"] = the user's comment.
-    const textBlocks = Array.from(card.querySelectorAll('[dir="ltr"]'))
+    const dirLtrs = Array.from(card.querySelectorAll('[dir="ltr"]'))
       .map((el) => readText(el))
       .filter((t) => t.length > 0);
-    if (textBlocks.length < 2) continue;
+    const unique = Array.from(new Set(dirLtrs));
+    if (unique.length < 2) continue;
 
-    const originalPostText = textBlocks[0];
-    const text = textBlocks[textBlocks.length - 1];
-    if (!text || text === originalPostText) continue;
+    // Parent post = longest text. User's comment = a different text from the
+    // end of DOM order (last one in `unique`).
+    const sortedByLen = [...unique].sort((a, b) => b.length - a.length);
+    const originalPostText = sortedByLen[0];
+    const text = [...unique].reverse().find((t) => t !== originalPostText) ?? '';
+    if (!originalPostText || !text || text === originalPostText) continue;
 
-    // Original author — first entity lockup / link to /in/ inside the card.
-    const actorEl =
-      card.querySelector('[data-test-id*="entity-lockup-name" i]') ??
-      card.querySelector('a[href*="/in/"] span[aria-hidden="true"]') ??
-      card.querySelector('a[href*="/in/"]');
-    const originalAuthor = actorEl ? readText(actorEl) : '';
+    // Original author: first /in/* link whose handle is NOT the self handle.
+    const links = Array.from(card.querySelectorAll('a[href*="/in/"]')) as HTMLAnchorElement[];
+    let originalAuthor = '';
+    for (const a of links) {
+      const handle = (a.pathname.match(/^\/in\/([^/?#]+)/) ?? [])[1];
+      if (!handle) continue;
+      if (selfHandle && handle.toLowerCase() === selfHandle.toLowerCase()) continue;
+      const name = readText(a) || a.getAttribute('aria-label');
+      if (name) {
+        originalAuthor = name;
+        break;
+      }
+    }
 
-    if (!originalPostText || !originalAuthor) {
-      warnMiss('recentComments.parentPost');
+    if (!originalAuthor) {
+      warnMiss('recentComments.originalAuthor');
       continue;
     }
 
-    const tsEl = card.querySelector('time, [aria-label*="ago" i]');
-    const timestamp = tsEl ? readText(tsEl) || tsEl.getAttribute('datetime') || '' : '';
+    const timestamp = pickRelativeTime(card);
 
     out.push({ id, text, timestamp, originalPostText, originalAuthor });
     if (out.length >= MAX_RECENT_COMMENTS) break;

@@ -126,11 +126,14 @@ export class ProfileContextService {
         func: async () => {
           const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
           const originalScroll = window.scrollY;
-          // Scroll to ~mid then bottom to trigger lazy section loads
-          window.scrollTo({ top: document.body.scrollHeight / 2, behavior: 'instant' });
-          await wait(1500);
-          window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
-          await wait(1500);
+          // Staged scroll forces LinkedIn's SDUI to hydrate placeholders for
+          // About, Experience, Education, Skills, Activity. Each pause is the
+          // observed ~500-800ms XHR window; total ~5s but bounded.
+          const stops = [0.2, 0.4, 0.6, 0.8, 1.0];
+          for (const r of stops) {
+            window.scrollTo({ top: document.body.scrollHeight * r, behavior: 'instant' });
+            await wait(900);
+          }
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
           await wait(300);
           return document.documentElement.outerHTML;
@@ -207,9 +210,9 @@ export class ProfileContextService {
     // Issue #16 — full UserProfile capture (extended fields + recent activity).
     // Soft-fail: never block the legacy ProfileContext capture on a parse error.
     let userProfile: UserProfile | undefined;
-    if (fullProfileEnabled) {
+    if (fullProfileEnabled && activeTab?.id !== undefined) {
       try {
-        userProfile = await captureFullUserProfile(url, parsedDoc);
+        userProfile = await captureFullUserProfile(url, parsedDoc, activeTab.id);
         await saveUserProfile(userProfile);
       } catch (err) {
         console.warn('[LinkMate] Full profile capture failed:', err);
@@ -239,42 +242,90 @@ function extractHandle(url: string): string | null {
   return m ? m[1] : null;
 }
 
-async function fetchActivityHtml(handle: string, kind: 'all' | 'comments'): Promise<Document | null> {
-  const target = `https://www.linkedin.com/in/${encodeURIComponent(handle)}/recent-activity/${kind}/`;
+/**
+ * Navigate the user's active tab to `url`, wait for load + LinkedIn SDUI to
+ * hydrate, scroll to trigger lazy loads, and return the full outer HTML.
+ *
+ * Why not fetch(): the recent-activity page renders server-side as an empty
+ * SDUI shell; activity items are loaded by post-render XHR calls that require
+ * runtime auth tokens. The only reliable read is in a real browser tab.
+ * Background tabs are banned by spec; we re-use the user's active tab and
+ * restore the original URL at the end.
+ */
+async function scrapeInActiveTab(tabId: number, url: string): Promise<string | null> {
+  await chrome.tabs.update(tabId, { url });
+
+  // Wait for the navigation to fully complete.
+  await new Promise<void>((resolve) => {
+    const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo) => {
+      if (updatedTabId === tabId && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    // Safety: bail after 15s so a hung navigation can't pin us forever.
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 15000);
+  });
+
   try {
-    const res = await fetch(target, { credentials: 'include' });
-    if (!res.ok) return null;
-    // Detect login wall via final URL — LinkedIn 302's unauthenticated requests
-    // to /login or /authwall. Cheaper and more reliable than scanning the body.
-    if (/\/(login|authwall|uas\/login|checkpoint)/i.test(res.url)) return null;
-    const html = await res.text();
-    if (!html || html.length < 1000) return null;
-    return new DOMParser().parseFromString(html, 'text/html');
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async () => {
+        const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        // Extra wait for the SDUI XHR hydration cycle.
+        await wait(1500);
+        for (const r of [0.3, 0.6, 1.0]) {
+          window.scrollTo({ top: document.body.scrollHeight * r, behavior: 'instant' });
+          await wait(900);
+        }
+        window.scrollTo({ top: 0, behavior: 'instant' });
+        await wait(300);
+        return document.documentElement.outerHTML;
+      },
+    });
+    return (results?.[0]?.result as string | undefined) ?? null;
   } catch (err) {
-    console.warn(`[LinkMate] fetch recent-activity/${kind} failed:`, err);
+    console.warn('[LinkMate] scrapeInActiveTab failed:', err);
     return null;
   }
 }
 
 /**
  * Build a UserProfile from the already-loaded main-profile DOM, then enrich
- * with recent posts/comments via background fetch of the activity pages.
+ * with recent posts/comments by navigating the user's active tab through
+ * the recent-activity subpages and finally restoring the original profile URL.
  */
 async function captureFullUserProfile(
   url: string,
-  parsedDoc: Document
+  parsedDoc: Document,
+  tabId: number
 ): Promise<UserProfile> {
   const handle = extractHandle(url);
   const canonical = handle ? `https://www.linkedin.com/in/${handle}/` : url;
   const profile = parseUserProfile(parsedDoc, canonical);
 
   if (handle) {
-    const [postsDoc, commentsDoc] = await Promise.all([
-      fetchActivityHtml(handle, 'all'),
-      fetchActivityHtml(handle, 'comments'),
-    ]);
-    if (postsDoc) profile.recentPosts = parseRecentPosts(postsDoc);
-    if (commentsDoc) profile.recentComments = parseRecentComments(commentsDoc);
+    const postsUrl = `https://www.linkedin.com/in/${handle}/recent-activity/all/`;
+    const commentsUrl = `https://www.linkedin.com/in/${handle}/recent-activity/comments/`;
+    try {
+      const postsHtml = await scrapeInActiveTab(tabId, postsUrl);
+      if (postsHtml) {
+        const d = new DOMParser().parseFromString(postsHtml, 'text/html');
+        profile.recentPosts = parseRecentPosts(d);
+      }
+      const commentsHtml = await scrapeInActiveTab(tabId, commentsUrl);
+      if (commentsHtml) {
+        const d = new DOMParser().parseFromString(commentsHtml, 'text/html');
+        profile.recentComments = parseRecentComments(d, handle);
+      }
+    } finally {
+      // Always return the tab to the user's original page, even on partial failure.
+      await chrome.tabs.update(tabId, { url });
+    }
   }
 
   return profile;
