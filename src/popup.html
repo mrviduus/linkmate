@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LinkMate</title>
+    <link rel="stylesheet" href="popup.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+  </head>
+  <body>
+    <div class="card">
+      <header class="popup-hdr">
+        <img id="logo" src="icons/icon-32.png" width="32" height="32" />
+        <h1 class="brand">LinkMate</h1>
+      </header>
+
+      <div id="settings-content" class="settings-main">
+        <!-- OpenAI key + model -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-key"></i>
+            OpenAI
+          </h3>
+          <p class="settings-description">
+            LinkMate uses OpenAI for all AI generation. Bring your own key — stored locally in this
+            browser only, never synced.
+          </p>
+
+          <div class="provider-openai-config">
+            <label class="provider-field">
+              <span>API Key</span>
+              <input
+                type="password"
+                id="providerOpenAIKey"
+                placeholder="sk-..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <small class="provider-field__hint">
+                Get one at platform.openai.com/api-keys
+              </small>
+            </label>
+
+            <label class="provider-field">
+              <span>Model</span>
+              <select id="providerOpenAIModel">
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                <option value="gpt-4o">gpt-4o (best quality)</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="o4-mini">o4-mini (reasoning)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="provider-actions">
+            <button id="providerSave" class="btn btn-primary">
+              <i class="fa fa-save"></i>
+              Save
+            </button>
+          </div>
+
+          <div id="providerStatus" class="status-message" style="display: none"></div>
+        </div>
+
+        <!-- Profile Context -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-user-circle"></i>
+            Profile Context
+          </h3>
+          <p class="settings-description">
+            Capture your LinkedIn profile so AI drafts read in your voice. Open your own profile
+            page, then click Capture below.
+          </p>
+
+          <div id="profileStatus" class="profile-status">
+            <div id="profileNoneState" class="profile-none">
+              <i class="fa fa-info-circle"></i>
+              <span>No profile captured yet.</span>
+            </div>
+            <div id="profileCapturedState" class="profile-captured" style="display: none">
+              <div class="profile-row"><strong id="profileFullName">-</strong></div>
+              <div class="profile-row profile-headline" id="profileHeadline">-</div>
+              <div class="profile-row profile-positioning" id="profilePositioning">-</div>
+              <div class="profile-meta">
+                Captured <span id="profileCapturedAt">-</span> ·
+                <span id="profileSkillsCount">0</span> skills
+                <span id="profileStaleChip" class="profile-stale-chip" style="display: none"
+                  >stale</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-actions">
+            <button id="captureProfile" class="btn btn-primary">
+              <i class="fa fa-camera"></i>
+              Capture Profile
+            </button>
+            <button id="openMyProfile" class="btn btn-secondary">
+              <i class="fa fa-external-link-alt"></i>
+              Open My Profile
+            </button>
+          </div>
+
+          <div id="profileMessage" class="status-message" style="display: none"></div>
+        </div>
+
+        <!-- SSI Tracker -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-chart-line"></i>
+            SSI Tracker
+          </h3>
+          <p class="settings-description">
+            Daily snapshot of your LinkedIn Social Selling Index.
+          </p>
+
+          <div id="ssiStatus">
+            <div id="ssiNoneState" class="ssi-none">
+              <i class="fa fa-info-circle"></i>
+              <span>No SSI captured yet.</span>
+            </div>
+            <div id="ssiCapturedState" class="ssi-captured" style="display: none">
+              <div class="ssi-total-row">
+                <span class="ssi-total" id="ssiTotal">—</span>
+                <span class="ssi-total-max">/ 100</span>
+              </div>
+              <div class="ssi-rank-row">
+                Industry: <strong id="ssiIndustry">—</strong> · Network:
+                <strong id="ssiNetwork">—</strong>
+              </div>
+              <div class="ssi-donut-wrapper">
+                <canvas
+                  id="ssiDonutCanvas"
+                  width="160"
+                  height="160"
+                  aria-label="SSI components breakdown"
+                ></canvas>
+                <div class="ssi-donut-center">
+                  <div class="ssi-donut-center__total" id="ssiDonutTotal">—</div>
+                  <div class="ssi-donut-center__label">/ 100</div>
+                </div>
+              </div>
+              <div class="ssi-components-grid">
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Brand</span>
+                  <span class="ssi-component-value" id="ssiCompBrand">—</span>
+                </div>
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Find people</span>
+                  <span class="ssi-component-value" id="ssiCompFind">—</span>
+                </div>
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Engage</span>
+                  <span class="ssi-component-value" id="ssiCompEngage">—</span>
+                </div>
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Build</span>
+                  <span class="ssi-component-value" id="ssiCompBuild">—</span>
+                </div>
+              </div>
+              <div class="ssi-meta">Captured <span id="ssiCapturedAt">—</span></div>
+              <div class="ssi-canvas-wrapper">
+                <canvas id="ssiTrendCanvas" height="120"></canvas>
+              </div>
+              <div id="ssiInsight" class="ssi-insight"></div>
+              <div id="ssiErrorChip" class="ssi-error-chip" style="display: none"></div>
+            </div>
+          </div>
+
+          <div class="ssi-actions">
+            <button id="ssiRefresh" class="btn btn-primary">
+              <i class="fa fa-sync"></i> Refresh now
+            </button>
+            <button id="ssiOpenPage" class="btn btn-secondary">
+              <i class="fa fa-external-link-alt"></i> Open SSI page
+            </button>
+          </div>
+
+          <div id="ssiMessage" class="status-message" style="display: none"></div>
+        </div>
+
+        <!-- AI Generation Parameters -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-sliders-h"></i>
+            AI Generation Parameters
+          </h3>
+          <p class="settings-description">Fine-tune AI response generation settings</p>
+
+          <div class="parameter-group">
+            <label for="temperatureSlider" class="parameter-label">
+              <i class="fa fa-thermometer-half"></i>
+              <span>Temperature: <strong id="temperatureValue">0.85</strong></span>
+            </label>
+            <input
+              type="range"
+              id="temperatureSlider"
+              class="parameter-slider"
+              min="0.5"
+              max="1.0"
+              step="0.05"
+              value="0.85"
+            />
+            <div class="slider-labels">
+              <span class="label-left">Focused (0.5)</span>
+              <span class="label-right">Creative (1.0)</span>
+            </div>
+          </div>
+
+          <div class="parameter-group">
+            <label for="maxTokensSlider" class="parameter-label">
+              <i class="fa fa-text-width"></i>
+              <span>Max Tokens: <strong id="maxTokensValue">150</strong></span>
+            </label>
+            <input
+              type="range"
+              id="maxTokensSlider"
+              class="parameter-slider"
+              min="50"
+              max="200"
+              step="10"
+              value="150"
+            />
+            <div class="slider-labels">
+              <span class="label-left">Brief (50)</span>
+              <span class="label-right">Detailed (200)</span>
+            </div>
+          </div>
+
+          <div class="parameter-actions">
+            <button id="saveParameters" class="btn btn-primary">
+              <i class="fa fa-save"></i>
+              Save Parameters
+            </button>
+            <button id="resetParameters" class="btn btn-secondary">
+              <i class="fa fa-undo"></i>
+              Reset to Defaults
+            </button>
+          </div>
+
+          <div id="parameterStatus" class="status-message" style="display: none"></div>
+        </div>
+
+        <!-- Prompts -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-edit"></i>
+            AI Prompt Customization
+          </h3>
+          <p class="settings-description">Customize how the AI generates LinkedIn replies</p>
+
+          <div id="settingsContent" class="settings-content">
+            <div class="prompt-group">
+              <label for="standardPrompt" class="prompt-label">
+                <i class="fa fa-comment"></i>
+                Standard Reply Prompt
+              </label>
+              <textarea
+                id="standardPrompt"
+                class="prompt-textarea"
+                rows="6"
+                placeholder="Enter your custom prompt for standard replies..."
+              ></textarea>
+            </div>
+
+            <div class="prompt-group">
+              <label for="withCommentsPrompt" class="prompt-label">
+                <i class="fa fa-chart-line"></i>
+                Smart Reply Prompt
+              </label>
+              <textarea
+                id="withCommentsPrompt"
+                class="prompt-textarea"
+                rows="6"
+                placeholder="Enter your custom prompt for smart replies..."
+              ></textarea>
+            </div>
+
+            <div class="settings-actions">
+              <button id="savePrompts" class="btn btn-primary">
+                <i class="fa fa-save"></i>
+                Save Changes
+              </button>
+              <button id="resetPrompts" class="btn btn-secondary">
+                <i class="fa fa-undo"></i>
+                Reset to Defaults
+              </button>
+            </div>
+
+            <div id="settingsStatus" class="status-message" style="display: none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
