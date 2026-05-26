@@ -1,6 +1,10 @@
 node_modules
 dist
+packages
 linkmate.zip
 .DS_Store
 *.log
 tsconfig.tsbuildinfo
+.parcel-cache
+coverage
+eslint-report.json

@@ -1,0 +1,108 @@
+<!--
+  T030 — Synthetic LinkedIn profile fixture; created 2026-05-14; no real PII.
+  Constitution v1.1 §VIII compliance: synthetic name, headline, about text,
+  skills, and post themes. No real URNs, no JSON-LD, no <script>.
+
+  Structure mirrors the DOM that profile-parser.ts must read:
+    - .text-heading-xlarge          → fullName
+    - .text-body-medium.break-words → headline
+    - #about + .pv-shared-text-with-see-more → about (full text)
+    - #skills      → ul of <li class="pvs-list__paged-list-item">
+    - .pv-recent-activity / posts  → recent post themes (3–5 visible)
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Synthetic Me — LinkedIn (synthetic)</title></head>
+<body>
+<main>
+  <!-- Top card -->
+  <section class="pv-top-card artdeco-card">
+    <div class="ph5 pb5">
+      <div class="display-flex justify-space-between">
+        <div class="display-flex flex-column">
+          <h1 class="text-heading-xlarge inline t-24 v-align-middle break-words">Synthetic Me</h1>
+          <div class="text-body-medium break-words">AI Engineer | RAG | Agents | TypeScript</div>
+          <span class="text-body-small inline t-black--light break-words">Toronto, Ontario, Canada · <a class="link-without-visited-state" href="#"><span>Contact info</span></a></span>
+          <span class="text-body-small">1,150 followers · 500+ connections</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- About -->
+  <section id="about" class="artdeco-card pv-profile-card">
+    <div class="pvs-header__container">
+      <h2 class="pvs-header__title"><span aria-hidden="true">About</span></h2>
+    </div>
+    <div class="display-flex ph5 pv3">
+      <div class="display-flex full-width">
+        <div class="inline-show-more-text inline-show-more-text--is-collapsed inline-show-more-text--is-collapsed-with-line-clamp">
+          <span aria-hidden="true">Builder of local-first AI systems. I spent the last 18 months focused on retrieval-augmented generation pipelines and tool-using agents that run on the user&apos;s own device — no cloud round-trip, no telemetry, no usage-based pricing. The wedge I keep returning to is that &quot;local-first&quot; is not a privacy slogan; it is the only way to make AI features feel instant and personal at the same time.
+
+Most recently I shipped a Chrome extension that drafts LinkedIn replies entirely on-device using WebLLM (Llama-3.2 / Qwen2.5 in WASM + WebGPU). The interesting parts were not the inference but the orchestration: device-tier model selection so a 4 GB laptop still gets a usable model, MV3 service-worker keep-alive so the engine survives a 30-second LinkedIn page-load, and prompt builders that read positioning context from the user&apos;s own profile so drafts sound like them and not like a chatbot.
+
+I write TypeScript for production and Python for prototyping. I believe in test-first for anything that touches storage, and in fixture-driven tests for anything that touches a third-party DOM. I have opinions about evaluation harnesses and very few opinions about which embedding model you should use.
+
+Currently looking for senior / staff AI Engineer roles, remote, Canada or US time zones. The strongest fit is teams shipping LLM features inside an existing product surface — not a greenfield &quot;AI startup&quot; — and where on-device or hybrid inference is on the roadmap. Open to contract-to-hire.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Skills (top 10) -->
+  <section id="skills" class="artdeco-card pv-profile-card">
+    <div class="pvs-header__container">
+      <h2 class="pvs-header__title"><span aria-hidden="true">Skills</span></h2>
+    </div>
+    <ul class="pvs-list">
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">TypeScript</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">Python</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">WebLLM</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">Retrieval-Augmented Generation (RAG)</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">LLM Agents</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">Chrome Extensions / MV3</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">Node.js</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">React</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">Vector Databases</span></span></div></div></li>
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">Prompt Engineering</span></span></div></div></li>
+      <!-- 11th item should be ignored by parser (cap=10) -->
+      <li class="pvs-list__paged-list-item"><div class="display-flex"><div class="display-flex flex-column"><span class="t-bold"><span aria-hidden="true">DevOps</span></span></div></div></li>
+    </ul>
+  </section>
+
+  <!-- Recent activity / posts (themes parser samples from first 3–5) -->
+  <section id="content_collections" class="artdeco-card pv-profile-card">
+    <div class="pvs-header__container">
+      <h2 class="pvs-header__title"><span aria-hidden="true">Activity</span></h2>
+    </div>
+    <ul class="pvs-list">
+      <li class="pvs-list__paged-list-item profile-creator-shared-feed-update__container">
+        <div class="update-components-text">
+          <span aria-hidden="true">Shipped LinkMate v0.3.3 today — local-first LinkedIn reply assistant, WebLLM under the hood, zero outbound LLM calls.</span>
+        </div>
+      </li>
+      <li class="pvs-list__paged-list-item profile-creator-shared-feed-update__container">
+        <div class="update-components-text">
+          <span aria-hidden="true">Notes from a week of MCP experiments: tool composition changes how I think about agent design more than RAG did.</span>
+        </div>
+      </li>
+      <li class="pvs-list__paged-list-item profile-creator-shared-feed-update__container">
+        <div class="update-components-text">
+          <span aria-hidden="true">Local LLMs hit a quiet inflection in 2026: 0.5B–3B models are now coherent enough for in-product features without a cloud fallback.</span>
+        </div>
+      </li>
+      <li class="pvs-list__paged-list-item profile-creator-shared-feed-update__container">
+        <div class="update-components-text">
+          <span aria-hidden="true">A RAG eval harness I&apos;ve been using: 30 hand-graded queries, log every chunk retrieved, then diff retrieval sets across config changes. Boring, but it works.</span>
+        </div>
+      </li>
+      <li class="pvs-list__paged-list-item profile-creator-shared-feed-update__container">
+        <div class="update-components-text">
+          <span aria-hidden="true">TypeScript strict + ESLint with @typescript-eslint/parser catches 80% of the &quot;why is this any?&quot; bugs at PR time. Worth the 2-hour setup.</span>
+        </div>
+      </li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

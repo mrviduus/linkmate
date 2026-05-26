@@ -1,30 +1,67 @@
 {
-  "name": "linkmate",
+  "name": "linkmate-extension",
+  "version": "0.1.0",
+  "description": "AI-powered LinkedIn assistant: SSI tracker, profile audit, comment drafts via OpenAI.",
   "private": true,
-  "version": "0.1.1",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "zip": "cd dist && zip -r ../linkmate.zip . && cd .."
+    "dev": "parcel watch src/manifest.json --config @parcel/config-webextension",
+    "build": "parcel build src/manifest.json --config @parcel/config-webextension",
+    "build:script": "./scripts/build.sh",
+    "package": "./scripts/package.sh",
+    "version:bump": "./scripts/version-bump.sh",
+    "zip": "npm run build && npm run package",
+    "clean": "rm -rf dist packages .parcel-cache",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --watchAll=false --maxWorkers=2",
+    "lint": "eslint \"src/**/*.{ts,js}\" --max-warnings=0",
+    "lint:fix": "eslint \"src/**/*.{ts,js}\" --fix",
+    "format": "prettier --write \"src/**/*.{ts,js,css,html,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,js,css,html,json}\"",
+    "type-check": "tsc --noEmit --project tsconfig.json",
+    "validate-manifest": "node -e \"const m=require('./dist/manifest.json'); console.log('Valid:', m.name, 'v'+m.version)\""
+  },
+  "keywords": [
+    "chrome-extension",
+    "linkedin",
+    "ai",
+    "openai",
+    "ssi",
+    "productivity"
+  ],
+  "author": "LinkMate",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrviduus/linkmate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mrviduus/linkmate/issues"
+  },
+  "homepage": "https://github.com/mrviduus/linkmate#readme",
+  "devDependencies": {
+    "@parcel/config-webextension": "^2.9.3",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@types/chrome": "^0.0.242",
+    "@types/jest": "^30.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "buffer": "^6.0.3",
+    "eslint": "^8.57.0",
+    "eslint-plugin-jest": "^27.9.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.0.4",
+    "jest-environment-jsdom": "^30.0.4",
+    "jsdom": "^26.1.0",
+    "parcel": "^2.9.3",
+    "prettier": "^3.2.5",
+    "process": "^0.11.10",
+    "ts-jest": "^29.4.0",
+    "typescript": "^5.3.0"
   },
   "dependencies": {
-    "openai": "^4.77.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "recharts": "^2.13.3"
-  },
-  "devDependencies": {
-    "@crxjs/vite-plugin": "^2.0.0-beta.28",
-    "@types/chrome": "^0.0.287",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.16",
-    "typescript": "^5.7.2",
-    "vite": "^5.4.11"
+    "chart.js": "^4.5.1"
   }
 }

@@ -1,0 +1,236 @@
+<!--
+  T110 — Synthetic LinkedIn feed fixture; created 2026-05-14; no real PII.
+  Constitution v1.1 §VIII compliance: all author names, URNs, dates, post text,
+  follower counts, and engagement counts are synthetic placeholders. No JSON-LD,
+  no inline <script>. Structure mirrors the DOM shape LinkMate parses against
+  (data-urn / .feed-shared-update-v2 / .update-components-* / .social-counts-*).
+
+  Layout: 10 posts inside `main[role="main"]` > `.scaffold-finite-scroll__content`.
+  Posts 1–9 are from other authors with varying tiers/engagement.
+  Post 10 is `isOwn=true` (author URN matches the synthetic "me" used in tests).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>LinkedIn Feed (synthetic)</title></head>
+<body>
+<main role="main">
+  <div class="scaffold-layout__main">
+    <div class="scaffold-finite-scroll__content">
+
+      <!-- Post 1: 100k+ author, 1st degree, RAG topic, high engagement -->
+      <div data-urn="urn:li:activity:7000000000000000001" data-id="urn:li:activity:7000000000000000001" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-1/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Alex Karpova</span></span>
+            <span class="update-components-actor__description">Building synthetic-labs · AI Engineering</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">142,300 followers · 2h · 🌐</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">1st</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">MCP is going to reshape how we build agents — tool composition is finally first-class. We&apos;ve been wiring it into a C# server and the difference vs. ad-hoc function calling is night and day.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">4,210</span>
+          <span class="social-details-social-counts__comments">312 comments</span>
+        </div>
+        <div class="feed-shared-social-actions"></div>
+      </div>
+
+      <!-- Post 2: mid-tier author (10k–100k), 2nd degree, agent topic, mid engagement -->
+      <div data-urn="urn:li:activity:7000000000000000002" data-id="urn:li:activity:7000000000000000002" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-2/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Priya Sample</span></span>
+            <span class="update-components-actor__description">Senior ML Engineer at PlaceholderCo</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">23,140 followers · 5h</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">2nd</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">Spent the weekend building a small RAG eval harness. The headline finding: chunk size matters more than embedding model choice at the scale most teams operate.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">486</span>
+          <span class="social-details-social-counts__comments">41 comments</span>
+        </div>
+        <div class="feed-shared-social-actions"></div>
+      </div>
+
+      <!-- Post 3: low-tier (<1k), 3rd, generic topic, low engagement -->
+      <div data-urn="urn:li:activity:7000000000000000003" data-id="urn:li:activity:7000000000000000003" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-3/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Jordan Placeholder</span></span>
+            <span class="update-components-actor__description">Product Designer</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">640 followers · 1d</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">3rd</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">Reminder: Mondays are for planning, not for shipping.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">12</span>
+          <span class="social-details-social-counts__comments">2 comments</span>
+        </div>
+      </div>
+
+      <!-- Post 4: mid (1k–10k), 1st, TypeScript topic — matches user's topSkills -->
+      <div data-urn="urn:li:activity:7000000000000000004" data-id="urn:li:activity:7000000000000000004" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-4/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Sam Example</span></span>
+            <span class="update-components-actor__description">Staff Engineer · TypeScript &amp; build systems</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">4,820 followers · 8h</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">1st</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">TypeScript 5.5 satisfies operator is the most underused feature I see in production codebases. It catches schema drift without forcing type widening.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">208</span>
+          <span class="social-details-social-counts__comments">18 comments</span>
+        </div>
+      </div>
+
+      <!-- Post 5: 100k+ but unrelated topic (fitness) — low topic match -->
+      <div data-urn="urn:li:activity:7000000000000000005" data-id="urn:li:activity:7000000000000000005" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-5/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Morgan Reed</span></span>
+            <span class="update-components-actor__description">CEO at WellnessPlaceholder</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">312,400 followers · 3h</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">3rd</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">Sleep is the #1 productivity hack. If you remember nothing else from this week, remember that.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">8,940</span>
+          <span class="social-details-social-counts__comments">512 comments</span>
+        </div>
+      </div>
+
+      <!-- Post 6: mid-tier, follow-only, local-LLM topic — strong topic match -->
+      <div data-urn="urn:li:activity:7000000000000000006" data-id="urn:li:activity:7000000000000000006" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-6/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Riley Synthetic</span></span>
+            <span class="update-components-actor__description">Founder at LocalLLM Placeholder</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">11,200 followers · 30m · Following</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">Following</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">Ran Qwen2.5 0.5B and Llama-3.2 1B side by side on a 4 GB laptop. The 1B wins on coherence but the 0.5B wins on warm-start latency for short replies. Choose by use-case.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">142</span>
+          <span class="social-details-social-counts__comments">9 comments</span>
+        </div>
+      </div>
+
+      <!-- Post 7: AI-suspicious phrasing (obviousAiContent penalty trigger) -->
+      <div data-urn="urn:li:activity:7000000000000000007" data-id="urn:li:activity:7000000000000000007" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-7/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Casey Generic</span></span>
+            <span class="update-components-actor__description">Growth Marketer</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">3,100 followers · 6h</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">2nd</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">In today&apos;s ever-evolving landscape, leveraging synergies to unlock transformative outcomes has become a game-changer. Here are 5 takeaways every leader must know. 🚀</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">88</span>
+          <span class="social-details-social-counts__comments">4 comments</span>
+        </div>
+      </div>
+
+      <!-- Post 8: 10k–100k, 1st, hiring-related (relevant to job search) -->
+      <div data-urn="urn:li:activity:7000000000000000008" data-id="urn:li:activity:7000000000000000008" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-8/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Taylor Hiring</span></span>
+            <span class="update-components-actor__description">Eng Director · hiring AI engineers Q2</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">38,700 followers · 4h</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">1st</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">We&apos;re opening 5 senior AI Engineer roles next quarter — remote, Canada/US, focus on RAG and agents. DM me if you want context before the JDs go up.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">624</span>
+          <span class="social-details-social-counts__comments">87 comments</span>
+        </div>
+      </div>
+
+      <!-- Post 9: empty/short text edge-case for parser -->
+      <div data-urn="urn:li:activity:7000000000000000009" data-id="urn:li:activity:7000000000000000009" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-author-9/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Quinn Brief</span></span>
+            <span class="update-components-actor__description">Engineer</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">410 followers · 12h</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">2nd</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">0</span>
+          <span class="social-details-social-counts__comments">0 comments</span>
+        </div>
+      </div>
+
+      <!-- Post 10: OWN POST — must be excluded by isOwn filter in feed-parser -->
+      <div data-urn="urn:li:activity:7000000000000000010" data-id="urn:li:activity:7000000000000000010" class="feed-shared-update-v2">
+        <div class="update-components-actor">
+          <a class="update-components-actor__meta-link" href="/in/synthetic-me/">
+            <span class="update-components-actor__title"><span aria-hidden="true">Synthetic Me</span></span>
+            <span class="update-components-actor__description">AI Engineer | RAG | Agents</span>
+            <span class="update-components-actor__sub-description"><span aria-hidden="true">1,150 followers · 1h</span></span>
+            <span class="update-components-actor__supplementary-actor-info" aria-hidden="true">You</span>
+          </a>
+        </div>
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="update-components-text feed-shared-text">
+            <span dir="ltr">Shipped a tiny local-first reply assistant today. Privacy-first, runs WebLLM in the browser. Will write up the architecture next week.</span>
+          </div>
+        </div>
+        <div class="social-details-social-counts">
+          <span class="social-counts-reactions__count">26</span>
+          <span class="social-details-social-counts__comments">3 comments</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</main>
+</body>
+</html>
