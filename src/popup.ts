@@ -195,13 +195,13 @@ const ssiMessage = $('ssiMessage');
 
 let ssiChart: { destroy: () => void } | null = null;
 let ssiDonutChart: { destroy: () => void } | null = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- chart.js/auto default export
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Chart class via dynamic import
 let cachedChartCtor: any = null;
 
 async function loadChartCtor(): Promise<unknown> {
   if (!cachedChartCtor) {
-    const mod = await import('chart.js/auto');
-    cachedChartCtor = mod.default;
+    const mod = await import('./chart-loader');
+    cachedChartCtor = mod.Chart;
   }
   return cachedChartCtor;
 }
