@@ -171,7 +171,9 @@ function getTargetTabId(): number | null {
 async function getLinkedInTabId(): Promise<number | null> {
   const explicit = getTargetTabId();
   if (explicit !== null) return explicit;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // Side panel UI runs alongside the browser content; `currentWindow` is the
+  // window the panel is attached to, so this still finds the LinkedIn tab.
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab?.id ?? null;
 }
 

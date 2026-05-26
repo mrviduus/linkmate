@@ -106,15 +106,16 @@ export class ProfileContextService {
       }
     }
 
-    // Step 1: target tab — prefer explicit ?targetTab= from detached-popup URL,
-    // fall back to active tab in current window for the action-popup case.
+    // Step 1: target tab — prefer explicit ?targetTab= from the side panel URL,
+    // otherwise find the active tab in the last-focused window (side panel
+    // shares window context with content).
     let activeTab: chrome.tabs.Tab | undefined;
     try {
       const explicitId = getExplicitTargetTabId();
       if (explicitId !== null) {
         activeTab = await chrome.tabs.get(explicitId);
       } else {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         activeTab = tabs[0];
       }
     } catch (err) {

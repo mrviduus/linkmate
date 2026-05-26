@@ -74,31 +74,48 @@ async function autoOpenProfileIfStale(reason: 'install' | 'startup'): Promise<vo
       await waitForTabComplete(tab.id, 15000);
     }
 
-    // Open a DETACHED popup window (not the transient action popup). Detached
-    // windows survive tab navigation — critical because the capture flow
-    // hops between /in/me/, /recent-activity/all/, /comments/, then back.
-    // The action popup would close the moment focus shifts to the LinkedIn tab.
-    try {
-      await chrome.windows.create({
-        url: chrome.runtime.getURL(`popup.html?targetTab=${tab.id ?? ''}&auto=1`),
-        type: 'popup',
-        width: 440,
-        height: 720,
-        focused: true,
-      });
-      console.log('[LinkMate] detached popup opened');
-    } catch (err) {
-      console.warn('[LinkMate] chrome.windows.create failed — falling back to action popup:', err);
+    // Configure side panel for the LinkedIn tab with ?targetTab=… so the
+    // panel's JS targets the right tab even when it isn't currently active.
+    // chrome.sidePanel.open() requires Chrome 116+; @types/chrome is stale,
+    // hence the `as any` casts.
+    const sidePanel = chrome.sidePanel as unknown as {
+      setOptions: (o: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>;
+      open: (o: { tabId?: number; windowId?: number }) => Promise<void>;
+      setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
+    };
+    if (tab.id !== undefined) {
       try {
-        await chrome.action.openPopup();
-      } catch {
-        /* user can click icon manually */
+        await sidePanel.setOptions({
+          tabId: tab.id,
+          path: `popup.html?targetTab=${tab.id}&auto=1`,
+          enabled: true,
+        });
+      } catch (err) {
+        console.warn('[LinkMate] sidePanel.setOptions failed:', err);
+      }
+      try {
+        await sidePanel.open({ tabId: tab.id });
+        console.log('[LinkMate] side panel opened');
+      } catch (err) {
+        console.warn(
+          '[LinkMate] sidePanel.open requires user gesture — user can click the LinkMate icon to open it:',
+          err,
+        );
       }
     }
   } catch (err) {
     console.warn('[LinkMate] autoOpenProfileIfStale failed:', err);
   }
 }
+
+// Action icon click → open the side panel automatically (instead of a popup).
+(
+  chrome.sidePanel as unknown as {
+    setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
+  }
+)
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((err) => console.warn('[LinkMate] setPanelBehavior failed:', err));
 
 function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
