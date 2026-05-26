@@ -25,6 +25,7 @@ export interface ActionRow {
   postId?: string;
   draftText?: string;
   submitted: boolean; // false if drafted but never sent
+  topics?: string[]; // populated by topic-tagger at append time (Phase B)
   // Manual chip (👍/👎) is stored on the outcome row, not here.
 }
 

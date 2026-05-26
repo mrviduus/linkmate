@@ -7,6 +7,7 @@
  */
 
 import { getDb, type ActionRow, type ActionType, type OutcomeRow, type Pillar } from './lib/idb';
+import { tagText } from './topic-tagger';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -24,11 +25,15 @@ export interface AppendInput {
   postId?: string;
   draftText?: string;
   submitted: boolean;
+  topics?: string[];
+  sourceText?: string; // post body text — tagged inline if topics omitted
 }
 
 /** Append a new action row. Returns the assigned id. */
 export async function append(input: AppendInput): Promise<number> {
   const db = await getDb();
+  let topics = input.topics;
+  if (!topics && input.sourceText) topics = tagText(input.sourceText);
   const row: ActionRow = {
     type: input.type,
     pillar: ACTION_TO_PILLAR[input.type],
@@ -36,8 +41,25 @@ export async function append(input: AppendInput): Promise<number> {
     postId: input.postId,
     draftText: input.draftText,
     submitted: input.submitted,
+    topics,
   };
   return (await db.add('actions', row)) as number;
+}
+
+/** Top-N topics across submitted actions in the past `days` window. */
+export async function topTopics(days = 14, n = 5): Promise<Array<{ topic: string; count: number }>> {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const db = await getDb();
+  const all = await db.getAllFromIndex('actions', 'by-ts', IDBKeyRange.lowerBound(cutoff));
+  const counts: Record<string, number> = {};
+  for (const a of all) {
+    if (!a.submitted || !a.topics) continue;
+    for (const t of a.topics) counts[t] = (counts[t] ?? 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([topic, count]) => ({ topic, count }))
+    .sort((a, b) => b.count - a.count || a.topic.localeCompare(b.topic))
+    .slice(0, n);
 }
 
 /** All actions in the rolling N-day window (default 7d), oldest first. */
