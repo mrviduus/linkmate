@@ -63,6 +63,51 @@ linkedin.com/feed/*  ─┘   (scrape + inject)  (orchestrator)    (Today/SSI/
 | `popup.html` / `.ts` / `.css` | Today tab (cards + bars + streak), Settings (key, quotas, prompts), SSI dashboard, Profile capture |
 | `background.ts` | Message router · daily alarms for SSI capture and recommender refresh · rule-based fallback when no API key |
 
+## Storage
+
+Three backends — chosen by data shape, not convenience. Everything stays in your browser.
+
+**`chrome.storage.local`** — hot key-value state (10 MB cap, each get = full JSON.parse). Lives in `src/storage-schema.ts` → `STORAGE_KEYS`:
+
+| Key | Holds |
+| --- | --- |
+| `linkmate.profile.v1` | `ProfileContext` (headline, about, skills, positioning summary) |
+| `linkmate.ssi.history.v1` | `SsiSnapshot[]` — ring buffer of 90 daily captures |
+| `linkmate.ssi.lastError.v1` | Last SSI capture failure for the popup chip |
+| `linkmate.queue.engaged.v1` | Engaged postIds with 30-day TTL |
+| `linkmate.queue.dismissed.v1` | Dismissed postIds (forever) |
+| `linkmate.provider.v1` | `{mode, openai: {apiKey, model}}` — BYOK, never synced |
+| `linkmate.cadence.targets.v1` | `{brand, finding, engaging, building}` weekly quotas |
+| `linkmate.cadence.streak.v1` | `{count, lastWindowEnd}` consecutive full-quota weeks |
+| `linkmate.recommender.cards.v1` | Cached AI cards + generatedAt + source (ai/rule) |
+| `linkmate.retro.lastShown.v1` | Timestamp of last weekly-retro dismissal |
+| `linkmate.schema.version` | For future migrations |
+
+**`chrome.storage.sync`** — cross-device settings (100 KB cap):
+
+| Key | Holds |
+| --- | --- |
+| `customPrompts` | User overrides of default reply prompts (standard + withComments) |
+| `aiTemperature` / `aiMaxTokens` | Generation params (sliders in popup) |
+
+OpenAI key is **deliberately not synced** — per-device secret.
+
+**IndexedDB** (`linkmate` db v1, `src/lib/idb.ts` wrapper) — append-only time-series:
+
+```
+actions  store (autoinc id)
+  value: {type, pillar, timestamp, postId?, draftText?, submitted, topics?}
+  indexes: by-type-ts [type, timestamp] · by-ts timestamp
+
+outcomes store (autoinc id)
+  value: {actionId, timestamp, likes?, replies?, source: 'auto'|'manual', manualVerdict?}
+  index: by-action actionId
+```
+
+Time-series in `chrome.storage.local` would re-parse the whole array on every popup-open and hit the 10 MB cap within months. IDB indexes give O(log n) `IDBKeyRange.lowerBound(now - 7d)` for cadence + outcome lookups.
+
+**Write path** — content scripts never write directly; they send `chrome.runtime.sendMessage({action:'action.log.append', ...})` and the background service worker is the sole writer. Single-writer simplifies migrations and avoids storage races.
+
 ## Technical highlights
 
 - **MV3 service worker** with idempotent `chrome.alarms` registration that survives SW eviction and missed install events.
