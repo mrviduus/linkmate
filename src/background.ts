@@ -254,12 +254,15 @@ const SSI_URL = 'https://www.linkedin.com/sales/ssi';
 
 const RECOMMENDER_ALARM_NAME = 'linkmate.recommender.daily';
 
+/** Register alarms defensively at every SW startup. chrome.alarms.create
+ *  with the same name+period is a no-op for an existing alarm, so this is
+ *  cheap. Belt-and-suspenders vs an `onInstalled` we might miss. */
+chrome.alarms.create(SSI_ALARM_NAME, { periodInMinutes: 1440 });
+chrome.alarms.create(RECOMMENDER_ALARM_NAME, { periodInMinutes: 1440 });
+
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('Extension installed:', details.reason);
   chrome.storage.local.set({ hasUsedExtension: true });
-  chrome.alarms.create(SSI_ALARM_NAME, { periodInMinutes: 1440 });
-  chrome.alarms.create(RECOMMENDER_ALARM_NAME, { periodInMinutes: 1440 });
-  console.log(`⏰ Registered daily alarms: ${SSI_ALARM_NAME}, ${RECOMMENDER_ALARM_NAME}`);
 });
 
 // ─── Message router ─────────────────────────────────────────────────────────

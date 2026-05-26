@@ -103,12 +103,16 @@ function parseCards(raw: string): RecommendCard[] | null {
       ) {
         continue;
       }
+      // Only accept postId if it matches LinkedIn's URN shape — guards
+      // against AI hallucinated IDs that would dead-link the "Open" button.
+      const postId =
+        c.postId && /^urn:li:activity:\d+$/.test(c.postId) ? c.postId : undefined;
       out.push({
         action: c.action as ActionVerb,
         pillar: c.pillar as PillarKey,
         title: String(c.title).slice(0, 80),
         reason: String(c.reason).slice(0, 200),
-        postId: c.postId ? String(c.postId) : undefined,
+        postId,
       });
     }
     return out.length > 0 ? out.slice(0, 3) : null;
@@ -246,7 +250,7 @@ export async function suggestPosts(): Promise<{ ok: true; drafts: PostDraft[] } 
     const raw = await provider.generate({
       system,
       user,
-      maxTokens: 1000,
+      maxTokens: 1500,
       temperature: 0.75,
       topP: 0.9,
     });
@@ -272,6 +276,9 @@ export async function getRetroIfDue(now = Date.now()): Promise<string | null> {
     getCadenceStreak(),
     getSsiHistory(),
   ]);
+  // Skip retro until we have at least 2 SSI snapshots — otherwise the delta
+  // is meaningless and the user sees "Last week: 0/x ❌" on day-one.
+  if (ssiHistory.length < 2) return null;
   const ssiDelta = ssiDeltaFromHistory(ssiHistory);
   const input: BuildWeeklyRetroInput = {
     weekStartTs: now - SEVEN_DAYS_MS,
