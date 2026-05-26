@@ -487,6 +487,15 @@ const topicsRow = $('topicsRow');
 const topicsChips = $('topicsChips');
 const cadenceSaveBtn = $<HTMLButtonElement>('cadenceSaveBtn');
 const cadenceStatus = $('cadenceStatus');
+const retroCard = $('retroCard');
+const retroText = $('retroText');
+const retroDismiss = $<HTMLButtonElement>('retroDismiss');
+const cardsSource = $('cardsSource');
+const cardsRefresh = $<HTMLButtonElement>('cardsRefresh');
+const suggestPostBtn = $<HTMLButtonElement>('suggestPostBtn');
+const postModal = $('postModal');
+const postModalClose = $<HTMLButtonElement>('postModalClose');
+const postModalBody = $('postModalBody');
 const targetBrand = $<HTMLInputElement>('targetBrand');
 const targetFinding = $<HTMLInputElement>('targetFinding');
 const targetEngaging = $<HTMLInputElement>('targetEngaging');
@@ -538,35 +547,59 @@ function renderStreak(count: number): void {
   if (streakCount) streakCount.textContent = String(count);
 }
 
-function renderRecommendations(weakest: Pillar, progress: WeeklyProgressDto): void {
+interface RecommendCardDto {
+  action: string;
+  pillar: Pillar;
+  title: string;
+  reason: string;
+  postId?: string;
+}
+interface RecommenderStateDto {
+  generatedAt: number;
+  cards: RecommendCardDto[];
+  source: 'ai' | 'rule';
+}
+
+function cardHrefFor(pillar: Pillar, postId?: string): string {
+  if (postId && postId.startsWith('urn:li:activity:')) {
+    const id = postId.replace('urn:li:activity:', '');
+    return `https://www.linkedin.com/feed/update/urn:li:activity:${id}/`;
+  }
+  return PILLAR_COPY[pillar].href;
+}
+
+function renderRecommendations(state: RecommenderStateDto): void {
   if (!recommendCards) return;
-  // Pick 3 cards: weakest pillar first, then next-weakest two.
-  const order: Pillar[] = ['brand', 'finding', 'engaging', 'building'].sort((a, b) => {
-    if (a === weakest) return -1;
-    if (b === weakest) return 1;
-    return progress[a as Pillar].pct - progress[b as Pillar].pct;
-  }) as Pillar[];
-  const pick = order.slice(0, 3);
+  if (cardsSource) {
+    cardsSource.textContent =
+      state.source === 'ai' ? 'AI · ' + relativeTime(state.generatedAt) : 'Rule-based';
+  }
   recommendCards.innerHTML = '';
-  for (const pillar of pick) {
-    const copy = PILLAR_COPY[pillar];
-    const p = progress[pillar];
-    const remaining = Math.max(0, p.target - p.done);
+  for (const c of state.cards) {
     const card = document.createElement('div');
     card.className = 'recommend-card';
     const title = document.createElement('div');
     title.className = 'recommend-card__title';
-    title.textContent = remaining > 0 ? `${copy.label} (${remaining} to go this week)` : copy.label;
+    title.textContent = c.title;
     const reason = document.createElement('div');
     reason.className = 'recommend-card__reason';
-    reason.textContent = copy.reason;
+    reason.textContent = c.reason;
     const btn = document.createElement('button');
     btn.className = 'recommend-card__action';
-    btn.textContent = copy.cta;
-    btn.addEventListener('click', () => chrome.tabs.create({ url: copy.href }));
+    btn.textContent = PILLAR_COPY[c.pillar].cta;
+    btn.addEventListener('click', () => chrome.tabs.create({ url: cardHrefFor(c.pillar, c.postId) }));
     card.append(title, reason, btn);
     recommendCards.append(card);
   }
+}
+
+function relativeTime(ts: number): string {
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
 }
 
 async function loadPending(): Promise<void> {
@@ -631,7 +664,7 @@ async function recordOutcome(
 }
 
 async function loadToday(): Promise<void> {
-  const [progressResp, streakResp] = await Promise.all([
+  const [progressResp, streakResp, cardsResp, retroResp] = await Promise.all([
     new Promise<{ ok: boolean; progress: WeeklyProgressDto; weakest: Pillar }>((resolve) => {
       chrome.runtime.sendMessage({ action: 'action.log.weeklyProgress' }, (r) =>
         resolve(r ?? { ok: false, progress: emptyProgress(), weakest: 'engaging' }),
@@ -642,14 +675,139 @@ async function loadToday(): Promise<void> {
         resolve(r ?? { ok: false, count: 0 }),
       );
     }),
+    new Promise<{ ok: boolean; state?: RecommenderStateDto }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'recommender.getCards' }, (r) =>
+        resolve(r ?? { ok: false }),
+      );
+    }),
+    new Promise<{ ok: boolean; retro?: string | null }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'recommender.getRetro' }, (r) =>
+        resolve(r ?? { ok: false }),
+      );
+    }),
   ]);
   const progress = progressResp.progress ?? emptyProgress();
   const weakest = progressResp.weakest ?? 'engaging';
   renderProgressBars(progress, weakest);
   renderStreak(streakResp.count ?? 0);
-  renderRecommendations(weakest, progress);
+  if (cardsResp.state) renderRecommendations(cardsResp.state);
+  renderRetro(retroResp.retro ?? null);
   void loadPending();
   void loadTopics();
+}
+
+function renderRetro(text: string | null): void {
+  if (!retroCard || !retroText) return;
+  if (!text) {
+    retroCard.style.display = 'none';
+    return;
+  }
+  retroText.textContent = text;
+  retroCard.style.display = '';
+}
+
+async function handleRetroDismiss(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    chrome.runtime.sendMessage({ action: 'recommender.dismissRetro' }, () => resolve());
+  });
+  if (retroCard) retroCard.style.display = 'none';
+}
+
+async function handleCardsRefresh(): Promise<void> {
+  if (!cardsRefresh) return;
+  cardsRefresh.disabled = true;
+  const prev = cardsRefresh.innerHTML;
+  cardsRefresh.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i>';
+  try {
+    const resp = await new Promise<{ ok: boolean; state?: RecommenderStateDto }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'recommender.refresh' }, (r) =>
+        resolve(r ?? { ok: false }),
+      );
+    });
+    if (resp.state) renderRecommendations(resp.state);
+  } finally {
+    cardsRefresh.disabled = false;
+    cardsRefresh.innerHTML = prev;
+  }
+}
+
+// ─── Suggest-a-post modal ─────────────────────────────────────────────────
+
+interface PostDraftDto {
+  angle: 'story' | 'hot_take' | 'lesson';
+  topic: string;
+  body: string;
+}
+
+function openPostModal(): void {
+  if (!postModal || !postModalBody) return;
+  postModal.style.display = '';
+  postModalBody.innerHTML =
+    '<div class="post-modal__loading"><i class="fa fa-circle-notch fa-spin"></i> Drafting…</div>';
+  void fetchPostDrafts();
+}
+
+function closePostModal(): void {
+  if (postModal) postModal.style.display = 'none';
+}
+
+async function fetchPostDrafts(): Promise<void> {
+  const resp = await new Promise<{ ok: boolean; drafts?: PostDraftDto[]; error?: string }>(
+    (resolve) => {
+      chrome.runtime.sendMessage({ action: 'recommender.suggestPosts' }, (r) =>
+        resolve(r ?? { ok: false, error: 'No response' }),
+      );
+    },
+  );
+  if (!postModalBody) return;
+  if (!resp.ok || !resp.drafts) {
+    postModalBody.innerHTML = '';
+    const err = document.createElement('div');
+    err.className = 'post-modal__error';
+    err.textContent = resp.error ?? 'Failed to generate drafts.';
+    postModalBody.append(err);
+    return;
+  }
+  postModalBody.innerHTML = '';
+  for (const draft of resp.drafts) {
+    const card = document.createElement('div');
+    card.className = 'post-draft';
+    const meta = document.createElement('div');
+    meta.className = 'post-draft__meta';
+    meta.textContent = `${draft.angle.replace('_', ' ')} · ${draft.topic}`;
+    const body = document.createElement('div');
+    body.className = 'post-draft__body';
+    body.textContent = draft.body;
+    const actions = document.createElement('div');
+    actions.className = 'post-draft__actions';
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'post-draft__btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', () => {
+      void navigator.clipboard.writeText(draft.body);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => (copyBtn.textContent = 'Copy'), 1500);
+      // Log the post action.
+      chrome.runtime.sendMessage({
+        action: 'action.log.append',
+        input: { type: 'post', draftText: draft.body, submitted: true, sourceText: draft.body },
+      });
+    });
+    const composeBtn = document.createElement('button');
+    composeBtn.className = 'post-draft__btn post-draft__btn--secondary';
+    composeBtn.textContent = 'Open composer';
+    composeBtn.addEventListener('click', () => {
+      void navigator.clipboard.writeText(draft.body);
+      chrome.tabs.create({ url: 'https://www.linkedin.com/feed/?shareActive=true' });
+      chrome.runtime.sendMessage({
+        action: 'action.log.append',
+        input: { type: 'post', draftText: draft.body, submitted: true, sourceText: draft.body },
+      });
+    });
+    actions.append(copyBtn, composeBtn);
+    card.append(meta, body, actions);
+    postModalBody.append(card);
+  }
 }
 
 async function loadTopics(): Promise<void> {
@@ -752,6 +910,11 @@ function wire(): void {
   savePromptsBtn?.addEventListener('click', () => void handleSavePrompts());
   resetPromptsBtn?.addEventListener('click', () => void handleResetPrompts());
   cadenceSaveBtn?.addEventListener('click', () => void handleCadenceSave());
+  retroDismiss?.addEventListener('click', () => void handleRetroDismiss());
+  cardsRefresh?.addEventListener('click', () => void handleCardsRefresh());
+  suggestPostBtn?.addEventListener('click', openPostModal);
+  postModalClose?.addEventListener('click', closePostModal);
+  postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
