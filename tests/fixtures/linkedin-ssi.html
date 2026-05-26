@@ -1,0 +1,93 @@
+<!--
+  T200 — Synthetic LinkedIn Social Selling Index (SSI) fixture; created 2026-05-14; no real PII.
+  Constitution v1.1 §VIII compliance: scores are realistic but synthetic, ranks are placeholder text.
+  No real LinkedIn account URN, no JSON-LD, no <script>.
+
+  This fixture represents the standard /sales/ssi page DOM that ssi-parser.ts must read:
+    - .ssi-score-table__current-ssi (total score, 0–100)
+    - 4 component cards under .ssi-component-card with .ssi-score-table__component-value:
+        Establish your professional brand
+        Find the right people
+        Engage with insights
+        Build relationships
+    - .ssi-ranking-statement (industry + network rank text)
+
+  Variant: free LinkedIn (not Sales Navigator subscriber). The Sales Navigator variant
+  has a richer header but identical score-table classes — same parser handles both.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Social Selling Index (synthetic)</title></head>
+<body>
+<main>
+  <div class="ssi-page-container">
+
+    <header class="ssi-header">
+      <h1>Your Social Selling Index</h1>
+      <p class="ssi-header__date">Updated daily · last refreshed today</p>
+    </header>
+
+    <!-- Total score -->
+    <section class="ssi-score-summary">
+      <div class="ssi-score-table">
+        <div class="ssi-score-table__current-ssi" data-test-id="ssi-current-score">
+          <span class="ssi-score-table__current-ssi-score">18</span>
+          <span class="ssi-score-table__current-ssi-out-of"> / 100</span>
+        </div>
+      </div>
+
+      <!-- Ranking statements -->
+      <div class="ssi-ranking-section">
+        <p class="ssi-ranking-statement">
+          You rank in the <span class="ssi-ranking-statement__highlight">top 80%</span>
+          of your industry.
+        </p>
+        <p class="ssi-ranking-statement">
+          You rank in the <span class="ssi-ranking-statement__highlight">top 91%</span>
+          of your network.
+        </p>
+      </div>
+    </section>
+
+    <!-- Four component cards -->
+    <section class="ssi-components">
+      <div class="ssi-component-card">
+        <h3 class="ssi-component-card__title">Establish your professional brand</h3>
+        <div class="ssi-score-table__component-value"><span aria-hidden="true">5.42</span></div>
+        <div class="ssi-component-card__max">out of 25</div>
+        <p class="ssi-component-card__description">
+          Complete your profile with the customer in mind. Become a thought leader by publishing meaningful posts.
+        </p>
+      </div>
+
+      <div class="ssi-component-card">
+        <h3 class="ssi-component-card__title">Find the right people</h3>
+        <div class="ssi-score-table__component-value"><span aria-hidden="true">6.12</span></div>
+        <div class="ssi-component-card__max">out of 25</div>
+        <p class="ssi-component-card__description">
+          Identify better prospects in less time using efficient search and research tools.
+        </p>
+      </div>
+
+      <div class="ssi-component-card">
+        <h3 class="ssi-component-card__title">Engage with insights</h3>
+        <div class="ssi-score-table__component-value"><span aria-hidden="true">0.85</span></div>
+        <div class="ssi-component-card__max">out of 25</div>
+        <p class="ssi-component-card__description">
+          Discover and share conversation-worthy updates to create and grow relationships.
+        </p>
+      </div>
+
+      <div class="ssi-component-card">
+        <h3 class="ssi-component-card__title">Build relationships</h3>
+        <div class="ssi-score-table__component-value"><span aria-hidden="true">5.61</span></div>
+        <div class="ssi-component-card__max">out of 25</div>
+        <p class="ssi-component-card__description">
+          Strengthen your network by connecting and establishing trust with decision makers.
+        </p>
+      </div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

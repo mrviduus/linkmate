@@ -1,0 +1,489 @@
+/* LinkMate LinkedIn Integration Styles */
+
+/* Generate Reply Button - Inherit LinkedIn's native styles */
+.linkmate-generate-btn {
+  /* Override any conflicting LinkedIn styles while maintaining appearance */
+  background: #0a66c2 !important;
+  color: white !important;
+  border-radius: 20px !important;
+  font-weight: 600 !important;
+  gap: 6px !important;
+  padding: 6px 12px !important;
+  min-height: 32px !important;
+  border: 1px solid #0a66c2 !important;
+}
+
+.linkmate-generate-btn:hover {
+  background: #004182 !important;
+  border-color: #004182 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(10, 102, 194, 0.3);
+}
+
+.linkmate-generate-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(10, 102, 194, 0.3);
+}
+
+.linkmate-generate-btn:focus {
+  outline: 2px solid #0a66c2;
+  outline-offset: 2px;
+}
+
+.linkmate-generate-btn:disabled {
+  opacity: 0.7 !important;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Button States */
+.linkmate-generate-btn.loading {
+  background: #666 !important;
+  border-color: #666 !important;
+  cursor: wait;
+}
+
+.linkmate-generate-btn.success {
+  background: #057642 !important;
+  border-color: #057642 !important;
+}
+
+.linkmate-generate-btn.error {
+  background: #cc1016 !important;
+  border-color: #cc1016 !important;
+}
+
+/* Icon Styles */
+.linkmate-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.linkmate-icon.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Button Text */
+.linkmate-button-text {
+  white-space: nowrap;
+}
+
+/* Reply Panel */
+.linkmate-panel {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f8f9fa;
+  border: 1px solid #d0d5da;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: all 0.3s ease;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.linkmate-panel-show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.linkmate-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Smart Reply Indicator */
+.linkmate-smart-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #0a66c2 0%, #004182 100%);
+  color: white;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  animation: shimmer 2s ease-in-out;
+}
+
+@keyframes shimmer {
+  0% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.8;
+  }
+}
+
+.linkmate-smart-indicator svg {
+  flex-shrink: 0;
+}
+
+/* Highlight for comment analysis mode */
+.linkmate-generate-btn.smart-mode {
+  background: linear-gradient(135deg, #0a66c2 0%, #004182 100%) !important;
+  color: white !important;
+  border-color: #004182 !important;
+}
+
+.linkmate-generate-btn.smart-mode:hover {
+  background: linear-gradient(135deg, #004182 0%, #00305c 100%) !important;
+}
+
+/* Reply Text Display */
+.linkmate-reply-text {
+  padding: 12px 16px;
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #181818;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  min-height: 60px;
+  position: relative;
+}
+
+.linkmate-reply-text:focus {
+  outline: 2px solid #0a66c2;
+  outline-offset: 1px;
+}
+
+/* Panel Action Buttons */
+.linkmate-panel-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.linkmate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: white;
+  color: #666;
+  border: 1px solid #d0d5da;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 36px;
+  font-family: inherit;
+}
+
+.linkmate-btn:hover {
+  background: #f3f6f8;
+  border-color: #0a66c2;
+  color: #0a66c2;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.linkmate-btn:active {
+  transform: translateY(0);
+}
+
+.linkmate-btn:focus {
+  outline: 2px solid #0a66c2;
+  outline-offset: 2px;
+}
+
+.linkmate-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Specific button styles */
+.linkmate-regenerate:hover {
+  color: #8b5cf6;
+  border-color: #8b5cf6;
+}
+
+.linkmate-copy:hover {
+  color: #059669;
+  border-color: #059669;
+}
+
+.linkmate-insert {
+  background: #0a66c2;
+  color: white;
+  border-color: #0a66c2;
+}
+
+.linkmate-insert:hover {
+  background: #004182;
+  border-color: #004182;
+  color: white;
+}
+
+/* Toast Notifications */
+.linkmate-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  padding: 12px 24px;
+  background: #057642;
+  color: white;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 999999;
+  transition: transform 0.3s ease;
+  max-width: 400px;
+  text-align: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.linkmate-toast-show {
+  transform: translateX(-50%) translateY(0);
+}
+
+.linkmate-toast-error {
+  background: #dc2626;
+}
+
+/* Loading states */
+.linkmate-loading {
+  color: #666;
+  font-style: italic;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .linkmate-generate-btn {
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    gap: 4px !important;
+  }
+
+  .linkmate-button-text {
+    display: none;
+  }
+
+  .linkmate-panel {
+    margin: 12px 0;
+    padding: 12px;
+  }
+
+  .linkmate-panel-actions {
+    justify-content: center;
+  }
+
+  .linkmate-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .linkmate-toast {
+    max-width: 90vw;
+    margin: 0 5vw;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .linkmate-generate-btn {
+    border-width: 2px;
+  }
+
+  .linkmate-panel {
+    border-width: 2px;
+  }
+
+  .linkmate-btn {
+    border-width: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .linkmate-generate-btn,
+  .linkmate-btn,
+  .linkmate-panel,
+  .linkmate-toast {
+    transition: none;
+  }
+
+  .linkmate-icon.spinning {
+    animation: none;
+  }
+
+  .linkmate-generate-btn:hover,
+  .linkmate-btn:hover {
+    transform: none;
+  }
+}
+
+/* Dark mode support (if LinkedIn implements it) */
+@media (prefers-color-scheme: dark) {
+  .linkmate-panel {
+    background: #1e1e1e;
+    border-color: #404040;
+    color: #e1e1e1;
+  }
+
+  .linkmate-reply-text {
+    background: #2a2a2a;
+    border-color: #404040;
+    color: #e1e1e1;
+  }
+
+  .linkmate-btn {
+    background: #2a2a2a;
+    border-color: #404040;
+    color: #e1e1e1;
+  }
+
+  .linkmate-btn:hover {
+    background: #3a3a3a;
+  }
+}
+
+/* Accessibility improvements */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Focus visible for better keyboard navigation */
+.linkmate-generate-btn:focus-visible,
+.linkmate-btn:focus-visible {
+  outline: 2px solid #0a66c2;
+  outline-offset: 2px;
+}
+
+/* Ensure proper contrast ratios */
+.linkmate-generate-btn {
+  /* Ensures 4.5:1 contrast ratio */
+  color: white;
+}
+
+.linkmate-btn {
+  /* Ensures proper contrast */
+  color: #374151;
+}
+
+/* Animation for better UX */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.linkmate-panel-show {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+/* Prevent layout shift and ensure proper integration */
+.linkmate-generate-btn {
+  /* Fits naturally with LinkedIn's action buttons */
+  box-sizing: border-box;
+}
+
+/* Override LinkedIn styles that might conflict */
+.linkmate-generate-btn * {
+  pointer-events: none;
+}
+
+.linkmate-btn * {
+  pointer-events: none;
+}
+
+/* Ensure proper stacking */
+.linkmate-panel {
+  position: relative;
+  z-index: 10;
+}
+
+.linkmate-toast {
+  z-index: 999999;
+}
+
+/* Close button specific styling */
+.linkmate-close {
+  background: #fff !important;
+  color: #666 !important;
+  border-color: #dc2626 !important;
+}
+
+.linkmate-close:hover {
+  background: #fee !important;
+  color: #dc2626 !important;
+  border-color: #dc2626 !important;
+}
+
+/* Panel hiding animation */
+.linkmate-panel-hiding {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: all 0.3s ease;
+}
+
+/* Adjust button layout for better spacing */
+.linkmate-panel-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .linkmate-panel-actions {
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .linkmate-btn {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  /* Stack buttons on very small screens */
+  @media (max-width: 480px) {
+    .linkmate-panel-actions {
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .linkmate-btn {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+}
