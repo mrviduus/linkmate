@@ -788,6 +788,7 @@ async function openPostModal(): Promise<void> {
 
 function closePostModal(): void {
   if (postModal) postModal.style.display = 'none';
+  clearInFlightWatchdog();
 }
 
 function shouldStartFresh(state: PostDraftsStateDto): boolean {
@@ -809,15 +810,42 @@ async function writePostDraftsState(s: PostDraftsStateDto): Promise<void> {
   await chrome.storage.local.set({ [POST_DRAFTS_KEY]: s });
 }
 
+let inFlightWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+function clearInFlightWatchdog(): void {
+  if (inFlightWatchdog !== null) {
+    clearTimeout(inFlightWatchdog);
+    inFlightWatchdog = null;
+  }
+}
+
 function renderPostDraftsState(state: PostDraftsStateDto): void {
   if (!postModalBody) return;
   postModalBody.innerHTML = '';
+  clearInFlightWatchdog();
   if (state.status === 'inFlight') {
     const loading = document.createElement('div');
     loading.className = 'post-modal__loading';
     loading.innerHTML =
       '<i class="fa fa-circle-notch fa-spin"></i> Drafting (this can take 10–30s)…';
     postModalBody.append(loading);
+    // Watchdog: MV3 service workers can be evicted mid-call. If the state
+    // doesn't move past `inFlight` by the stale threshold, surface an error
+    // with retry rather than hanging on the spinner indefinitely.
+    const elapsed = Date.now() - state.startedAt;
+    const remaining = Math.max(2000, POST_DRAFTS_STALE_INFLIGHT_MS - elapsed);
+    inFlightWatchdog = setTimeout(() => {
+      void (async () => {
+        const fresh = await readPostDraftsState();
+        if (fresh.status === 'inFlight') {
+          await writePostDraftsState({
+            status: 'error',
+            finishedAt: Date.now(),
+            error: 'Drafting timed out. The background worker may have been evicted — try again.',
+          });
+        }
+      })();
+    }, remaining);
     return;
   }
   if (state.status === 'error') {
@@ -994,8 +1022,22 @@ function wire(): void {
   postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
 }
 
+/**
+ * Make sure the Post-drafts modal starts hidden, and don't carry an orphaned
+ * `inFlight` flag across popup sessions. MV3 service workers can be evicted
+ * mid-call, leaving the state stuck — sanitize before any code reads it.
+ */
+async function sanitizePostDraftsState(): Promise<void> {
+  if (postModal) postModal.style.display = 'none';
+  const state = await readPostDraftsState();
+  if (state.status === 'inFlight' && Date.now() - state.startedAt > POST_DRAFTS_STALE_INFLIGHT_MS) {
+    await writePostDraftsState({ status: 'idle' });
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   wire();
+  await sanitizePostDraftsState();
   await Promise.all([
     loadProviderConfig(),
     refreshProfileDisplay(),
