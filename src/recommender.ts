@@ -25,13 +25,16 @@ import {
   getRecommenderCards,
   getRetroLastShown,
   getSsiHistory,
+  setPostDraftsState,
   setRecommenderCards,
   setRetroLastShown,
   type PillarKey,
   type ActionVerb,
+  type PostDraft,
   type RecommendCard,
   type RecommenderState,
 } from './storage-schema';
+export type { PostDraft };
 import { knownTopics } from './topic-tagger';
 
 const VALID_ACTIONS: ActionVerb[] = ['comment', 'post', 'invite', 'thread_reply'];
@@ -192,12 +195,6 @@ export async function getCardsOrRefresh(): Promise<RecommenderState> {
 
 // ─── Suggest-a-post ─────────────────────────────────────────────────────────
 
-export interface PostDraft {
-  angle: 'story' | 'hot_take' | 'lesson';
-  topic: string;
-  body: string;
-}
-
 interface RawDraft {
   angle?: string;
   topic?: string;
@@ -205,6 +202,7 @@ interface RawDraft {
 }
 
 const VALID_ANGLES = new Set(['story', 'hot_take', 'lesson']);
+const SUGGEST_TIMEOUT_MS = 60_000;
 
 function parseDrafts(raw: string): PostDraft[] | null {
   try {
@@ -225,8 +223,42 @@ function parseDrafts(raw: string): PostDraft[] | null {
   }
 }
 
-/** Generate 3 post drafts. AI-only — no rule-based fallback (graceful error to UI). */
-export async function suggestPosts(): Promise<{ ok: true; drafts: PostDraft[] } | { ok: false; error: string }> {
+/**
+ * Generate 3 post drafts.
+ *
+ * Persists lifecycle to `linkmate.recommender.postDrafts.v1` so the popup can
+ * survive being closed mid-call (Chrome popups unmount on outside-click):
+ *   - on start: { status: 'inFlight', startedAt }
+ *   - on success: { status: 'ready', drafts, finishedAt }
+ *   - on error:   { status: 'error', error, finishedAt }
+ *
+ * Return value is preserved for tests + the legacy message-response path,
+ * but the canonical channel is storage.onChanged on `postDraftsState`.
+ */
+export async function suggestPosts(): Promise<
+  { ok: true; drafts: PostDraft[] } | { ok: false; error: string }
+> {
+  await setPostDraftsState({ status: 'inFlight', startedAt: Date.now() });
+  const result = await runSuggestPosts();
+  if (result.ok) {
+    await setPostDraftsState({
+      status: 'ready',
+      drafts: result.drafts,
+      finishedAt: Date.now(),
+    });
+  } else {
+    await setPostDraftsState({
+      status: 'error',
+      error: result.error,
+      finishedAt: Date.now(),
+    });
+  }
+  return result;
+}
+
+async function runSuggestPosts(): Promise<
+  { ok: true; drafts: PostDraft[] } | { ok: false; error: string }
+> {
   const profile = await getProfile();
   if (!profile) return { ok: false, error: 'No profile captured. Use Capture Profile first.' };
   const [progress, topics] = await Promise.all([weeklyProgress(), topTopics(14, 8)]);
@@ -253,6 +285,7 @@ export async function suggestPosts(): Promise<{ ok: true; drafts: PostDraft[] } 
       maxTokens: 1500,
       temperature: 0.75,
       topP: 0.9,
+      timeoutMs: SUGGEST_TIMEOUT_MS,
     });
     const drafts = parseDrafts(raw);
     if (!drafts) return { ok: false, error: 'AI returned malformed JSON.' };

@@ -71,14 +71,31 @@ export class OpenAIProvider implements InferenceProvider {
       stop: params.stop,
     };
 
-    const res = await doFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.cfg.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    // Timeout via AbortController. Defaults to 60s — long enough for 1500-token
+    // 3-draft replies on gpt-4o-mini, short enough that the popup doesn't sit
+    // on "Drafting…" indefinitely if OpenAI hangs.
+    const timeoutMs = params.timeoutMs ?? 60_000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await doFetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.cfg.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`OpenAI request timed out after ${timeoutMs / 1000}s`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!res.ok) {
       let errMsg = `${res.status} ${res.statusText}`;
