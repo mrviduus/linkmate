@@ -63,14 +63,45 @@ async function autoOpenProfileIfStale(reason: 'install' | 'startup'): Promise<vo
   try {
     const profile = await getProfile();
     if (profile && Date.now() - profile.capturedAt < AUTO_OPEN_TTL_MS) return;
-    // Open a NEW tab rather than hijack whatever the user is on (especially
-    // important on Chrome startup when sessions are restoring). The popup's
-    // own auto-capture fires when the user clicks the LinkMate icon next.
-    await chrome.tabs.create({ url: 'https://www.linkedin.com/in/me/', active: true });
-    console.log(`[LinkMate] auto-opened /in/me/ (reason=${reason})`);
+    // Open a NEW tab rather than hijack whatever the user is on (important
+    // on Chrome startup when sessions are restoring).
+    const tab = await chrome.tabs.create({ url: 'https://www.linkedin.com/in/me/', active: true });
+    console.log(`[LinkMate] auto-opened /in/me/ (reason=${reason}, tabId=${tab.id})`);
+
+    // Wait for the new LinkedIn tab to finish loading before opening the popup
+    // — otherwise the popup's capture flow won't have a profile DOM to grab.
+    if (tab.id !== undefined) {
+      await waitForTabComplete(tab.id, 15000);
+    }
+
+    // Try to open the popup so the user gets a zero-click capture. Requires
+    // Chrome 127+ and a pinned extension; fails silently otherwise.
+    try {
+      await chrome.action.openPopup();
+      console.log('[LinkMate] popup opened programmatically');
+    } catch (err) {
+      console.warn('[LinkMate] chrome.action.openPopup() unavailable — user can click the icon:', err);
+    }
   } catch (err) {
     console.warn('[LinkMate] autoOpenProfileIfStale failed:', err);
   }
+}
+
+function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, timeoutMs);
+    const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+      if (id === tabId && info.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
