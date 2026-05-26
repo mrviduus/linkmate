@@ -22,7 +22,7 @@ export class ConnectionSuggestor {
    * Surface 5 suggestions per weekday morning. Will pull from a configurable
    * list of target search queries (e.g. "AI Engineer hiring Toronto"),
    * deduplicate against `linkmate.connections.suggestions.v1` history, and
-   * generate a personalized note via WebLLM for each.
+   * generate a personalized note via OpenAI for each.
    */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async suggest(_args?: { count?: number }): Promise<ConnectionSuggestion[]> {

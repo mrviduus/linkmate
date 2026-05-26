@@ -1,14 +1,10 @@
 /**
- * v0.5.0 — Inference provider abstraction.
+ * Inference provider abstraction.
  *
- * Single interface that every model backend implements (local WebLLM, OpenAI,
- * future Anthropic/Groq/etc.). Callers in background.ts never reference
- * WebLLM or fetch directly — they get a provider from getActiveProvider()
- * and call .generate().
- *
- * Compliance gate: providers MUST self-declare via `isCloud` so the popup
- * + queue sidebar can render an honest "data leaves your browser" indicator
- * when a non-local provider is active.
+ * Single interface that every backend implements (OpenAI today; Anthropic,
+ * Groq, Azure-compatible proxies later). Callers in background.ts never
+ * `fetch` directly — they get a provider from getActiveProvider() and
+ * call .generate().
  */
 
 export interface InferenceParams {

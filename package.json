@@ -6,11 +6,8 @@
   "scripts": {
     "dev": "parcel watch src/manifest.json --config @parcel/config-webextension",
     "build": "parcel build src/manifest.json --config @parcel/config-webextension",
-    "build:script": "./scripts/build.sh",
-    "package": "./scripts/package.sh",
-    "version:bump": "./scripts/version-bump.sh",
-    "zip": "npm run build && npm run package",
-    "clean": "rm -rf dist packages .parcel-cache",
+    "zip": "npm run build && cd dist && zip -r ../linkmate.zip . && cd ..",
+    "clean": "rm -rf dist .parcel-cache linkmate.zip",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -19,8 +16,7 @@
     "lint:fix": "eslint \"src/**/*.{ts,js}\" --fix",
     "format": "prettier --write \"src/**/*.{ts,js,css,html,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,css,html,json}\"",
-    "type-check": "tsc --noEmit --project tsconfig.json",
-    "validate-manifest": "node -e \"const m=require('./dist/manifest.json'); console.log('Valid:', m.name, 'v'+m.version)\""
+    "type-check": "tsc --noEmit --project tsconfig.json"
   },
   "keywords": [
     "chrome-extension",

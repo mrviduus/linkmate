@@ -41,18 +41,6 @@ Object.assign(navigator, {
   },
 });
 
-// Mock ProgressBar
-jest.mock('progressbar.js', () => {
-  return {
-    Line: jest.fn().mockImplementation(() => ({
-      animate: jest.fn(),
-      set: jest.fn(),
-      destroy: jest.fn(),
-    })),
-    ProgressBar: jest.fn(),
-  };
-});
-
 // Setup DOM
 beforeEach(() => {
   document.body.innerHTML = '';
