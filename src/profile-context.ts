@@ -158,65 +158,69 @@ export class ProfileContextService {
           const originalScroll = window.scrollY;
           const main = document.querySelector('main');
           const scope = main ?? document;
+          const heightLog: number[] = [];
 
-          // Phase 1 — grow-scroll the page so LinkedIn streams more sections.
-          // Stop only after scrollHeight is stable for ~5s (LinkedIn loads
-          // chunks; pause < hydration latency would bail too early).
+          // Phase 1 — brute-force scroll. LinkedIn hydrates sections only as
+          // they enter the viewport, and the page's scrollHeight grows in
+          // chunks. Run for at least ~18s, bailing only after 8 consecutive
+          // iterations with no growth. Data quality > capture speed (#16).
           let lastHeight = 0;
           let stableCount = 0;
-          for (let i = 0; i < 30; i++) {
+          for (let i = 0; i < 36; i++) {
             const h = Math.max(
               document.documentElement.scrollHeight,
               document.body.scrollHeight,
               main?.scrollHeight ?? 0,
             );
+            heightLog.push(h);
             window.scrollTo({ top: h, behavior: 'instant' });
             if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
             document.documentElement.scrollTop = h;
-            await wait(1000);
+            // Also scroll by viewport increments to trigger IntersectionObservers
+            // on partially-rendered cards.
+            window.scrollBy({ top: 200, behavior: 'instant' });
+            await wait(800);
             if (h === lastHeight) {
               stableCount++;
-              if (stableCount >= 5) break;
+              if (stableCount >= 8 && i >= 22) break; // ≥18s minimum
             } else {
               stableCount = 0;
             }
             lastHeight = h;
           }
 
-          // Phase 2 — for each "interesting" h2 section, scrollIntoView and
-          // WAIT until that section actually has hydrated content (>=1 <li>
-          // inside its closest section/componentkey, OR specific item markers).
-          const targets = ['experience', 'education', 'skills', 'licenses', 'languages', 'projects', 'certifications'];
+          // Phase 2 — scrollIntoView every h2/h3 in <main> with a long wait
+          // each so SDUI cards load their <li> items. We do ALL headings, not
+          // a curated list, since LinkedIn occasionally renames sections.
           const headings = Array.from(scope.querySelectorAll('h2, h3')) as HTMLElement[];
-          for (const t of targets) {
-            const h = headings.find((el) =>
-              new RegExp(`^${t}(\\s*\\(\\d+\\))?\\b`, 'i').test((el.textContent ?? '').trim()),
-            );
-            if (!h) continue;
+          for (const h of headings) {
             try {
               h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+              await wait(700);
+              // If the card is still empty, wait a bit more.
+              const card = h.closest('section, div[componentkey]');
+              const itemCount = card?.querySelectorAll('li').length ?? 0;
+              if (itemCount === 0) await wait(1500);
             } catch {
               /* ignore */
             }
-            // Wait up to 4s for the section to grow content.
-            const card = h.closest('section, div[componentkey]');
-            const start = Date.now();
-            while (Date.now() - start < 4000) {
-              const itemCount = card?.querySelectorAll('li').length ?? 0;
-              if (itemCount > 0) break;
-              await wait(300);
-            }
           }
-          // Tiny settle-down before grabbing HTML.
-          await wait(600);
+          await wait(1000);
 
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
-          await wait(200);
+          await wait(300);
 
-          // Diagnostic dump alongside HTML so popup can console.log it for debug.
+          // Diagnostic dump alongside HTML so popup can console.log it.
+          const targets = ['experience', 'education', 'skills', 'licenses', 'languages', 'projects', 'certifications'];
           const diag = {
-            h2List: headings.map((h) => (h.textContent ?? '').trim()).slice(0, 30),
+            heightLog,
+            finalHeight: Math.max(
+              document.documentElement.scrollHeight,
+              document.body.scrollHeight,
+              main?.scrollHeight ?? 0,
+            ),
+            h2List: headings.map((h) => (h.textContent ?? '').trim()).slice(0, 40),
             sectionItemCounts: targets.map((t) => {
               const h = headings.find((el) =>
                 new RegExp(`^${t}(\\s*\\(\\d+\\))?\\b`, 'i').test((el.textContent ?? '').trim()),
@@ -225,7 +229,6 @@ export class ProfileContextService {
               return { t, found: !!h, items: card?.querySelectorAll('li').length ?? 0 };
             }),
           };
-          // Embed diag as a JSON comment at end of HTML so caller can parse it.
           return (
             document.documentElement.outerHTML +
             `\n<!-- LINKMATE_DIAG:${JSON.stringify(diag)} -->`

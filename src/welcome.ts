@@ -19,8 +19,14 @@ async function handleGetStarted(): Promise<void> {
   getStartedBtn.textContent = 'Opening LinkedIn…';
   await setCaptureFullProfile(captureFull?.checked ?? true);
   await setOnboardingCompleted(true);
-  // Navigate the same tab to LinkedIn. The content script's first-gesture
-  // listener will open the side panel and auto-capture from there.
+  // Send the gesture to background so it can open both the LinkedIn tab AND
+  // the side panel inside the same user-activation window. After this fires,
+  // we still navigate locally in case the message round-trip is slow.
+  try {
+    await chrome.runtime.sendMessage({ action: 'onboarding.start' });
+  } catch {
+    /* background may still be initializing; navigation below is the fallback */
+  }
   window.location.assign('https://www.linkedin.com/in/me/');
 }
 
