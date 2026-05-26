@@ -41,6 +41,7 @@ import {
   attachOutcome as logAttachOutcome,
   pendingOutcomes as logPendingOutcomes,
   getByPostId as logGetByPostId,
+  topTopics as logTopTopics,
   type AppendInput,
 } from './action-log';
 import { maybeAdvanceStreak, weeklyProgress, weakestPillar } from './cadence';
@@ -393,6 +394,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.action === 'action.log.byPostId') {
     logGetByPostId(request.postId as string)
       .then((rows) => sendResponse({ ok: true, rows }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'action.log.topTopics') {
+    logTopTopics(request.days as number | undefined, request.n as number | undefined)
+      .then((topics) => sendResponse({ ok: true, topics }))
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
     return true;
   }

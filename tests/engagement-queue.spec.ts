@@ -221,7 +221,10 @@ describe('EngagementQueue (T120)', () => {
       copyBtn.click();
       await new Promise((r) => setTimeout(r, 0));
       expect(copyToClipboard).toHaveBeenCalledTimes(1);
-      expect(markEngaged).toHaveBeenCalledWith('urn:li:activity:copy-target');
+      expect(markEngaged).toHaveBeenCalledWith(
+        'urn:li:activity:copy-target',
+        expect.any(String),
+      );
       expect(openPost).toHaveBeenCalledWith('urn:li:activity:copy-target');
     });
 
