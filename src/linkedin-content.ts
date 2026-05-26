@@ -1123,6 +1123,31 @@ if (window.location.hostname.includes('linkedin.com')) {
   window.addEventListener('beforeunload', () => {
     linkedInLinkMate.destroy();
   });
+
+  // Issue #16: side panel can't open without user gesture. On any LinkedIn
+  // profile page (/in/<handle>/), the first click/scroll/keydown forwards a
+  // message to background, which opens the side panel on behalf of the user.
+  // Fires at most once per tab session.
+  (() => {
+    const PROFILE_RE = /^\/in\/[^/?#]+\/?$/;
+    if (!PROFILE_RE.test(window.location.pathname)) return;
+    let fired = false;
+    const open = () => {
+      if (fired) return;
+      fired = true;
+      try {
+        chrome.runtime.sendMessage({ action: 'sidepanel.openFromGesture' });
+      } catch {
+        /* extension reload race; ignore */
+      }
+      window.removeEventListener('click', open, true);
+      window.removeEventListener('keydown', open, true);
+      window.removeEventListener('scroll', open, true);
+    };
+    window.addEventListener('click', open, true);
+    window.addEventListener('keydown', open, true);
+    window.addEventListener('scroll', open, true);
+  })();
 }
 
 // Debug function to test if custom prompts are being used

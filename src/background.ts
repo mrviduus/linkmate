@@ -123,6 +123,39 @@ async function autoOpenProfileIfStale(reason: 'install' | 'startup'): Promise<vo
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((err) => console.warn('[LinkMate] setPanelBehavior failed:', err));
 
+// Issue #16 — content-script forwards the first user gesture on a LinkedIn
+// profile page so we can open the side panel without the user clicking the
+// extension icon. Chrome preserves the user-gesture token across this hop.
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.action === 'sidepanel.openFromGesture' && sender.tab?.id !== undefined) {
+    const tabId = sender.tab.id;
+    const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
+      side_panel?: { default_path?: string };
+    };
+    const sidePanelPath = manifest.side_panel?.default_path ?? 'popup.html';
+    const sp = chrome.sidePanel as unknown as {
+      setOptions: (o: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>;
+      open: (o: { tabId?: number; windowId?: number }) => Promise<void>;
+    };
+    void (async () => {
+      try {
+        await sp.setOptions({
+          tabId,
+          path: `${sidePanelPath}?targetTab=${tabId}&auto=1`,
+          enabled: true,
+        });
+        await sp.open({ tabId });
+        sendResponse({ ok: true });
+      } catch (err) {
+        console.warn('[LinkMate] sidepanel.openFromGesture failed:', err);
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
+    return true; // keep channel open for async sendResponse
+  }
+  return undefined;
+});
+
 function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
