@@ -19,14 +19,32 @@ async function handleGetStarted(): Promise<void> {
   getStartedBtn.textContent = 'Opening LinkedIn…';
   await setCaptureFullProfile(captureFull?.checked ?? true);
   await setOnboardingCompleted(true);
-  // Send the gesture to background so it can open both the LinkedIn tab AND
-  // the side panel inside the same user-activation window. After this fires,
-  // we still navigate locally in case the message round-trip is slow.
+
+  // Open the side panel BEFORE navigating — we're inside the synchronous
+  // user-activation window of the click, so chrome.sidePanel.open() succeeds.
+  // Side panel stays attached to this tab through the upcoming navigation.
   try {
-    await chrome.runtime.sendMessage({ action: 'onboarding.start' });
-  } catch {
-    /* background may still be initializing; navigation below is the fallback */
+    const tab = await chrome.tabs.getCurrent();
+    if (tab?.id !== undefined) {
+      const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
+        side_panel?: { default_path?: string };
+      };
+      const sidePanelPath = manifest.side_panel?.default_path ?? 'popup.html';
+      const sp = chrome.sidePanel as unknown as {
+        setOptions: (o: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>;
+        open: (o: { tabId?: number }) => Promise<void>;
+      };
+      await sp.setOptions({
+        tabId: tab.id,
+        path: `${sidePanelPath}?targetTab=${tab.id}&auto=1`,
+        enabled: true,
+      });
+      await sp.open({ tabId: tab.id });
+    }
+  } catch (err) {
+    console.warn('[LinkMate] welcome → sidePanel.open failed:', err);
   }
+
   window.location.assign('https://www.linkedin.com/in/me/');
 }
 
