@@ -147,12 +147,14 @@ describe('profile-context (T033)', () => {
       const res = await svc.capture();
 
       expect(res.ok).toBe(true);
-      if (res.ok) {
+      if (res.ok && res.profile) {
         expect(res.profile.fullName).toBe('Synthetic Me');
         expect(res.profile.positioningSummary).toBe(
           'AI engineer focused on local-first agents.',
         );
         expect(res.profile.capturedAt).toBeGreaterThan(0);
+      } else {
+        throw new Error('expected res.profile to be defined');
       }
       // Persisted to storage under the v1 key
       expect(storage.get(STORAGE_KEYS.profile)).toBeDefined();
@@ -170,7 +172,7 @@ describe('profile-context (T033)', () => {
       if (!res.ok) expect(res.reason).toBe('script-failed');
     });
 
-    it('returns summary-failed if background returns an error', async () => {
+    it('still succeeds when AI positioning summary errors out (issue #16: DOM scrape is independent)', async () => {
       installChromeTabsScriptingMocks({
         activeTabUrl: 'https://www.linkedin.com/in/synthetic-me/',
         scriptingHtml: sampleProfileHtml(),
@@ -178,8 +180,11 @@ describe('profile-context (T033)', () => {
       installBackgroundMessenger({ error: 'webllm not ready' });
       const svc = new ProfileContextService();
       const res = await svc.capture();
-      expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.reason).toBe('summary-failed');
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.summaryError).toBeDefined();
+        expect(res.profile).toBeUndefined();
+      }
     });
 
     it('accepts URLs with or without trailing slash, with or without www, with query/hash', async () => {

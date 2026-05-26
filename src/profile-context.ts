@@ -55,7 +55,13 @@ export type CaptureFailureReason =
   | 'summary-failed';
 
 export type CaptureResult =
-  | { ok: true; profile: ProfileContext; cached?: boolean; userProfile?: UserProfile }
+  | {
+      ok: true;
+      profile?: ProfileContext;
+      cached?: boolean;
+      userProfile?: UserProfile;
+      summaryError?: string;
+    }
   | { ok: false; reason: CaptureFailureReason; message: string };
 
 interface ProfileCaptureResponse {
@@ -177,38 +183,9 @@ export class ProfileContextService {
       };
     }
 
-    // Step 5 + 6: ship raw fields to background, get positioning summary
-    let response: ProfileCaptureResponse;
-    try {
-      response = (await chrome.runtime.sendMessage({
-        action: 'profile.capture',
-        fields: rawFields,
-      })) as ProfileCaptureResponse;
-    } catch (err) {
-      return {
-        ok: false,
-        reason: 'summary-failed',
-        message: `Background did not respond: ${String(err)}`,
-      };
-    }
-    if (!response?.ok || !response.positioningSummary) {
-      return {
-        ok: false,
-        reason: 'summary-failed',
-        message: response?.error ?? 'No positioning summary returned.',
-      };
-    }
-
-    // Step 7: persist
-    const profile: ProfileContext = {
-      ...rawFields,
-      positioningSummary: response.positioningSummary,
-      capturedAt: Date.now(),
-    };
-    await setProfile(profile);
-
-    // Issue #16 — full UserProfile capture (extended fields + recent activity).
-    // Soft-fail: never block the legacy ProfileContext capture on a parse error.
+    // Step 5 — Issue #16: pure-algorithm DOM scrape → IDB. Runs FIRST and is
+    // independent of any AI. If OpenAI key isn't configured or the API errors
+    // out later, we still have the structured profile saved.
     let userProfile: UserProfile | undefined;
     if (fullProfileEnabled && activeTab?.id !== undefined) {
       try {
@@ -219,7 +196,34 @@ export class ProfileContextService {
       }
     }
 
-    return { ok: true, profile, userProfile };
+    // Step 6 — legacy: OpenAI positioning summary + chrome.storage ProfileContext.
+    // This powers AI-drafted comments elsewhere in the extension. NON-BLOCKING:
+    // failure here doesn't invalidate the IDB write above.
+    let profile: ProfileContext | undefined;
+    let summaryError: string | undefined;
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        action: 'profile.capture',
+        fields: rawFields,
+      })) as ProfileCaptureResponse;
+      if (response?.ok && response.positioningSummary) {
+        profile = {
+          ...rawFields,
+          positioningSummary: response.positioningSummary,
+          capturedAt: Date.now(),
+        };
+        await setProfile(profile);
+      } else {
+        summaryError = response?.error ?? 'No positioning summary returned.';
+      }
+    } catch (err) {
+      summaryError = `Background did not respond: ${String(err)}`;
+    }
+    if (summaryError) {
+      console.warn('[LinkMate] positioning summary skipped:', summaryError);
+    }
+
+    return { ok: true, profile, userProfile, summaryError };
   }
 
   /** Read the currently-stored profile (or null). Cheap; no network/DOM access. */

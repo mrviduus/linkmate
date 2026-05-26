@@ -203,6 +203,11 @@ async function handleCaptureProfile(): Promise<void> {
     if (result.ok) {
       if (result.cached) {
         showProfileMessage('Profile is fresh (<24h). Using cached snapshot.', 'info');
+      } else if (result.summaryError) {
+        showProfileMessage(
+          'Profile captured (AI summary skipped — check OpenAI key in Settings).',
+          'info',
+        );
       } else {
         showProfileMessage('Profile captured.', 'success');
       }
