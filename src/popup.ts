@@ -483,6 +483,8 @@ const cadenceBars = $('cadenceBars');
 const recommendCards = $('recommendCards');
 const pendingChips = $('pendingChips');
 const pendingChipsList = $('pendingChipsList');
+const topicsRow = $('topicsRow');
+const topicsChips = $('topicsChips');
 const cadenceSaveBtn = $<HTMLButtonElement>('cadenceSaveBtn');
 const cadenceStatus = $('cadenceStatus');
 const targetBrand = $<HTMLInputElement>('targetBrand');
@@ -647,6 +649,35 @@ async function loadToday(): Promise<void> {
   renderStreak(streakResp.count ?? 0);
   renderRecommendations(weakest, progress);
   void loadPending();
+  void loadTopics();
+}
+
+async function loadTopics(): Promise<void> {
+  const resp = await new Promise<{ ok: boolean; topics?: Array<{ topic: string; count: number }> }>(
+    (resolve) => {
+      chrome.runtime.sendMessage({ action: 'action.log.topTopics', days: 14, n: 6 }, (r) =>
+        resolve(r ?? { ok: false }),
+      );
+    },
+  );
+  const topics = resp.topics ?? [];
+  if (!topicsRow || !topicsChips) return;
+  if (topics.length === 0) {
+    topicsRow.style.display = 'none';
+    return;
+  }
+  topicsRow.style.display = '';
+  topicsChips.innerHTML = '';
+  for (const t of topics) {
+    const chip = document.createElement('span');
+    chip.className = 'topic-chip';
+    const label = document.createTextNode(`${t.topic} `);
+    const count = document.createElement('span');
+    count.className = 'topic-chip__count';
+    count.textContent = String(t.count);
+    chip.append(label, count);
+    topicsChips.append(chip);
+  }
 }
 
 function emptyProgress(): WeeklyProgressDto {
