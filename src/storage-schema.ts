@@ -26,6 +26,8 @@ export const STORAGE_KEYS = {
   provider: 'linkmate.provider.v1',
   cadenceTargets: 'linkmate.cadence.targets.v1',
   cadenceStreak: 'linkmate.cadence.streak.v1',
+  recommenderCards: 'linkmate.recommender.cards.v1',
+  retroLastShown: 'linkmate.retro.lastShown.v1',
   schemaVersion: 'linkmate.schema.version',
 } as const;
 
@@ -332,4 +334,40 @@ export async function getCadenceStreak(): Promise<CadenceStreak> {
 
 export async function setCadenceStreak(s: CadenceStreak): Promise<void> {
   await writeKey(STORAGE_KEYS.cadenceStreak, s);
+}
+
+// ─── Recommender cards (Phase C) ────────────────────────────────────────────
+
+export type ActionVerb = 'comment' | 'post' | 'invite' | 'thread_reply';
+export type PillarKey = 'brand' | 'finding' | 'engaging' | 'building';
+
+export interface RecommendCard {
+  action: ActionVerb;
+  pillar: PillarKey;
+  title: string;
+  reason: string;
+  postId?: string;
+}
+
+export interface RecommenderState {
+  generatedAt: number;
+  cards: RecommendCard[];
+  source: 'ai' | 'rule';
+}
+
+export async function getRecommenderCards(): Promise<RecommenderState | null> {
+  return readKey<RecommenderState>(STORAGE_KEYS.recommenderCards);
+}
+
+export async function setRecommenderCards(s: RecommenderState): Promise<void> {
+  await writeKey(STORAGE_KEYS.recommenderCards, s);
+}
+
+/** Timestamp of the last weekly retro the user has dismissed/seen. */
+export async function getRetroLastShown(): Promise<number> {
+  return (await readKey<number>(STORAGE_KEYS.retroLastShown)) ?? 0;
+}
+
+export async function setRetroLastShown(ts: number): Promise<void> {
+  await writeKey(STORAGE_KEYS.retroLastShown, ts);
 }
