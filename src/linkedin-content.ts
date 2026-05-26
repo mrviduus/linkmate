@@ -2,6 +2,7 @@
 // Handles post detection, reply generation, and UI injection
 
 import { EngagementQueue } from './engagement-queue';
+import { scanPostForOutcome } from './outcome-scanner';
 import type { ScoreFeedResult } from './engagement-queue';
 import { parseFeedDom } from './feed-parser';
 import type { ParsedPost, ScoredPost } from './storage-schema';
@@ -76,12 +77,13 @@ class LinkedInLinkMate {
             tone: req.tone,
             length: req.length,
           }).then((r) => r?.draft ?? '[Draft unavailable]'),
-        markEngaged: async (postId: string) => {
+        markEngaged: async (postId: string, postText?: string) => {
           await this.sendQueueMessage({ action: 'queue.markEngaged', postId });
-          // Also append to action log so cadence tracker sees it.
+          // Also append to action log so cadence tracker sees it; pass post body
+          // so the tagger can attribute topics.
           chrome.runtime.sendMessage({
             action: 'action.log.append',
-            input: { type: 'comment', postId, submitted: true },
+            input: { type: 'comment', postId, submitted: true, sourceText: postText },
           });
         },
         dismiss: async (postId: string) => {
@@ -310,6 +312,9 @@ class LinkedInLinkMate {
 
     this.posts.set(postId, post);
     this.injectReplyButton(post);
+    // Lazy outcome auto-attach: if user previously commented on this post and
+    // their comment is on-screen, scrape engagement metrics. No-op otherwise.
+    void scanPostForOutcome(postElement, postId);
   }
 
   private getPostId(element: HTMLElement): string | null {
@@ -967,10 +972,17 @@ class LinkedInLinkMate {
 
   /** Action log: record that the user committed to a generated reply on a post. */
   private logReplyAction(postId: string, draftText: string): void {
+    const post = this.posts.get(postId);
     chrome.runtime.sendMessage(
       {
         action: 'action.log.append',
-        input: { type: 'comment', postId, draftText, submitted: true },
+        input: {
+          type: 'comment',
+          postId,
+          draftText,
+          submitted: true,
+          sourceText: post?.textContent ?? draftText,
+        },
       },
       () => {
         if (chrome.runtime.lastError) {
