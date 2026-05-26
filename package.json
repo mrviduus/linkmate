@@ -1,6 +1,6 @@
 {
   "name": "linkmate-extension",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI-powered LinkedIn assistant: SSI tracker, profile audit, comment drafts via OpenAI.",
   "private": true,
   "scripts": {
