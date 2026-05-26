@@ -464,6 +464,248 @@ async function handleResetPrompts(): Promise<void> {
   showPromptsStatus('Reset to defaults.', 'success');
 }
 
+// ─── Today: cadence quotas + recommend cards + streak + pending chips ─────
+
+type Pillar = 'brand' | 'finding' | 'engaging' | 'building';
+type WeeklyProgressDto = Record<Pillar, { done: number; target: number; pct: number }>;
+interface ActionRowDto {
+  id: number;
+  type: string;
+  pillar: Pillar;
+  timestamp: number;
+  postId?: string;
+  draftText?: string;
+  submitted: boolean;
+}
+
+const streakCount = $('streakCount');
+const cadenceBars = $('cadenceBars');
+const recommendCards = $('recommendCards');
+const pendingChips = $('pendingChips');
+const pendingChipsList = $('pendingChipsList');
+const cadenceSaveBtn = $<HTMLButtonElement>('cadenceSaveBtn');
+const cadenceStatus = $('cadenceStatus');
+const targetBrand = $<HTMLInputElement>('targetBrand');
+const targetFinding = $<HTMLInputElement>('targetFinding');
+const targetEngaging = $<HTMLInputElement>('targetEngaging');
+const targetBuilding = $<HTMLInputElement>('targetBuilding');
+
+const PILLAR_COPY: Record<Pillar, { label: string; cta: string; href: string; reason: string }> = {
+  brand: {
+    label: 'Publish a post',
+    cta: 'Open composer',
+    href: 'https://www.linkedin.com/feed/?shareActive=true',
+    reason: 'Brand pillar — original posts move it most.',
+  },
+  finding: {
+    label: 'Send connection invites',
+    cta: 'Open My Network',
+    href: 'https://www.linkedin.com/mynetwork/grow/',
+    reason: 'Finding pillar — outbound invites the only signal LinkedIn rewards.',
+  },
+  engaging: {
+    label: 'Comment on a relevant post',
+    cta: 'Open feed',
+    href: 'https://www.linkedin.com/feed/',
+    reason: 'Engaging pillar — thoughtful comments outperform reactions 3-to-1.',
+  },
+  building: {
+    label: 'Reply in a comment thread',
+    cta: 'Open feed',
+    href: 'https://www.linkedin.com/feed/',
+    reason: 'Building pillar — back-and-forth replies signal real relationships.',
+  },
+};
+
+function renderProgressBars(progress: WeeklyProgressDto, weakest: Pillar): void {
+  if (!cadenceBars) return;
+  const rows = cadenceBars.querySelectorAll<HTMLElement>('.cadence-row');
+  rows.forEach((row) => {
+    const pillar = row.getAttribute('data-pillar') as Pillar;
+    const p = progress[pillar];
+    const fill = row.querySelector<HTMLElement>('.cadence-fill');
+    const num = row.querySelector<HTMLElement>('.cadence-num');
+    if (fill) fill.style.width = `${p.pct}%`;
+    if (num) num.textContent = `${p.done} / ${p.target}`;
+    row.classList.toggle('weakest', pillar === weakest);
+    row.classList.toggle('complete', p.target > 0 && p.done >= p.target);
+  });
+}
+
+function renderStreak(count: number): void {
+  if (streakCount) streakCount.textContent = String(count);
+}
+
+function renderRecommendations(weakest: Pillar, progress: WeeklyProgressDto): void {
+  if (!recommendCards) return;
+  // Pick 3 cards: weakest pillar first, then next-weakest two.
+  const order: Pillar[] = ['brand', 'finding', 'engaging', 'building'].sort((a, b) => {
+    if (a === weakest) return -1;
+    if (b === weakest) return 1;
+    return progress[a as Pillar].pct - progress[b as Pillar].pct;
+  }) as Pillar[];
+  const pick = order.slice(0, 3);
+  recommendCards.innerHTML = '';
+  for (const pillar of pick) {
+    const copy = PILLAR_COPY[pillar];
+    const p = progress[pillar];
+    const remaining = Math.max(0, p.target - p.done);
+    const card = document.createElement('div');
+    card.className = 'recommend-card';
+    const title = document.createElement('div');
+    title.className = 'recommend-card__title';
+    title.textContent = remaining > 0 ? `${copy.label} (${remaining} to go this week)` : copy.label;
+    const reason = document.createElement('div');
+    reason.className = 'recommend-card__reason';
+    reason.textContent = copy.reason;
+    const btn = document.createElement('button');
+    btn.className = 'recommend-card__action';
+    btn.textContent = copy.cta;
+    btn.addEventListener('click', () => chrome.tabs.create({ url: copy.href }));
+    card.append(title, reason, btn);
+    recommendCards.append(card);
+  }
+}
+
+async function loadPending(): Promise<void> {
+  const resp = await new Promise<{ ok: boolean; rows: ActionRowDto[] }>((resolve) => {
+    chrome.runtime.sendMessage({ action: 'action.log.pending' }, (r) =>
+      resolve(r ?? { ok: false, rows: [] }),
+    );
+  });
+  const rows = resp.rows ?? [];
+  if (!pendingChips || !pendingChipsList) return;
+  if (rows.length === 0) {
+    pendingChips.style.display = 'none';
+    return;
+  }
+  pendingChips.style.display = '';
+  pendingChipsList.innerHTML = '';
+  for (const row of rows.slice(0, 5)) {
+    const chip = document.createElement('div');
+    chip.className = 'pending-chip';
+    const txt = document.createElement('span');
+    txt.className = 'pending-chip__text';
+    const when = new Date(row.timestamp).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+    });
+    txt.textContent = `${when} · ${row.type}${row.postId ? ' · ' + row.postId.slice(0, 12) : ''}`;
+    const up = document.createElement('button');
+    up.className = 'pending-chip__btn';
+    up.title = 'It worked';
+    up.textContent = '👍';
+    up.addEventListener('click', () =>
+      void recordOutcome(row.id, 'positive', chip),
+    );
+    const down = document.createElement('button');
+    down.className = 'pending-chip__btn';
+    down.title = "Didn't work";
+    down.textContent = '👎';
+    down.addEventListener('click', () =>
+      void recordOutcome(row.id, 'negative', chip),
+    );
+    chip.append(txt, up, down);
+    pendingChipsList.append(chip);
+  }
+}
+
+async function recordOutcome(
+  actionId: number,
+  verdict: 'positive' | 'negative',
+  chip: HTMLElement,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        action: 'action.log.attachOutcome',
+        input: { actionId, source: 'manual', manualVerdict: verdict },
+      },
+      () => resolve(),
+    );
+  });
+  chip.remove();
+  // Refresh cadence (no change to counts, but streak might shift on outcome boundaries later).
+}
+
+async function loadToday(): Promise<void> {
+  const [progressResp, streakResp] = await Promise.all([
+    new Promise<{ ok: boolean; progress: WeeklyProgressDto; weakest: Pillar }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'action.log.weeklyProgress' }, (r) =>
+        resolve(r ?? { ok: false, progress: emptyProgress(), weakest: 'engaging' }),
+      );
+    }),
+    new Promise<{ ok: boolean; count: number }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'cadence.streak' }, (r) =>
+        resolve(r ?? { ok: false, count: 0 }),
+      );
+    }),
+  ]);
+  const progress = progressResp.progress ?? emptyProgress();
+  const weakest = progressResp.weakest ?? 'engaging';
+  renderProgressBars(progress, weakest);
+  renderStreak(streakResp.count ?? 0);
+  renderRecommendations(weakest, progress);
+  void loadPending();
+}
+
+function emptyProgress(): WeeklyProgressDto {
+  return {
+    brand: { done: 0, target: 1, pct: 0 },
+    finding: { done: 0, target: 5, pct: 0 },
+    engaging: { done: 0, target: 3, pct: 0 },
+    building: { done: 0, target: 2, pct: 0 },
+  };
+}
+
+// ─── Weekly targets form ──────────────────────────────────────────────────
+
+function showCadenceStatus(text: string, kind: 'success' | 'error'): void {
+  if (!cadenceStatus) return;
+  cadenceStatus.textContent = text;
+  cadenceStatus.className = `status-message ${kind}`;
+  cadenceStatus.style.display = '';
+  setTimeout(() => {
+    if (cadenceStatus) cadenceStatus.style.display = 'none';
+  }, 3000);
+}
+
+async function loadCadenceTargets(): Promise<void> {
+  const resp = await new Promise<{
+    ok: boolean;
+    targets: { brand: number; finding: number; engaging: number; building: number };
+  }>((resolve) => {
+    chrome.runtime.sendMessage({ action: 'cadence.getTargets' }, (r) =>
+      resolve(r ?? { ok: false, targets: { brand: 1, finding: 5, engaging: 3, building: 2 } }),
+    );
+  });
+  const t = resp.targets;
+  if (targetBrand) targetBrand.value = String(t.brand);
+  if (targetFinding) targetFinding.value = String(t.finding);
+  if (targetEngaging) targetEngaging.value = String(t.engaging);
+  if (targetBuilding) targetBuilding.value = String(t.building);
+}
+
+async function handleCadenceSave(): Promise<void> {
+  const targets = {
+    brand: parseInt(targetBrand?.value ?? '1', 10),
+    finding: parseInt(targetFinding?.value ?? '5', 10),
+    engaging: parseInt(targetEngaging?.value ?? '3', 10),
+    building: parseInt(targetBuilding?.value ?? '2', 10),
+  };
+  const resp = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+    chrome.runtime.sendMessage({ action: 'cadence.setTargets', targets }, (r) =>
+      resolve(r ?? { ok: false, error: 'No response' }),
+    );
+  });
+  if (resp.ok) {
+    showCadenceStatus('Saved.', 'success');
+    void loadToday();
+  } else {
+    showCadenceStatus(`Save failed: ${resp.error ?? 'unknown'}`, 'error');
+  }
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 
 function wire(): void {
@@ -478,6 +720,7 @@ function wire(): void {
   resetParametersBtn?.addEventListener('click', () => void handleResetParameters());
   savePromptsBtn?.addEventListener('click', () => void handleSavePrompts());
   resetPromptsBtn?.addEventListener('click', () => void handleResetPrompts());
+  cadenceSaveBtn?.addEventListener('click', () => void handleCadenceSave());
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -488,6 +731,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadSsiData(),
     loadAIParameters(),
     loadPrompts(),
+    loadCadenceTargets(),
+    loadToday(),
   ]);
   chrome.runtime.sendMessage({ action: 'popupReady' });
 });

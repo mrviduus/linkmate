@@ -78,6 +78,11 @@ class LinkedInLinkMate {
           }).then((r) => r?.draft ?? '[Draft unavailable]'),
         markEngaged: async (postId: string) => {
           await this.sendQueueMessage({ action: 'queue.markEngaged', postId });
+          // Also append to action log so cadence tracker sees it.
+          chrome.runtime.sendMessage({
+            action: 'action.log.append',
+            input: { type: 'comment', postId, submitted: true },
+          });
         },
         dismiss: async (postId: string) => {
           await this.sendQueueMessage({ action: 'queue.dismiss', postId });
@@ -948,14 +953,31 @@ class LinkedInLinkMate {
         break;
       case 'copy':
         this.copyToClipboard(reply);
+        this.logReplyAction(post.id, reply);
         break;
       case 'insert':
         this.insertIntoCommentBox(post, reply);
+        this.logReplyAction(post.id, reply);
         break;
       case 'close':
         this.closeReplyPanel(panel);
         break;
     }
+  }
+
+  /** Action log: record that the user committed to a generated reply on a post. */
+  private logReplyAction(postId: string, draftText: string): void {
+    chrome.runtime.sendMessage(
+      {
+        action: 'action.log.append',
+        input: { type: 'comment', postId, draftText, submitted: true },
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[linkmate] action.log.append failed', chrome.runtime.lastError.message);
+        }
+      },
+    );
   }
 
   private closeReplyPanel(panel: HTMLElement): void {
