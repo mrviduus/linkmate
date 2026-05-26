@@ -304,16 +304,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return false;
   }
 
-  // initializeModel + updateModel are no-ops (no local engine to warm).
-  if (request.action === 'initializeModel' || request.action === 'updateModel') {
-    sendResponse({ success: true, currentModel: 'openai' });
-    return false;
-  }
-  if (request.action === 'engine.unload' || request.action === 'engine.status') {
-    sendResponse({ ok: true, loaded: false, currentModel: null });
-    return false;
-  }
-
   if (request.action === 'popupReady') return false;
 
   // Engagement Queue handlers.

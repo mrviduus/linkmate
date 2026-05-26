@@ -22,7 +22,7 @@
  *   3. chrome.scripting.executeScript injects HTML-grab function
  *   4. parseProfileDom runs in popup against the returned HTML
  *   5. Send raw fields to background via 'profile.capture' message
- *   6. Background returns positioningSummary (uses WebLLM)
+ *   6. Background returns positioningSummary (uses OpenAI)
  *   7. Persist ProfileContext via storage-schema.setProfile
  *
  * Returns a typed Result; never throws. Caller (popup) renders an error chip.
