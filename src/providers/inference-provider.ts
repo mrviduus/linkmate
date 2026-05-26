@@ -20,6 +20,8 @@ export interface InferenceParams {
   topP?: number;
   /** Stop sequences (newline boundaries etc.). */
   stop?: string[];
+  /** Abort after this many milliseconds. Default 60s. */
+  timeoutMs?: number;
 }
 
 export interface InferenceProvider {

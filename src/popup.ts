@@ -739,76 +739,133 @@ interface PostDraftDto {
   body: string;
 }
 
-function openPostModal(): void {
-  if (!postModal || !postModalBody) return;
+type PostDraftsStateDto =
+  | { status: 'idle' }
+  | { status: 'inFlight'; startedAt: number }
+  | { status: 'ready'; finishedAt: number; drafts: PostDraftDto[] }
+  | { status: 'error'; finishedAt: number; error: string };
+
+const POST_DRAFTS_KEY = 'linkmate.recommender.postDrafts.v1';
+const POST_DRAFTS_FRESH_MS = 5 * 60 * 1000; // 5 min — show cached drafts on reopen
+const POST_DRAFTS_STALE_INFLIGHT_MS = 90 * 1000; // 90s — anything older is orphan
+
+/**
+ * Open the modal. Reads persisted state so a re-opened popup picks up an
+ * in-flight or completed generation from a previous popup instance.
+ * Only kicks off a fresh request if there's nothing fresh to show.
+ */
+async function openPostModal(): Promise<void> {
+  if (!postModal) return;
   postModal.style.display = '';
-  postModalBody.innerHTML =
-    '<div class="post-modal__loading"><i class="fa fa-circle-notch fa-spin"></i> Drafting…</div>';
-  void fetchPostDrafts();
+  const state = await readPostDraftsState();
+  renderPostDraftsState(state);
+  if (shouldStartFresh(state)) {
+    // Reset state then fire-and-forget the message — popup unmount won't lose
+    // anything because suggestPosts persists lifecycle to storage.
+    await writePostDraftsState({ status: 'inFlight', startedAt: Date.now() });
+    chrome.runtime.sendMessage({ action: 'recommender.suggestPosts' });
+  }
 }
 
 function closePostModal(): void {
   if (postModal) postModal.style.display = 'none';
 }
 
-async function fetchPostDrafts(): Promise<void> {
-  const resp = await new Promise<{ ok: boolean; drafts?: PostDraftDto[]; error?: string }>(
-    (resolve) => {
-      chrome.runtime.sendMessage({ action: 'recommender.suggestPosts' }, (r) =>
-        resolve(r ?? { ok: false, error: 'No response' }),
-      );
-    },
-  );
+function shouldStartFresh(state: PostDraftsStateDto): boolean {
+  if (state.status === 'idle') return true;
+  if (state.status === 'inFlight') {
+    // Re-fire if the previous in-flight is suspiciously old (orphaned by SW eviction).
+    return Date.now() - state.startedAt > POST_DRAFTS_STALE_INFLIGHT_MS;
+  }
+  // ready/error: re-fire only if older than the fresh window
+  return Date.now() - state.finishedAt > POST_DRAFTS_FRESH_MS;
+}
+
+async function readPostDraftsState(): Promise<PostDraftsStateDto> {
+  const { [POST_DRAFTS_KEY]: stored } = await chrome.storage.local.get(POST_DRAFTS_KEY);
+  return (stored as PostDraftsStateDto | undefined) ?? { status: 'idle' };
+}
+
+async function writePostDraftsState(s: PostDraftsStateDto): Promise<void> {
+  await chrome.storage.local.set({ [POST_DRAFTS_KEY]: s });
+}
+
+function renderPostDraftsState(state: PostDraftsStateDto): void {
   if (!postModalBody) return;
-  if (!resp.ok || !resp.drafts) {
-    postModalBody.innerHTML = '';
-    const err = document.createElement('div');
-    err.className = 'post-modal__error';
-    err.textContent = resp.error ?? 'Failed to generate drafts.';
-    postModalBody.append(err);
+  postModalBody.innerHTML = '';
+  if (state.status === 'inFlight') {
+    const loading = document.createElement('div');
+    loading.className = 'post-modal__loading';
+    loading.innerHTML =
+      '<i class="fa fa-circle-notch fa-spin"></i> Drafting (this can take 10–30s)…';
+    postModalBody.append(loading);
     return;
   }
-  postModalBody.innerHTML = '';
-  for (const draft of resp.drafts) {
-    const card = document.createElement('div');
-    card.className = 'post-draft';
-    const meta = document.createElement('div');
-    meta.className = 'post-draft__meta';
-    meta.textContent = `${draft.angle.replace('_', ' ')} · ${draft.topic}`;
-    const body = document.createElement('div');
-    body.className = 'post-draft__body';
-    body.textContent = draft.body;
-    const actions = document.createElement('div');
-    actions.className = 'post-draft__actions';
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'post-draft__btn';
-    copyBtn.textContent = 'Copy';
-    copyBtn.addEventListener('click', () => {
-      void navigator.clipboard.writeText(draft.body);
-      copyBtn.textContent = 'Copied';
-      setTimeout(() => (copyBtn.textContent = 'Copy'), 1500);
-      // Log the post action.
-      chrome.runtime.sendMessage({
-        action: 'action.log.append',
-        input: { type: 'post', draftText: draft.body, submitted: true, sourceText: draft.body },
-      });
-    });
-    const composeBtn = document.createElement('button');
-    composeBtn.className = 'post-draft__btn post-draft__btn--secondary';
-    composeBtn.textContent = 'Open composer';
-    composeBtn.addEventListener('click', () => {
-      void navigator.clipboard.writeText(draft.body);
-      chrome.tabs.create({ url: 'https://www.linkedin.com/feed/?shareActive=true' });
-      chrome.runtime.sendMessage({
-        action: 'action.log.append',
-        input: { type: 'post', draftText: draft.body, submitted: true, sourceText: draft.body },
-      });
-    });
-    actions.append(copyBtn, composeBtn);
-    card.append(meta, body, actions);
-    postModalBody.append(card);
+  if (state.status === 'error') {
+    const err = document.createElement('div');
+    err.className = 'post-modal__error';
+    err.textContent = state.error || 'Failed to generate drafts.';
+    const retry = document.createElement('button');
+    retry.className = 'post-draft__btn';
+    retry.style.marginTop = '8px';
+    retry.textContent = 'Try again';
+    retry.addEventListener('click', () => void openPostModal());
+    postModalBody.append(err, retry);
+    return;
   }
+  if (state.status === 'ready') {
+    for (const draft of state.drafts) postModalBody.append(buildDraftCard(draft));
+    return;
+  }
+  // idle — open path will start a request next tick
 }
+
+function buildDraftCard(draft: PostDraftDto): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'post-draft';
+  const meta = document.createElement('div');
+  meta.className = 'post-draft__meta';
+  meta.textContent = `${draft.angle.replace('_', ' ')} · ${draft.topic}`;
+  const body = document.createElement('div');
+  body.className = 'post-draft__body';
+  body.textContent = draft.body;
+  const actions = document.createElement('div');
+  actions.className = 'post-draft__actions';
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'post-draft__btn';
+  copyBtn.textContent = 'Copy';
+  copyBtn.addEventListener('click', () => {
+    void navigator.clipboard.writeText(draft.body);
+    copyBtn.textContent = 'Copied';
+    setTimeout(() => (copyBtn.textContent = 'Copy'), 1500);
+    chrome.runtime.sendMessage({
+      action: 'action.log.append',
+      input: { type: 'post', draftText: draft.body, submitted: true, sourceText: draft.body },
+    });
+  });
+  const composeBtn = document.createElement('button');
+  composeBtn.className = 'post-draft__btn post-draft__btn--secondary';
+  composeBtn.textContent = 'Open composer';
+  composeBtn.addEventListener('click', () => {
+    void navigator.clipboard.writeText(draft.body);
+    chrome.tabs.create({ url: 'https://www.linkedin.com/feed/?shareActive=true' });
+    chrome.runtime.sendMessage({
+      action: 'action.log.append',
+      input: { type: 'post', draftText: draft.body, submitted: true, sourceText: draft.body },
+    });
+  });
+  actions.append(copyBtn, composeBtn);
+  card.append(meta, body, actions);
+  return card;
+}
+
+/** Live update modal when background writes new state (mid-call → ready/error). */
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[POST_DRAFTS_KEY]) return;
+  if (!postModal || postModal.style.display === 'none') return;
+  const next = changes[POST_DRAFTS_KEY].newValue as PostDraftsStateDto | undefined;
+  if (next) renderPostDraftsState(next);
+});
 
 async function loadTopics(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; topics?: Array<{ topic: string; count: number }> }>(
@@ -912,7 +969,7 @@ function wire(): void {
   cadenceSaveBtn?.addEventListener('click', () => void handleCadenceSave());
   retroDismiss?.addEventListener('click', () => void handleRetroDismiss());
   cardsRefresh?.addEventListener('click', () => void handleCardsRefresh());
-  suggestPostBtn?.addEventListener('click', openPostModal);
+  suggestPostBtn?.addEventListener('click', () => void openPostModal());
   postModalClose?.addEventListener('click', closePostModal);
   postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
 }

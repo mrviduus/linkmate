@@ -28,6 +28,7 @@ export const STORAGE_KEYS = {
   cadenceStreak: 'linkmate.cadence.streak.v1',
   recommenderCards: 'linkmate.recommender.cards.v1',
   retroLastShown: 'linkmate.retro.lastShown.v1',
+  postDraftsState: 'linkmate.recommender.postDrafts.v1',
   schemaVersion: 'linkmate.schema.version',
 } as const;
 
@@ -370,4 +371,26 @@ export async function getRetroLastShown(): Promise<number> {
 
 export async function setRetroLastShown(ts: number): Promise<void> {
   await writeKey(STORAGE_KEYS.retroLastShown, ts);
+}
+
+// ─── Post-drafts modal state (survives popup close mid-call) ───────────────
+
+export interface PostDraft {
+  angle: 'story' | 'hot_take' | 'lesson';
+  topic: string;
+  body: string;
+}
+
+export type PostDraftsState =
+  | { status: 'idle' }
+  | { status: 'inFlight'; startedAt: number }
+  | { status: 'ready'; finishedAt: number; drafts: PostDraft[] }
+  | { status: 'error'; finishedAt: number; error: string };
+
+export async function getPostDraftsState(): Promise<PostDraftsState> {
+  return (await readKey<PostDraftsState>(STORAGE_KEYS.postDraftsState)) ?? { status: 'idle' };
+}
+
+export async function setPostDraftsState(s: PostDraftsState): Promise<void> {
+  await writeKey(STORAGE_KEYS.postDraftsState, s);
 }
