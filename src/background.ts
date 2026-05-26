@@ -84,10 +84,16 @@ async function autoOpenProfileIfStale(reason: 'install' | 'startup'): Promise<vo
       setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
     };
     if (tab.id !== undefined) {
+      // Parcel content-hashes popup.html (e.g. popup.dbddf994.html); the bare
+      // string would 404. Read the resolved name from the runtime manifest.
+      const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
+        side_panel?: { default_path?: string };
+      };
+      const sidePanelPath = manifest.side_panel?.default_path ?? 'popup.html';
       try {
         await sidePanel.setOptions({
           tabId: tab.id,
-          path: `popup.html?targetTab=${tab.id}&auto=1`,
+          path: `${sidePanelPath}?targetTab=${tab.id}&auto=1`,
           enabled: true,
         });
       } catch (err) {
