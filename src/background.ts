@@ -23,6 +23,9 @@ import {
   clearSsiLastError,
   getProviderConfig,
   setProviderConfig,
+  getCadenceTargets,
+  setCadenceTargets,
+  getCadenceStreak,
 } from './storage-schema';
 import type {
   ParsedPost,
@@ -31,7 +34,16 @@ import type {
   LengthKey,
   SsiSnapshot,
   ProviderConfig,
+  CadenceTargets,
 } from './storage-schema';
+import {
+  append as logAppend,
+  attachOutcome as logAttachOutcome,
+  pendingOutcomes as logPendingOutcomes,
+  getByPostId as logGetByPostId,
+  type AppendInput,
+} from './action-log';
+import { maybeAdvanceStreak, weeklyProgress, weakestPillar } from './cadence';
 
 console.log('LinkMate background service worker loaded');
 
@@ -349,6 +361,58 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.action === 'provider.set') {
     setProviderConfig(request.config as ProviderConfig)
       .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+
+  // ─── Action log + cadence handlers ────────────────────────────────────────
+  if (request.action === 'action.log.append') {
+    logAppend(request.input as AppendInput)
+      .then((id) => sendResponse({ ok: true, id }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'action.log.weeklyProgress') {
+    weeklyProgress()
+      .then((p) => sendResponse({ ok: true, progress: p, weakest: weakestPillar(p) }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'action.log.pending') {
+    logPendingOutcomes()
+      .then((rows) => sendResponse({ ok: true, rows }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'action.log.attachOutcome') {
+    logAttachOutcome(request.input)
+      .then((id) => sendResponse({ ok: true, id }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'action.log.byPostId') {
+    logGetByPostId(request.postId as string)
+      .then((rows) => sendResponse({ ok: true, rows }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'cadence.getTargets') {
+    getCadenceTargets()
+      .then((t) => sendResponse({ ok: true, targets: t }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'cadence.setTargets') {
+    setCadenceTargets(request.targets as CadenceTargets)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'cadence.streak') {
+    Promise.all([getCadenceStreak(), maybeAdvanceStreak()])
+      .then(([prior, advance]) =>
+        sendResponse({ ok: true, count: advance.streak, advanced: advance.advanced, prior }),
+      )
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
     return true;
   }
