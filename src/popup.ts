@@ -96,7 +96,6 @@ async function handleProviderSave(): Promise<void> {
 // ─── Profile Context ────────────────────────────────────────────────────────
 
 const captureProfileBtn = $<HTMLButtonElement>('captureProfile');
-const openMyProfileBtn = $<HTMLButtonElement>('openMyProfile');
 const profileNoneState = $('profileNoneState');
 const profileCapturedState = $('profileCapturedState');
 const profileFullName = $('profileFullName');
@@ -152,12 +151,40 @@ async function refreshProfileDisplay(): Promise<void> {
   renderProfile(profile, profile !== null && stale);
 }
 
+/**
+ * If the active tab isn't already on a LinkedIn profile, navigate it to
+ * /in/me/ (LinkedIn auto-redirects to the user's own handle) and wait until
+ * the page is loaded. Returns true once the tab is on a profile URL.
+ */
+async function ensureOnOwnProfile(): Promise<boolean> {
+  const PROFILE_URL_RE = /^https?:\/\/(www\.)?linkedin\.com\/in\/[^/?#]+\/?(\?[^#]*)?(#.*)?$/;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return false;
+  if (PROFILE_URL_RE.test(tab.url ?? '')) return true;
+  await chrome.tabs.update(tab.id, { url: 'https://www.linkedin.com/in/me/' });
+  await new Promise<void>((resolve) => {
+    const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+      if (id === tab.id && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 15000);
+  });
+  return true;
+}
+
 async function handleCaptureProfile(): Promise<void> {
   if (!captureProfileBtn) return;
   captureProfileBtn.disabled = true;
   const prevText = captureProfileBtn.innerHTML;
   captureProfileBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
   try {
+    await ensureOnOwnProfile();
     const result = await profileService.capture();
     if (result.ok) {
       if (result.cached) {
@@ -175,10 +202,6 @@ async function handleCaptureProfile(): Promise<void> {
     captureProfileBtn.disabled = false;
     captureProfileBtn.innerHTML = prevText;
   }
-}
-
-function handleOpenMyProfile(): void {
-  chrome.tabs.update({ url: 'https://www.linkedin.com/in/me/' });
 }
 
 async function loadCaptureFullProfileToggle(): Promise<void> {
@@ -1004,7 +1027,6 @@ async function handleCadenceSave(): Promise<void> {
 function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
-  openMyProfileBtn?.addEventListener('click', handleOpenMyProfile);
   captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
   ssiRefreshBtn?.addEventListener('click', () => void handleSsiRefresh());
   ssiOpenPageBtn?.addEventListener('click', handleSsiOpenPage);
