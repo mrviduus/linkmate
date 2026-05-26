@@ -32,7 +32,7 @@ export type ScoreFeedResult = { ok: true; scored: ScoredPost[] } | { ok: false; 
 export interface EngagementQueueDeps {
   scoreFeed?: (posts: ParsedPost[]) => Promise<ScoreFeedResult>;
   draftComment?: (req: DraftRequest) => Promise<string>;
-  markEngaged?: (postId: string) => Promise<void>;
+  markEngaged?: (postId: string, postText?: string) => Promise<void>;
   dismiss?: (postId: string) => Promise<void>;
   copyToClipboard?: (text: string) => Promise<void>;
   openPost?: (postId: string) => void;
@@ -289,7 +289,8 @@ export class EngagementQueue {
     }
     if (this.deps.markEngaged) {
       try {
-        await this.deps.markEngaged(postId);
+        const post = this.currentScored.find((s) => s.id === postId);
+        await this.deps.markEngaged(postId, post?.text);
       } catch {
         /* swallow */
       }
