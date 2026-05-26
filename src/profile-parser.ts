@@ -212,28 +212,21 @@ function findSection(root: Element | Document | DocumentFragment, re: RegExp): E
   return null;
 }
 
-function dedupeListItems(section: Element): Element[] {
-  // Top-level <li> only (avoid nested role bullet sub-items duplicating).
-  const lis = Array.from(section.querySelectorAll('li'));
-  return lis.filter((li) => {
-    const parentLi = li.parentElement?.closest('li');
-    return !parentLi || !section.contains(parentLi);
-  });
+/**
+ * Top-level entity-collection-item entries inside a card. LinkedIn 2026
+ * marks each Experience row with `<div componentkey="entity-collection-item-…">`
+ * instead of `<li>`. Skips nested duplicates (the SDUI sometimes wraps).
+ */
+function topLevelEntities(section: Element): Element[] {
+  const all = Array.from(section.querySelectorAll('[componentkey^="entity-collection-item"]'));
+  return all.filter((el) => !el.parentElement?.closest('[componentkey^="entity-collection-item"]'));
 }
 
-function visibleSpanLines(el: Element): string[] {
-  // LinkedIn renders each text fragment as <span aria-hidden="true"> with a
-  // visually-hidden duplicate <span class="visually-hidden">. Use the
-  // aria-hidden ones to avoid double text.
-  const spans = Array.from(el.querySelectorAll('span[aria-hidden="true"]'));
-  const lines: string[] = [];
-  for (const s of spans) {
-    const t = readText(s);
-    if (!t) continue;
-    if (lines[lines.length - 1] === t) continue;
-    lines.push(t);
-  }
-  return lines;
+/** Read all visible `<p>` text fragments inside a node, in DOM order. */
+function paragraphTexts(el: Element): string[] {
+  return Array.from(el.querySelectorAll('p'))
+    .map((p) => readText(p))
+    .filter((t) => t.length > 0);
 }
 
 function parseExperience(root: Element | Document | DocumentFragment): UserProfile['experience'] {
@@ -243,20 +236,18 @@ function parseExperience(root: Element | Document | DocumentFragment): UserProfi
     return [];
   }
   const out: UserProfile['experience'] = [];
-  for (const li of dedupeListItems(section)) {
-    const lines = visibleSpanLines(li);
-    if (lines.length === 0) continue;
-    // Heuristic: first line = title, second = company (often "Company · Type"),
-    // third = dateRange (often "MMM YYYY - Present · Xy Xmo"), fourth = location.
-    const [title, company, dateRange, location, ...rest] = lines;
-    if (!title || !company) continue;
-    const description = rest.filter((l) => l.length > 20).join('\n').slice(0, 1000) || undefined;
+  for (const entry of topLevelEntities(section)) {
+    const ps = paragraphTexts(entry);
+    if (ps.length < 2) continue;
+    // Expected order: title, company·type, dateRange·duration, location·format, description, skills-tag
+    const [title, companyLine, dateLine, locLine, desc] = ps;
+    if (!title) continue;
     out.push({
       title,
-      company: company.split(' · ')[0],
-      dateRange: dateRange ?? '',
-      location: location || undefined,
-      description,
+      company: (companyLine ?? '').split(' · ')[0],
+      dateRange: (dateLine ?? '').split(' · ')[0],
+      location: locLine ? locLine.split(' · ')[0] : undefined,
+      description: desc ? desc.replace(/…\s*more\s*$/i, '').trim().slice(0, 1500) : undefined,
     });
   }
   return out;
@@ -268,21 +259,22 @@ function parseEducation(root: Element | Document | DocumentFragment): UserProfil
     warnMiss('education');
     return [];
   }
+  // Education renders as a flat list of <p> tags: school, degree, dateRange,
+  // school, degree, dateRange, ... (3 per entry). No entity-collection-item.
+  const ps = paragraphTexts(section);
   const out: UserProfile['education'] = [];
-  for (const li of dedupeListItems(section)) {
-    const lines = visibleSpanLines(li);
-    if (lines.length === 0) continue;
-    const [school, degreeLine, dateRange] = lines;
+  for (let i = 0; i + 2 < ps.length + 1; i += 3) {
+    const school = ps[i];
     if (!school) continue;
-    // degreeLine often "Bachelor's degree, Computer Science"
-    let degree: string | undefined;
-    let field: string | undefined;
-    if (degreeLine) {
-      const parts = degreeLine.split(/, ?/);
-      degree = parts[0]?.trim() || undefined;
-      field = parts.slice(1).join(', ').trim() || undefined;
-    }
-    out.push({ school, degree, field, dateRange: dateRange || undefined });
+    const degreeLine = ps[i + 1] ?? '';
+    const dateRange = ps[i + 2];
+    const [degree, ...rest] = degreeLine.split(/,\s*/);
+    out.push({
+      school,
+      degree: degree?.trim() || undefined,
+      field: rest.join(', ').trim() || undefined,
+      dateRange: dateRange || undefined,
+    });
   }
   return out;
 }
@@ -293,10 +285,20 @@ function parseCertifications(
   const section = findSection(root, /^licenses\s*&?\s*certifications?$|^certifications?$/i);
   if (!section) return [];
   const out: NonNullable<UserProfile['certifications']> = [];
-  for (const li of dedupeListItems(section)) {
-    const lines = visibleSpanLines(li);
-    if (!lines[0]) continue;
-    out.push({ name: lines[0], issuer: lines[1] || undefined, date: lines[2] || undefined });
+  // Try entity-collection-item first; fall back to flat <p>.
+  const entries = topLevelEntities(section);
+  if (entries.length > 0) {
+    for (const e of entries) {
+      const ps = paragraphTexts(e);
+      if (!ps[0]) continue;
+      out.push({ name: ps[0], issuer: ps[1] || undefined, date: ps[2] || undefined });
+    }
+  } else {
+    const ps = paragraphTexts(section);
+    for (let i = 0; i < ps.length; i += 3) {
+      if (!ps[i]) continue;
+      out.push({ name: ps[i], issuer: ps[i + 1] || undefined, date: ps[i + 2] || undefined });
+    }
   }
   return out;
 }
@@ -304,10 +306,30 @@ function parseCertifications(
 function parseLanguages(root: Element | Document | DocumentFragment): string[] {
   const section = findSection(root, /^languages?$/i);
   if (!section) return [];
+  const ps = paragraphTexts(section);
   const out: string[] = [];
-  for (const li of dedupeListItems(section)) {
-    const lines = visibleSpanLines(li);
-    if (lines[0] && !out.includes(lines[0])) out.push(lines[0]);
+  // Languages section: pairs of <p> — name, proficiency. Take even indices.
+  for (let i = 0; i < ps.length; i += 2) {
+    if (ps[i] && !out.includes(ps[i])) out.push(ps[i]);
+  }
+  return out;
+}
+
+/**
+ * Profile's Skills card lists pairs of `<p>`: skill name, role context
+ * ("Senior Software Engineer at Pinnacle"). Take even indices for skill names.
+ */
+function parseSkillsList(root: Element | Document | DocumentFragment): string[] {
+  const section = findSection(root, /^skills(\s*\(\d+\))?$/i);
+  if (!section) return [];
+  const ps = paragraphTexts(section);
+  const out: string[] = [];
+  for (let i = 0; i < ps.length; i += 2) {
+    const s = ps[i];
+    if (!s || s.length < 2 || s.length > 80) continue;
+    if (out.includes(s)) continue;
+    out.push(s);
+    if (out.length >= MAX_TOP_SKILLS) break;
   }
   return out;
 }
@@ -425,6 +447,10 @@ export function parseUserProfile(
   if (education.length === 0 && chip.school) {
     education = [{ school: chip.school }];
   }
+  // Skills: prefer the new <p>-based parser (LinkedIn 2026 doesn't use <li>).
+  // Fall back to parseProfileDom's older heuristic if it found something we missed.
+  const skillsFromList = parseSkillsList(root);
+  const skills = skillsFromList.length > 0 ? skillsFromList : base.topSkills;
 
   return {
     capturedAt: new Date().toISOString(),
@@ -435,7 +461,7 @@ export function parseUserProfile(
     connectionsCount: meta.connectionsCount,
     followersCount: meta.followersCount,
     about: base.about || undefined,
-    skills: base.topSkills,
+    skills,
     experience,
     education,
     certifications: parseCertifications(root),
