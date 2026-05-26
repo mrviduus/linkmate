@@ -31,6 +31,11 @@
             Rolling 7-day quotas. The recommender biases your actions toward the weakest pillar.
           </p>
 
+          <div id="retroCard" class="retro-card" style="display: none">
+            <div class="retro-card__text" id="retroText">—</div>
+            <button id="retroDismiss" class="retro-card__close" title="Dismiss">✕</button>
+          </div>
+
           <div id="cadenceBars" class="cadence-bars">
             <div class="cadence-row" data-pillar="brand">
               <span class="cadence-label">Brand</span>
@@ -54,7 +59,17 @@
             </div>
           </div>
 
+          <div class="today-meta">
+            <span id="cardsSource" class="cards-source">—</span>
+            <button id="cardsRefresh" class="cards-refresh" title="Regenerate now">
+              <i class="fa fa-sync"></i>
+            </button>
+          </div>
           <div id="recommendCards" class="recommend-cards"></div>
+
+          <button id="suggestPostBtn" class="btn btn-secondary suggest-post-btn">
+            <i class="fa fa-magic"></i> Suggest a post
+          </button>
 
           <div id="pendingChips" class="pending-chips" style="display: none">
             <h4 class="pending-chips__hdr">Did this work?</h4>
@@ -378,6 +393,21 @@
             </div>
 
             <div id="settingsStatus" class="status-message" style="display: none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="postModal" class="post-modal" style="display: none">
+      <div class="post-modal__backdrop"></div>
+      <div class="post-modal__sheet">
+        <div class="post-modal__hdr">
+          <h3>Post drafts</h3>
+          <button id="postModalClose" class="post-modal__close">✕</button>
+        </div>
+        <div id="postModalBody" class="post-modal__body">
+          <div class="post-modal__loading">
+            <i class="fa fa-circle-notch fa-spin"></i> Drafting…
           </div>
         </div>
       </div>

@@ -45,6 +45,13 @@ import {
   type AppendInput,
 } from './action-log';
 import { maybeAdvanceStreak, weeklyProgress, weakestPillar } from './cadence';
+import {
+  dismissRetro,
+  getCardsOrRefresh,
+  getRetroIfDue,
+  rankDaily,
+  suggestPosts,
+} from './recommender';
 
 console.log('LinkMate background service worker loaded');
 
@@ -245,11 +252,17 @@ const SSI_URL = 'https://www.linkedin.com/sales/ssi';
 
 // ─── Install / lifecycle ────────────────────────────────────────────────────
 
+const RECOMMENDER_ALARM_NAME = 'linkmate.recommender.daily';
+
+/** Register alarms defensively at every SW startup. chrome.alarms.create
+ *  with the same name+period is a no-op for an existing alarm, so this is
+ *  cheap. Belt-and-suspenders vs an `onInstalled` we might miss. */
+chrome.alarms.create(SSI_ALARM_NAME, { periodInMinutes: 1440 });
+chrome.alarms.create(RECOMMENDER_ALARM_NAME, { periodInMinutes: 1440 });
+
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('Extension installed:', details.reason);
   chrome.storage.local.set({ hasUsedExtension: true });
-  chrome.alarms.create(SSI_ALARM_NAME, { periodInMinutes: 1440 });
-  console.log(`⏰ Registered daily SSI alarm: ${SSI_ALARM_NAME} (every 1440 min)`);
 });
 
 // ─── Message router ─────────────────────────────────────────────────────────
@@ -415,6 +428,37 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
     return true;
   }
+  if (request.action === 'recommender.getCards') {
+    getCardsOrRefresh()
+      .then((state) => sendResponse({ ok: true, state }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'recommender.refresh') {
+    rankDaily()
+      .then((state) => sendResponse({ ok: true, state }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'recommender.suggestPosts') {
+    suggestPosts()
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'recommender.getRetro') {
+    getRetroIfDue()
+      .then((retro) => sendResponse({ ok: true, retro }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'recommender.dismissRetro') {
+    dismissRetro()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+
   if (request.action === 'cadence.streak') {
     Promise.all([getCadenceStreak(), maybeAdvanceStreak()])
       .then(([prior, advance]) =>
@@ -548,19 +592,30 @@ async function startSsiCapture(): Promise<SsiSnapshot> {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== SSI_ALARM_NAME) return;
-  console.log('⏰ SSI daily alarm fired');
-  startSsiCapture()
-    .then(async (snap) => {
-      await appendSsiSnapshot(snap);
-      await clearSsiLastError();
-      console.log(`✅ SSI snapshot captured: total=${snap.total}`);
-    })
-    .catch(async (err) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn('⚠️ SSI daily capture failed:', msg);
-      await setSsiLastError({ message: msg, capturedAt: Date.now() });
-    });
+  if (alarm.name === SSI_ALARM_NAME) {
+    console.log('⏰ SSI daily alarm fired');
+    startSsiCapture()
+      .then(async (snap) => {
+        await appendSsiSnapshot(snap);
+        await clearSsiLastError();
+        console.log(`✅ SSI snapshot captured: total=${snap.total}`);
+        // Chain recommender refresh — fresh SSI improves the prompt context.
+        rankDaily().catch((err) =>
+          console.warn('Post-SSI recommender refresh failed:', err),
+        );
+      })
+      .catch(async (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('⚠️ SSI daily capture failed:', msg);
+        await setSsiLastError({ message: msg, capturedAt: Date.now() });
+      });
+    return;
+  }
+  if (alarm.name === RECOMMENDER_ALARM_NAME) {
+    console.log('⏰ Recommender daily alarm fired');
+    rankDaily().catch((err) => console.warn('Recommender daily refresh failed:', err));
+    return;
+  }
 });
 
 // ─── Engagement Queue handlers ──────────────────────────────────────────────
