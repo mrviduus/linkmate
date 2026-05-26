@@ -74,13 +74,26 @@ async function autoOpenProfileIfStale(reason: 'install' | 'startup'): Promise<vo
       await waitForTabComplete(tab.id, 15000);
     }
 
-    // Try to open the popup so the user gets a zero-click capture. Requires
-    // Chrome 127+ and a pinned extension; fails silently otherwise.
+    // Open a DETACHED popup window (not the transient action popup). Detached
+    // windows survive tab navigation — critical because the capture flow
+    // hops between /in/me/, /recent-activity/all/, /comments/, then back.
+    // The action popup would close the moment focus shifts to the LinkedIn tab.
     try {
-      await chrome.action.openPopup();
-      console.log('[LinkMate] popup opened programmatically');
+      await chrome.windows.create({
+        url: chrome.runtime.getURL(`popup.html?targetTab=${tab.id ?? ''}&auto=1`),
+        type: 'popup',
+        width: 440,
+        height: 720,
+        focused: true,
+      });
+      console.log('[LinkMate] detached popup opened');
     } catch (err) {
-      console.warn('[LinkMate] chrome.action.openPopup() unavailable — user can click the icon:', err);
+      console.warn('[LinkMate] chrome.windows.create failed — falling back to action popup:', err);
+      try {
+        await chrome.action.openPopup();
+      } catch {
+        /* user can click icon manually */
+      }
     }
   } catch (err) {
     console.warn('[LinkMate] autoOpenProfileIfStale failed:', err);

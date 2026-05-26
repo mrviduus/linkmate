@@ -152,19 +152,43 @@ async function refreshProfileDisplay(): Promise<void> {
 }
 
 /**
- * If the active tab isn't already on a LinkedIn profile, navigate it to
- * /in/me/ (LinkedIn auto-redirects to the user's own handle) and wait until
- * the page is loaded. Returns true once the tab is on a profile URL.
+ * Read a `targetTab` query param from the popup URL. When the background
+ * service worker opens us in a detached chrome.windows.create() popup, it
+ * passes the LinkedIn tab id so we don't end up grabbing this popup's own
+ * window as the "active currentWindow" tab.
+ */
+function getTargetTabId(): number | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('targetTab');
+    if (id && /^\d+$/.test(id)) return Number(id);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function getLinkedInTabId(): Promise<number | null> {
+  const explicit = getTargetTabId();
+  if (explicit !== null) return explicit;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab?.id ?? null;
+}
+
+/**
+ * If the LinkedIn tab isn't already on a profile, navigate it to /in/me/.
+ * Returns true once the tab is on a profile URL.
  */
 async function ensureOnOwnProfile(): Promise<boolean> {
   const PROFILE_URL_RE = /^https?:\/\/(www\.)?linkedin\.com\/in\/[^/?#]+\/?(\?[^#]*)?(#.*)?$/;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return false;
+  const tabId = await getLinkedInTabId();
+  if (tabId === null) return false;
+  const tab = await chrome.tabs.get(tabId);
   if (PROFILE_URL_RE.test(tab.url ?? '')) return true;
-  await chrome.tabs.update(tab.id, { url: 'https://www.linkedin.com/in/me/' });
+  await chrome.tabs.update(tabId, { url: 'https://www.linkedin.com/in/me/' });
   await new Promise<void>((resolve) => {
     const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
-      if (id === tab.id && info.status === 'complete') {
+      if (id === tabId && info.status === 'complete') {
         chrome.tabs.onUpdated.removeListener(listener);
         resolve();
       }

@@ -70,6 +70,23 @@ interface ProfileCaptureResponse {
   error?: string;
 }
 
+/**
+ * Detached popup windows (chrome.windows.create) become their own
+ * "currentWindow" — so chrome.tabs.query({active,currentWindow:true}) returns
+ * the popup itself, NOT the LinkedIn tab. The background passes the real tab
+ * id via ?targetTab=… so we can target it explicitly.
+ */
+function getExplicitTargetTabId(): number | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('targetTab');
+    if (id && /^\d+$/.test(id)) return Number(id);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export class ProfileContextService {
   async capture(): Promise<CaptureResult> {
     // Issue #16 — when full-capture is ON and IDB snapshot is <24h, short-circuit
@@ -89,11 +106,17 @@ export class ProfileContextService {
       }
     }
 
-    // Step 1: active tab
+    // Step 1: target tab — prefer explicit ?targetTab= from detached-popup URL,
+    // fall back to active tab in current window for the action-popup case.
     let activeTab: chrome.tabs.Tab | undefined;
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      activeTab = tabs[0];
+      const explicitId = getExplicitTargetTabId();
+      if (explicitId !== null) {
+        activeTab = await chrome.tabs.get(explicitId);
+      } else {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        activeTab = tabs[0];
+      }
     } catch (err) {
       return {
         ok: false,
@@ -134,41 +157,43 @@ export class ProfileContextService {
           const originalScroll = window.scrollY;
           const main = document.querySelector('main');
 
-          // LinkedIn's SDUI lazy-loads Experience/Education/Skills/Projects
-          // sections only as they enter the viewport — and the page's
-          // scrollHeight GROWS as more sections hydrate. So:
-          //   1) scroll to bottom
-          //   2) wait
-          //   3) if scrollHeight grew OR target h2 not yet present → repeat
-          //   4) cap at 12 attempts (~12s) to avoid runaway
-          const targets = /^(experience|education|skills(\s*\(\d+\))?|licenses\s*&|certifications?|languages?)/i;
-          const hasTargetHeading = () =>
-            Array.from((main ?? document).querySelectorAll('h2, h3')).some((h) =>
-              targets.test((h.textContent ?? '').trim()),
-            );
-
+          // Grow-scroll: LinkedIn lazy-loads Experience/Education/Skills/Projects
+          // sections only when scrolled into view, and scrollHeight grows with
+          // each hydration. Cap ~30s to bound runaway.
           let lastHeight = 0;
           let stableCount = 0;
-          for (let i = 0; i < 12; i++) {
+          for (let i = 0; i < 24; i++) {
             const h = Math.max(
               document.documentElement.scrollHeight,
               document.body.scrollHeight,
               main?.scrollHeight ?? 0,
             );
             window.scrollTo({ top: h, behavior: 'instant' });
-            // Some LinkedIn layouts put scroll on <main>; covering both.
             if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
             document.documentElement.scrollTop = h;
-            await wait(900);
-            if (hasTargetHeading() && h === lastHeight) break;
+            await wait(1200);
             if (h === lastHeight) {
               stableCount++;
-              if (stableCount >= 2) break;
+              if (stableCount >= 3) break;
             } else {
               stableCount = 0;
             }
             lastHeight = h;
           }
+
+          // Final pass: scrollIntoView every section heading we found so the
+          // SDUI XHR for each card definitely fires before we grab the HTML.
+          const all = Array.from((main ?? document).querySelectorAll('h2, h3'));
+          for (const h of all) {
+            try {
+              h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+              await wait(400);
+            } catch {
+              /* ignore */
+            }
+          }
+          await wait(800);
+
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
           await wait(300);
