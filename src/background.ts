@@ -224,6 +224,12 @@ function trimToTwoSentences(reply: string): string {
   return max + (reply.endsWith('?') ? '' : '.');
 }
 
+// ─── SSI alarm constant (hoisted; install listener references it below) ────
+
+const SSI_ALARM_NAME = 'linkmate.ssi.daily';
+const SSI_CAPTURE_TIMEOUT_MS = 30_000;
+const SSI_URL = 'https://www.linkedin.com/sales/ssi';
+
 // ─── Install / lifecycle ────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -415,9 +421,6 @@ interface PendingSsiCapture {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 let pendingSsiCapture: PendingSsiCapture | null = null;
-const SSI_CAPTURE_TIMEOUT_MS = 30_000;
-const SSI_ALARM_NAME = 'linkmate.ssi.daily';
-const SSI_URL = 'https://www.linkedin.com/sales/ssi';
 
 async function startSsiCapture(): Promise<SsiSnapshot> {
   if (pendingSsiCapture) throw new Error('SSI capture already in progress');
