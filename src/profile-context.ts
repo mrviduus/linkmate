@@ -157,13 +157,14 @@ export class ProfileContextService {
           const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
           const originalScroll = window.scrollY;
           const main = document.querySelector('main');
+          const scope = main ?? document;
 
-          // Grow-scroll: LinkedIn lazy-loads Experience/Education/Skills/Projects
-          // sections only when scrolled into view, and scrollHeight grows with
-          // each hydration. Cap ~30s to bound runaway.
+          // Phase 1 — grow-scroll the page so LinkedIn streams more sections.
+          // Stop only after scrollHeight is stable for ~5s (LinkedIn loads
+          // chunks; pause < hydration latency would bail too early).
           let lastHeight = 0;
           let stableCount = 0;
-          for (let i = 0; i < 24; i++) {
+          for (let i = 0; i < 30; i++) {
             const h = Math.max(
               document.documentElement.scrollHeight,
               document.body.scrollHeight,
@@ -172,33 +173,63 @@ export class ProfileContextService {
             window.scrollTo({ top: h, behavior: 'instant' });
             if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
             document.documentElement.scrollTop = h;
-            await wait(1200);
+            await wait(1000);
             if (h === lastHeight) {
               stableCount++;
-              if (stableCount >= 3) break;
+              if (stableCount >= 5) break;
             } else {
               stableCount = 0;
             }
             lastHeight = h;
           }
 
-          // Final pass: scrollIntoView every section heading we found so the
-          // SDUI XHR for each card definitely fires before we grab the HTML.
-          const all = Array.from((main ?? document).querySelectorAll('h2, h3'));
-          for (const h of all) {
+          // Phase 2 — for each "interesting" h2 section, scrollIntoView and
+          // WAIT until that section actually has hydrated content (>=1 <li>
+          // inside its closest section/componentkey, OR specific item markers).
+          const targets = ['experience', 'education', 'skills', 'licenses', 'languages', 'projects', 'certifications'];
+          const headings = Array.from(scope.querySelectorAll('h2, h3')) as HTMLElement[];
+          for (const t of targets) {
+            const h = headings.find((el) =>
+              new RegExp(`^${t}(\\s*\\(\\d+\\))?\\b`, 'i').test((el.textContent ?? '').trim()),
+            );
+            if (!h) continue;
             try {
               h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
-              await wait(400);
             } catch {
               /* ignore */
             }
+            // Wait up to 4s for the section to grow content.
+            const card = h.closest('section, div[componentkey]');
+            const start = Date.now();
+            while (Date.now() - start < 4000) {
+              const itemCount = card?.querySelectorAll('li').length ?? 0;
+              if (itemCount > 0) break;
+              await wait(300);
+            }
           }
-          await wait(800);
+          // Tiny settle-down before grabbing HTML.
+          await wait(600);
 
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
-          await wait(300);
-          return document.documentElement.outerHTML;
+          await wait(200);
+
+          // Diagnostic dump alongside HTML so popup can console.log it for debug.
+          const diag = {
+            h2List: headings.map((h) => (h.textContent ?? '').trim()).slice(0, 30),
+            sectionItemCounts: targets.map((t) => {
+              const h = headings.find((el) =>
+                new RegExp(`^${t}(\\s*\\(\\d+\\))?\\b`, 'i').test((el.textContent ?? '').trim()),
+              );
+              const card = h?.closest('section, div[componentkey]') ?? null;
+              return { t, found: !!h, items: card?.querySelectorAll('li').length ?? 0 };
+            }),
+          };
+          // Embed diag as a JSON comment at end of HTML so caller can parse it.
+          return (
+            document.documentElement.outerHTML +
+            `\n<!-- LINKMATE_DIAG:${JSON.stringify(diag)} -->`
+          );
         },
       });
       html = (results?.[0]?.result as string | undefined) ?? null;
@@ -220,6 +251,17 @@ export class ProfileContextService {
     // Step 4: parse in popup context
     const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
     const rawFields: RawProfileFields = parseProfileDom(parsedDoc);
+
+    // Extract diagnostic block embedded by the inject script (issue #16 debug)
+    const diagMatch = html.match(/<!-- LINKMATE_DIAG:({[\s\S]*?}) -->/);
+    if (diagMatch) {
+      try {
+        const diag = JSON.parse(diagMatch[1]);
+        console.log('[LinkMate diag]', diag);
+      } catch {
+        /* ignore parse error */
+      }
+    }
 
     // v0.5.2 — sanity check: if EVERY extracted field is empty, the parser
     // doesn't match the current LinkedIn DOM. Surface a loud error instead of
