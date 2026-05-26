@@ -132,15 +132,45 @@ export class ProfileContextService {
         func: async () => {
           const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
           const originalScroll = window.scrollY;
-          // Staged scroll forces LinkedIn's SDUI to hydrate placeholders for
-          // About, Experience, Education, Skills, Activity. Each pause is the
-          // observed ~500-800ms XHR window; total ~5s but bounded.
-          const stops = [0.2, 0.4, 0.6, 0.8, 1.0];
-          for (const r of stops) {
-            window.scrollTo({ top: document.body.scrollHeight * r, behavior: 'instant' });
+          const main = document.querySelector('main');
+
+          // LinkedIn's SDUI lazy-loads Experience/Education/Skills/Projects
+          // sections only as they enter the viewport — and the page's
+          // scrollHeight GROWS as more sections hydrate. So:
+          //   1) scroll to bottom
+          //   2) wait
+          //   3) if scrollHeight grew OR target h2 not yet present → repeat
+          //   4) cap at 12 attempts (~12s) to avoid runaway
+          const targets = /^(experience|education|skills(\s*\(\d+\))?|licenses\s*&|certifications?|languages?)/i;
+          const hasTargetHeading = () =>
+            Array.from((main ?? document).querySelectorAll('h2, h3')).some((h) =>
+              targets.test((h.textContent ?? '').trim()),
+            );
+
+          let lastHeight = 0;
+          let stableCount = 0;
+          for (let i = 0; i < 12; i++) {
+            const h = Math.max(
+              document.documentElement.scrollHeight,
+              document.body.scrollHeight,
+              main?.scrollHeight ?? 0,
+            );
+            window.scrollTo({ top: h, behavior: 'instant' });
+            // Some LinkedIn layouts put scroll on <main>; covering both.
+            if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
+            document.documentElement.scrollTop = h;
             await wait(900);
+            if (hasTargetHeading() && h === lastHeight) break;
+            if (h === lastHeight) {
+              stableCount++;
+              if (stableCount >= 2) break;
+            } else {
+              stableCount = 0;
+            }
+            lastHeight = h;
           }
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
+          if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
           await wait(300);
           return document.documentElement.outerHTML;
         },
@@ -280,13 +310,32 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
       target: { tabId },
       func: async () => {
         const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const main = document.querySelector('main');
         // Extra wait for the SDUI XHR hydration cycle.
         await wait(1500);
-        for (const r of [0.3, 0.6, 1.0]) {
-          window.scrollTo({ top: document.body.scrollHeight * r, behavior: 'instant' });
+        // Loop scroll while scrollHeight grows OR until 10 attempts.
+        let lastHeight = 0;
+        let stable = 0;
+        for (let i = 0; i < 10; i++) {
+          const h = Math.max(
+            document.documentElement.scrollHeight,
+            document.body.scrollHeight,
+            main?.scrollHeight ?? 0,
+          );
+          window.scrollTo({ top: h, behavior: 'instant' });
+          if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
+          document.documentElement.scrollTop = h;
           await wait(900);
+          if (h === lastHeight) {
+            stable++;
+            if (stable >= 2) break;
+          } else {
+            stable = 0;
+          }
+          lastHeight = h;
         }
         window.scrollTo({ top: 0, behavior: 'instant' });
+        if (main && 'scrollTo' in main) main.scrollTo({ top: 0, behavior: 'instant' });
         await wait(300);
         return document.documentElement.outerHTML;
       },
