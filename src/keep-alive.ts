@@ -3,7 +3,7 @@
  *
  * Per Constitution v1.1 §VII (Service Worker Lifecycle, NON-NEGOTIABLE):
  *   MV3 SWs suspend after ~30s of event-loop idle. Long-running flows
- *   (SSI capture in a background tab, profile-capture WebLLM inference,
+ *   (SSI capture in a background tab, profile-capture OpenAI request,
  *   model cold-load) must wrap themselves in keepAlive.start()/stop() to
  *   prevent the SW from being killed mid-operation.
  *

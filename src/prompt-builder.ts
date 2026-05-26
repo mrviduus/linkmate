@@ -2,14 +2,14 @@
  * T021 — Prompt builder (Phase A foundation).
  *
  * Pure, deterministic prompt templates for LinkedIn engagement drafts.
- * No side effects, no I/O, no WebLLM calls — that's the caller's job.
+ * No side effects, no I/O, no OpenAI calls — that's the caller's job.
  *
  * Three exports:
  *   - buildCommentPrompt  → engagement-queue draft for a feed post
  *   - buildConnectionNotePrompt → ≤300-char connection note for a target profile
  *   - buildPositioningPrompt → 2-sentence positioning summary used in every other prompt
  *
- * All return { system, user } so callers can pass each to WebLLM as separate roles.
+ * All return { system, user } so callers can pass each to the provider as separate roles.
  */
 
 import type { ProfileContext, ParsedPost, ToneKey, LengthKey } from './storage-schema';
