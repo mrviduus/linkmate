@@ -244,13 +244,11 @@ async function fetchActivityHtml(handle: string, kind: 'all' | 'comments'): Prom
   try {
     const res = await fetch(target, { credentials: 'include' });
     if (!res.ok) return null;
+    // Detect login wall via final URL — LinkedIn 302's unauthenticated requests
+    // to /login or /authwall. Cheaper and more reliable than scanning the body.
+    if (/\/(login|authwall|uas\/login|checkpoint)/i.test(res.url)) return null;
     const html = await res.text();
-    // Login-wall heuristic: returned HTML lacks the <main> we expect, or
-    // contains the auth-wall marker. Treat as empty rather than crashing.
-    if (!html || html.length < 1000 || /authwall|sign\s*in/i.test(html.slice(0, 5000)) &&
-        !html.includes('feed-shared-update-v2') && !html.includes('urn:li:activity')) {
-      return null;
-    }
+    if (!html || html.length < 1000) return null;
     return new DOMParser().parseFromString(html, 'text/html');
   } catch (err) {
     console.warn(`[LinkMate] fetch recent-activity/${kind} failed:`, err);

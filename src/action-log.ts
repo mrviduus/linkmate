@@ -88,7 +88,7 @@ export async function pendingOutcomes(olderThanMs = 24 * 60 * 60 * 1000): Promis
   const all = await db.getAllFromIndex('actions', 'by-ts', IDBKeyRange.upperBound(cutoff));
   const outcomes = await db.getAll('outcomes');
   const actionsWithOutcome = new Set(outcomes.map((o) => o.actionId));
-  return all.filter((a) => a.submitted && a.id != null && !actionsWithOutcome.has(a.id));
+  return all.filter((a) => a.submitted && a.id !== undefined && !actionsWithOutcome.has(a.id));
 }
 
 /** Attach outcome metrics to an action. Source is 'auto' (content script) or 'manual' (popup chip). */

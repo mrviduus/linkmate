@@ -414,25 +414,28 @@ function parseEngagement(scope: Element): { likes: number; comments: number; rep
 
 export function parseRecentPosts(doc: Document | DocumentFragment): UserProfile['recentPosts'] {
   const out: UserProfile['recentPosts'] = [];
+  // Anchor on the stable `urn:li:activity:*` data attribute. Hash classes
+  // (`feed-shared-update-v2`, `update-components-*`) drift between releases
+  // and are intentionally avoided as primary selectors.
   const updates = doc.querySelectorAll(
-    'div.feed-shared-update-v2, [data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
+    '[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
   );
   for (const el of Array.from(updates)) {
     const id = extractUrn(el);
     if (out.find((p) => p.id === id)) continue;
-    // Post body
+    // Post body — prefer LinkedIn's data-test-id; fall back to dir="ltr"
+    // (which wraps user-authored text) or a long aria-labelled block.
     const textEl =
-      el.querySelector('[data-test-id="main-feed-activity-card__commentary"]') ??
-      el.querySelector('.feed-shared-update-v2__description') ??
-      el.querySelector('.update-components-text') ??
+      el.querySelector('[data-test-id*="commentary" i]') ??
+      el.querySelector('[data-test-id*="activity-card" i] [dir="ltr"]') ??
       el.querySelector('[dir="ltr"]');
     const text = textEl ? readText(textEl) : '';
     if (text.length < MIN_POST_TEXT_LEN) continue;
     const tsEl = el.querySelector('time, [aria-label*="ago" i]');
     const timestamp = tsEl ? readText(tsEl) || tsEl.getAttribute('datetime') || '' : '';
     const isRepost =
-      !!el.querySelector('.update-components-header__text-view, [data-test-id*="repost" i]') ||
-      /reposted/i.test(readText(el).slice(0, 200));
+      !!el.querySelector('[data-test-id*="repost" i], [aria-label*="reposted" i]') ||
+      /\breposted\b/i.test(readText(el).slice(0, 200));
     const engagement = parseEngagement(el);
     out.push({ id, text, timestamp, engagement, isRepost });
     if (out.length >= MAX_RECENT_POSTS) break;
@@ -445,35 +448,32 @@ export function parseRecentComments(
   doc: Document | DocumentFragment
 ): UserProfile['recentComments'] {
   const out: UserProfile['recentComments'] = [];
-  // LinkedIn renders each comment card with the parent post above it.
+  // Each card on /recent-activity/comments/ wraps the parent post (a feedshare
+  // urn) and one or more comment urns inside it. Anchor on the activity urn.
   const cards = doc.querySelectorAll(
-    '.profile-creator-shared-feed-update__container, [data-urn^="urn:li:activity"], li.profile-creator-shared-feed-update__container'
+    '[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
   );
   for (const card of Array.from(cards)) {
     const id = extractUrn(card);
     if (out.find((c) => c.id === id)) continue;
 
-    // Comment body — last/innermost "commentary" block.
-    const commentBlocks = card.querySelectorAll(
-      '.comments-comment-item-content-body, .comments-comment-item__main-content, .feed-shared-update-v2__commentary'
-    );
-    const commentEl =
-      commentBlocks[commentBlocks.length - 1] ?? card.querySelector('[dir="ltr"]');
-    const text = commentEl ? readText(commentEl) : '';
-    if (!text) continue;
+    // Two text regions live inside one card: the parent post (top) and the
+    // user's comment (bottom). LinkedIn marks each text block with dir="ltr".
+    // First [dir="ltr"] = parent post; last [dir="ltr"] = the user's comment.
+    const textBlocks = Array.from(card.querySelectorAll('[dir="ltr"]'))
+      .map((el) => readText(el))
+      .filter((t) => t.length > 0);
+    if (textBlocks.length < 2) continue;
 
-    // Parent post — first "commentary" block, or update-components-text.
-    const parentBlocks = card.querySelectorAll(
-      '.feed-shared-update-v2__description, .update-components-text'
-    );
-    const parentEl = parentBlocks[0];
-    const originalPostText = parentEl ? readText(parentEl) : '';
+    const originalPostText = textBlocks[0];
+    const text = textBlocks[textBlocks.length - 1];
+    if (!text || text === originalPostText) continue;
 
-    // Original author — actor name in the parent block.
+    // Original author — first entity lockup / link to /in/ inside the card.
     const actorEl =
-      card.querySelector(
-        '.update-components-actor__title, .feed-shared-actor__name, [data-test-id="main-feed-activity-card__entity-lockup-name"]'
-      ) ?? null;
+      card.querySelector('[data-test-id*="entity-lockup-name" i]') ??
+      card.querySelector('a[href*="/in/"] span[aria-hidden="true"]') ??
+      card.querySelector('a[href*="/in/"]');
     const originalAuthor = actorEl ? readText(actorEl) : '';
 
     if (!originalPostText || !originalAuthor) {
