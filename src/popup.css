@@ -480,3 +480,172 @@ body {
   display: flex;
   gap: 8px;
 }
+
+/* ── Streak badge in header ───────────────────────────────────────────── */
+
+.streak-badge {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #fff3cd;
+  color: #856404;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.streak-badge i {
+  color: #e25b00;
+}
+
+/* ── Cadence bars (Today) ─────────────────────────────────────────────── */
+
+.cadence-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.cadence-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 50px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.cadence-label {
+  color: #424a52;
+}
+
+.cadence-track {
+  height: 8px;
+  background: #e6ebf0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.cadence-fill {
+  height: 100%;
+  background: #0a66c2;
+  width: 0%;
+  transition: width 0.4s ease;
+}
+
+.cadence-row.weakest .cadence-fill {
+  background: #c33;
+}
+
+.cadence-row.complete .cadence-fill {
+  background: #1a6b1a;
+}
+
+.cadence-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #6a737d;
+}
+
+/* ── Recommend cards ──────────────────────────────────────────────────── */
+
+.recommend-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.recommend-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e1e4e8;
+  border-left: 3px solid #0a66c2;
+  border-radius: 6px;
+}
+
+.recommend-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.recommend-card__reason {
+  font-size: 11px;
+  color: #6a737d;
+}
+
+.recommend-card__action {
+  align-self: flex-start;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #0a66c2;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.recommend-card__action:hover {
+  background: #084d92;
+}
+
+/* ── Pending outcome chips ────────────────────────────────────────────── */
+
+.pending-chips {
+  margin-top: 12px;
+}
+
+.pending-chips__hdr {
+  font-size: 12px;
+  font-weight: 600;
+  color: #424a52;
+  margin-bottom: 6px;
+}
+
+.pending-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f6f8fa;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.pending-chip__text {
+  flex: 1;
+  color: #424a52;
+}
+
+.pending-chip__btn {
+  padding: 2px 8px;
+  font-size: 14px;
+  background: transparent;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pending-chip__btn:hover {
+  background: #fff;
+}
+
+/* ── Cadence targets form ─────────────────────────────────────────────── */
+
+.cadence-targets-form {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.cadence-targets-form .provider-field input {
+  width: 100%;
+}
