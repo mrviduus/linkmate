@@ -346,16 +346,18 @@ function parseTopcardMeta(
     }
   }
 
-  // Location: the topcard renders the city/region/country as a short line
-  // that contains neither "connections", "followers", "Contact info", nor a "·".
-  // It also doesn't contain '|' (used by headlines). Pick the first such line
-  // up to 80 chars, AFTER the name h2.
+  // Location: a short text line inside topcard, AFTER the name h2, that doesn't
+  // contain headline markers (`|`, `·`) or status words (connections, etc.).
+  // For Vasyl this is "Canada"; for others may be "Waterloo, Ontario, Canada".
+  const all = Array.from(topcard.querySelectorAll('*'));
   const nameH2 = topcard.querySelector('h2');
-  const after = nameH2 ? walkSiblings(nameH2) : Array.from(topcard.querySelectorAll('p, span, div'));
+  const startIdx = nameH2 ? all.indexOf(nameH2) : -1;
+  const after = startIdx >= 0 ? all.slice(startIdx + 1) : all;
   for (const el of after) {
     const t = readText(el);
     if (!t || t.length > 80) continue;
     if (/connection|follower|contact info|premium|•|·|\|/i.test(t)) continue;
+    // Allow single-token country names ("Canada") OR comma-separated city tuples.
     if (/^[A-Za-zА-Яа-яЇЄІїєі' .-]{2,}(,\s*[A-Za-zА-Яа-яЇЄІїєі' .-]{2,}){0,2}$/.test(t)) {
       location = t;
       break;
@@ -364,23 +366,25 @@ function parseTopcardMeta(
   return { location, connectionsCount, followersCount };
 }
 
-function walkSiblings(start: Element): Element[] {
-  // Depth-first, in-order traversal of nodes AFTER `start` within the same root.
-  const root = start.closest('[componentkey]') ?? start.parentElement ?? start;
-  const all = Array.from(root.querySelectorAll('*'));
-  const idx = all.indexOf(start);
-  return idx < 0 ? all : all.slice(idx + 1);
-}
-
 /**
  * Topcard chip line "Pinnacle · Kremenchuk State Polytechnical University" — the
  * current-company + current-school summary. Used as a fallback 1-entry
  * experience / education when /details/* sub-pages are empty.
+ *
+ * IMPORTANT: must exclude headlines like "AI Engineer | RAG · Agents · …".
+ * Headlines contain `|`; the chip line never does.
  */
 function parseTopcardChip(topcard: Element): { company?: string; school?: string } {
   const lines = Array.from(topcard.querySelectorAll('p'))
     .map((p) => readText(p))
-    .filter((t) => t && t.includes(' · ') && t.length < 200);
+    .filter(
+      (t) =>
+        t &&
+        t.includes(' · ') &&
+        !t.includes('|') &&
+        t.length < 200 &&
+        t.split(' · ').length === 2
+    );
   for (const t of lines) {
     const [left, right] = t.split(' · ').map((s) => s.trim());
     if (left && right) return { company: left, school: right };
