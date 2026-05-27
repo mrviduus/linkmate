@@ -259,11 +259,12 @@ function parseEducation(root: Element | Document | DocumentFragment): UserProfil
     warnMiss('education');
     return [];
   }
-  // Education renders as a flat list of <p> tags: school, degree, dateRange,
-  // school, degree, dateRange, ... (3 per entry). No entity-collection-item.
+  // Education renders as a flat list of <p>: school, degree, dateRange,
+  // repeating. Strict 3-per-entry stride; require full triplet to avoid
+  // misalignment when an entry has 2 paragraphs and bleeds into the next.
   const ps = paragraphTexts(section);
   const out: UserProfile['education'] = [];
-  for (let i = 0; i + 2 < ps.length + 1; i += 3) {
+  for (let i = 0; i + 3 <= ps.length; i += 3) {
     const school = ps[i];
     if (!school) continue;
     const degreeLine = ps[i + 1] ?? '';

@@ -343,11 +343,26 @@ async function maybeAutoCapture(): Promise<void> {
   await handleCaptureProfile();
 }
 
+// Module-level guard so concurrent triggers (welcome auto-fire, Hero refresh
+// click, legacy Profile Context button) don't race each other on the same
+// tab — each capture nav-jumps the user's LinkedIn tab, parallel runs would
+// trash each other's state.
+let captureInFlight = false;
+
 async function handleCaptureProfile(): Promise<void> {
-  if (!captureProfileBtn) return;
-  captureProfileBtn.disabled = true;
-  const prevText = captureProfileBtn.innerHTML;
-  captureProfileBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
+  if (captureInFlight) {
+    console.warn('[LinkMate] capture already in flight; ignoring duplicate trigger');
+    return;
+  }
+  captureInFlight = true;
+  if (!captureProfileBtn) {
+    // Allow flow to continue even without the legacy button mounted.
+  }
+  const prevText = captureProfileBtn?.innerHTML;
+  if (captureProfileBtn) {
+    captureProfileBtn.disabled = true;
+    captureProfileBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
+  }
   try {
     await ensureOnOwnProfile();
     const result = await profileService.capture();
@@ -399,8 +414,11 @@ async function handleCaptureProfile(): Promise<void> {
   } catch (err) {
     showProfileMessage(`Unexpected error: ${String(err)}`, 'error');
   } finally {
-    captureProfileBtn.disabled = false;
-    captureProfileBtn.innerHTML = prevText;
+    captureInFlight = false;
+    if (captureProfileBtn) {
+      captureProfileBtn.disabled = false;
+      if (prevText !== undefined) captureProfileBtn.innerHTML = prevText;
+    }
   }
 }
 

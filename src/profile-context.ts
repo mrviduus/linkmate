@@ -97,8 +97,12 @@ export class ProfileContextService {
     if (fullProfileEnabled) {
       try {
         const cached = await getUserProfile();
-        const existingProfile = await getProfile();
-        if (cached && existingProfile && isFresh(cached)) {
+        if (cached && isFresh(cached)) {
+          // IDB is the source of truth for the new flow; legacy chrome.storage
+          // ProfileContext may be absent (e.g. user has no OpenAI key) but the
+          // IDB snapshot is still valid — surface it as cached without forcing
+          // a 30s re-scrape.
+          const existingProfile = (await getProfile()) ?? undefined;
           return { ok: true, profile: existingProfile, cached: true, userProfile: cached };
         }
       } catch (err) {
@@ -365,26 +369,45 @@ function extractHandle(url: string): string | null {
 async function scrapeInActiveTab(tabId: number, url: string): Promise<string | null> {
   await chrome.tabs.update(tabId, { url });
 
-  // Wait for the navigation to fully complete.
+  // Wait for the navigation to fully complete. Two failure modes guarded:
+  //   1) onUpdated 'complete' fires before listener attaches (cached/fast nav).
+  //      → post-attach we re-check tab.status and resolve if already complete.
+  //   2) Listener fires first; setTimeout must be cleared to avoid leaked
+  //      closures across rapid recaptures.
   await new Promise<void>((resolve) => {
-    const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo) => {
-      if (updatedTabId === tabId && info.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-    // Safety: bail after 15s so a hung navigation can't pin us forever.
-    setTimeout(() => {
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timer !== null) clearTimeout(timer);
       chrome.tabs.onUpdated.removeListener(listener);
       resolve();
-    }, 15000);
+    };
+    const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo) => {
+      if (updatedTabId === tabId && info.status === 'complete') finish();
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    timer = setTimeout(finish, 15000);
+    // Catch the case where 'complete' fired between update() and addListener().
+    chrome.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status === 'complete') finish();
+      },
+      () => finish(),
+    );
   });
 
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: async () => {
+        // Authwall guard: LinkedIn 302's expired sessions to /authwall or
+        // /uas/login. We must NOT silently scrape the logged-out shell as
+        // if it were the activity HTML.
+        if (/\/(authwall|login|uas\/login|checkpoint)\b/i.test(window.location.pathname)) {
+          return '__LINKMATE_AUTHWALL__';
+        }
         const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
         const main = document.querySelector('main');
         await wait(900);
@@ -445,11 +468,17 @@ async function captureFullUserProfile(
     const commentsUrl = `https://www.linkedin.com/in/${handle}/recent-activity/comments/`;
     try {
       const postsHtml = await scrapeInActiveTab(tabId, postsUrl);
+      if (postsHtml === '__LINKMATE_AUTHWALL__') {
+        throw new Error('LinkedIn session expired (authwall). Sign in and try again.');
+      }
       if (postsHtml) {
         const d = new DOMParser().parseFromString(postsHtml, 'text/html');
         profile.recentPosts = parseRecentPosts(d);
       }
       const commentsHtml = await scrapeInActiveTab(tabId, commentsUrl);
+      if (commentsHtml === '__LINKMATE_AUTHWALL__') {
+        throw new Error('LinkedIn session expired (authwall). Sign in and try again.');
+      }
       if (commentsHtml) {
         const d = new DOMParser().parseFromString(commentsHtml, 'text/html');
         profile.recentComments = parseRecentComments(d, handle);
