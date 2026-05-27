@@ -164,6 +164,85 @@ export function buildPositioningPrompt(input: BuildPositioningPromptInput): {
   return { system, user };
 }
 
+// ─── buildFeedRankingPrompt ────────────────────────────────────────────────
+
+export interface BuildFeedRankingPromptInput {
+  profile: ProfileContext;
+  posts: ParsedPost[];
+}
+
+export function buildFeedRankingPrompt(input: BuildFeedRankingPromptInput): {
+  system: string;
+  user: string;
+} {
+  const system = [
+    'You are an expert LinkedIn feed curator and reranker.',
+    'Rank posts for this specific technical/software/AI user, not for generic popularity.',
+    '',
+    'Prioritize:',
+    '- technical depth',
+    '- AI engineering and ML systems',
+    '- software infrastructure, distributed systems, privacy, security, data science',
+    '- startup/operator insight',
+    '- strong hiring or networking opportunities for serious technical teams',
+    '- practical industry signals and non-obvious market context',
+    '',
+    'Penalize:',
+    '- generic motivation',
+    '- engagement bait',
+    '- vague personal branding',
+    '- low-information reposts',
+    '- recruiter spam',
+    '- sponsored/promotional content',
+    '- shallow AI hype',
+    '',
+    'Return strict JSON only. No markdown fences, no prose.',
+    'Use this exact shape:',
+    '{"items":[{"id":"<post id>","score":8.2,"highlight":true,"whyItRanks":"<1 sentence>","strongPoints":["<sentence>"],"especiallyRelevantBecause":["<sentence>"],"whatThisProvides":["<sentence>"],"weaknesses":["<sentence>"],"tags":["<short tag>"],"recommendation":"<1-2 sentences>"}]}',
+    '',
+    'Rules:',
+    '- Include exactly one item for every input post id.',
+    '- score is 0.0 to 10.0 with one decimal place.',
+    '- highlight is true only for posts the user should prioritize.',
+    '- Keep arrays concise: 2-5 strongPoints, 1-4 especiallyRelevantBecause, 1-4 whatThisProvides, 0-3 weaknesses, 2-6 tags.',
+    '- Every reason must name concrete signals from the post/profile data.',
+  ].join('\n');
+
+  const posts = input.posts.map((p, i) => ({
+    id: p.id,
+    index: i,
+    authorName: p.authorName,
+    authorTitle: p.authorTitle,
+    followerTier: p.followerTier,
+    relationship: p.degree,
+    engagement: {
+      likes: p.likeCount,
+      comments: p.commentCount,
+    },
+    postedAt: p.postedAt,
+    isOwn: p.isOwn,
+    text: p.text.slice(0, 1200),
+  }));
+
+  const user = JSON.stringify(
+    {
+      user_profile: {
+        fullName: input.profile.fullName,
+        headline: input.profile.headline,
+        about: input.profile.about.slice(0, 1200),
+        topSkills: input.profile.topSkills,
+        recentPostThemes: input.profile.recentPostThemes,
+        positioningSummary: input.profile.positioningSummary,
+      },
+      posts,
+    },
+    null,
+    2
+  );
+
+  return { system, user };
+}
+
 // ─── Phase C: Recommender + Post-draft + Weekly retro ──────────────────────
 
 export interface BuildRecommenderPromptInput {

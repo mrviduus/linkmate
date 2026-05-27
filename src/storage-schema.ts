@@ -171,9 +171,10 @@ export interface QueuePreferences {
 export interface FeedAnalysisState {
   apiVersion: 'linkmate.feed.analysis.v1';
   generatedAt: number;
-  source: 'local_heuristic' | 'debug_fallback';
+  source: 'ai' | 'local_heuristic';
   profileCapturedAt: number;
   items: FeedPostAnalysis[];
+  warning?: string;
 }
 
 /**

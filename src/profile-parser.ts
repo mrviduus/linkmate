@@ -50,6 +50,17 @@ function readText(el: Element | null | undefined): string {
   return (el.textContent ?? '').trim().replace(/\s+/g, ' ');
 }
 
+function isPlaceholderText(text: string): boolean {
+  return /posts you share will be displayed here|show all posts|no posts yet/i.test(text);
+}
+
+function cleanDocumentTitle(title: string): string {
+  return title
+    .replace(/\s*\|\s*LinkedIn\s*$/i, '')
+    .replace(/\s*-\s*LinkedIn\s*$/i, '')
+    .trim();
+}
+
 export function parseProfileDom(doc: Document | DocumentFragment): RawProfileFields {
   // LinkedIn 2026 puts the sticky-header h1 OUTSIDE <main>. Limiting search to
   // <main> means we get the topcard h1 (the visually-large one with the name).
@@ -59,7 +70,11 @@ export function parseProfileDom(doc: Document | DocumentFragment): RawProfileFie
   // ─── Name ────────────────────────────────────────────────────────────────
   // First h1 inside <main>. LinkedIn's topcard puts the name here regardless of
   // class name churn.
-  const fullName = readText(root.querySelector('h1'));
+  let fullName = readText(root.querySelector('h1'));
+  if (!fullName && 'querySelector' in doc) {
+    const title = readText(doc.querySelector('title'));
+    fullName = cleanDocumentTitle(title);
+  }
 
   // ─── Headline ────────────────────────────────────────────────────────────
   // Strategy A: find the topcard container with aria-label === fullName, then
@@ -99,6 +114,11 @@ export function parseProfileDom(doc: Document | DocumentFragment): RawProfileFie
       break;
     }
   }
+  if (!headline) {
+    headline = readText(
+      root.querySelector('.text-body-medium.break-words, .text-body-medium')
+    );
+  }
 
   // Headings cached for the next three sections.
   const headings = Array.from(root.querySelectorAll('h2, h3'));
@@ -116,6 +136,12 @@ export function parseProfileDom(doc: Document | DocumentFragment): RawProfileFie
     const cleaned = sectionText.replace(/^about\s+/i, '').trim();
     about = cleaned.slice(0, ABOUT_MAX_CHARS);
     break;
+  }
+  if (!about) {
+    about = readText(root.querySelector('#about .inline-show-more-text, #about')).slice(
+      0,
+      ABOUT_MAX_CHARS
+    );
   }
   if (!about) {
     // Fallback: scan componentkey placeholders for ones that mention "About"
@@ -151,6 +177,16 @@ export function parseProfileDom(doc: Document | DocumentFragment): RawProfileFie
       }
     }
   }
+  if (topSkills.length === 0) {
+    const legacySkills = root.querySelectorAll('#skills .t-bold span[aria-hidden="true"], #skills h3');
+    for (const item of Array.from(legacySkills)) {
+      const s = readText(item);
+      if (!s || s.length < 2 || s.length > 80) continue;
+      if (topSkills.includes(s)) continue;
+      topSkills.push(s);
+      if (topSkills.length >= MAX_TOP_SKILLS) break;
+    }
+  }
 
   // ─── Recent post themes / Activity ───────────────────────────────────────
   const recentPostThemes: string[] = [];
@@ -162,12 +198,25 @@ export function parseProfileDom(doc: Document | DocumentFragment): RawProfileFie
       for (const t of Array.from(texts)) {
         const s = readText(t);
         if (!s) continue;
+        if (isPlaceholderText(s)) continue;
         if (s.length < 30 || s.length > 500) continue;
         if (/^activity$|^posts$|^show all/i.test(s)) continue;
         if (recentPostThemes.includes(s)) continue;
         recentPostThemes.push(s);
         if (recentPostThemes.length >= MAX_RECENT_POST_THEMES) break;
       }
+    }
+  }
+  if (recentPostThemes.length === 0) {
+    const legacyThemes = root.querySelectorAll(
+      '#content_collections .update-components-text span[aria-hidden="true"]'
+    );
+    for (const item of Array.from(legacyThemes)) {
+      const s = readText(item);
+      if (!s || isPlaceholderText(s)) continue;
+      if (recentPostThemes.includes(s)) continue;
+      recentPostThemes.push(s);
+      if (recentPostThemes.length >= MAX_RECENT_POST_THEMES) break;
     }
   }
 

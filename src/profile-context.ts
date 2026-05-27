@@ -149,6 +149,20 @@ export class ProfileContextService {
           "Profile parser couldn't read any fields from this page. LinkedIn's DOM may have changed — please report this. (Tip: run scripts/dump-linkedin-profile-dom.js in DevTools and share the JSON.)",
       };
     }
+    if (
+      !rawFields.fullName ||
+      (!rawFields.headline &&
+        !rawFields.about &&
+        rawFields.topSkills.length === 0 &&
+        rawFields.recentPostThemes.length === 0)
+    ) {
+      return {
+        ok: false,
+        reason: 'script-failed',
+        message:
+          'Profile capture found incomplete profile details. Make sure your real LinkedIn profile page is fully loaded, then try again.',
+      };
+    }
 
     // Step 5 + 6: ship raw fields to background, get positioning summary
     let response: ProfileCaptureResponse;

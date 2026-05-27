@@ -7,10 +7,10 @@
  */
 
 import { keepAlive } from './keep-alive';
-import { buildPositioningPrompt, buildCommentPrompt } from './prompt-builder';
+import { buildPositioningPrompt, buildCommentPrompt, buildFeedRankingPrompt } from './prompt-builder';
 import type { RawProfileFields } from './profile-parser';
 import { scoreRelevance } from './relevance-scorer';
-import { buildFeedPostAnalysis } from './feed-analysis';
+import { buildFeedPostAnalysis, parseAiFeedAnalysis } from './feed-analysis';
 import { getActiveProvider } from './providers';
 import {
   getProfile,
@@ -32,6 +32,7 @@ import {
 } from './storage-schema';
 import type {
   FeedAnalysisState,
+  FeedPostAnalysis,
   ParsedPost,
   ProfileContext,
   ScoredPost,
@@ -642,11 +643,9 @@ async function handleQueueScoreFeed(
 ): Promise<void> {
   try {
     let profile = await getProfile();
-    let source: FeedAnalysisState['source'] = 'local_heuristic';
     if (!profile) {
       if (options.allowDebugProfile) {
         profile = makeDebugProfile();
-        source = 'debug_fallback';
       } else {
         sendResponse({
           ok: false,
@@ -660,7 +659,42 @@ async function handleQueueScoreFeed(
     const dismissedIds = new Set(dismissed);
     const recentlyDisplayedAuthors: string[] = [];
     const generatedAt = Date.now();
-    const scored: ScoredPost[] = posts.map((p) => {
+    const activePosts = posts.filter(
+      (post) => !engagedIds.has(post.id) && !dismissedIds.has(post.id) && !post.isOwn
+    );
+    const limitedPosts = activePosts.slice(0, 20);
+
+    let analysisItems: FeedPostAnalysis[] | null = null;
+    let source: FeedAnalysisState['source'] = 'ai';
+    let warning: string | undefined;
+
+    if (limitedPosts.length > 0) {
+      try {
+        const provider = await getActiveProvider();
+        const { system, user } = buildFeedRankingPrompt({ profile, posts: limitedPosts });
+        const raw = await provider.generate({
+          system,
+          user,
+          maxTokens: 4000,
+          temperature: 0.2,
+          topP: 0.9,
+          timeoutMs: 60_000,
+        });
+        analysisItems = parseAiFeedAnalysis({ raw, posts: limitedPosts, generatedAt });
+        if (!analysisItems) {
+          throw new Error('AI returned malformed feed ranking JSON.');
+        }
+      } catch (err) {
+        source = 'local_heuristic';
+        warning = `AI feed ranking failed; used local fallback. ${err instanceof Error ? err.message : String(err)}`;
+        console.warn('[linkmate] AI feed ranking failed, falling back to local scoring:', err);
+      }
+    } else {
+      analysisItems = [];
+    }
+
+    const analysisByPostId = new Map((analysisItems ?? []).map((item) => [item.post.id, item]));
+    const scored: ScoredPost[] = limitedPosts.map((p) => {
       const relevance = scoreRelevance({
         post: p,
         profile,
@@ -670,10 +704,19 @@ async function handleQueueScoreFeed(
           recentlyDisplayedAuthors,
         },
       });
+      const aiAnalysis = analysisByPostId.get(p.id);
       return {
         ...p,
-        relevance,
-        analysis: buildFeedPostAnalysis({ post: p, profile, relevance, generatedAt }),
+        relevance: aiAnalysis
+          ? {
+              score: aiAnalysis.score.raw,
+              reasons: [aiAnalysis.sections.whyItRanks, ...aiAnalysis.sections.strongPoints].filter(
+                Boolean
+              ),
+              category: aiAnalysis.score.category,
+            }
+          : relevance,
+        analysis: aiAnalysis ?? buildFeedPostAnalysis({ post: p, profile, relevance, generatedAt }),
       };
     });
     const analysis: FeedAnalysisState = {
@@ -682,6 +725,7 @@ async function handleQueueScoreFeed(
       source,
       profileCapturedAt: profile.capturedAt,
       items: scored.map((post) => post.analysis!),
+      warning,
     };
     await setFeedAnalysis(analysis);
     sendResponse({ ok: true, scored, analysis });
@@ -749,25 +793,41 @@ async function handleProfileCapture(
 ): Promise<void> {
   keepAlive.start();
   try {
-    const provider = await getActiveProvider();
-    const { system, user } = buildPositioningPrompt({
-      headline: fields.headline,
-      about: fields.about,
-      topSkills: fields.topSkills,
-      recentPostThemes: fields.recentPostThemes,
-    });
-    const positioningSummary = await provider.generate({
-      system,
-      user,
-      maxTokens: 120,
-      temperature: 0.4,
-      topP: 0.9,
-    });
+    let positioningSummary = buildFallbackPositioningSummary(fields);
+    let providerName = 'fallback';
+    let isCloud = false;
+    let warning: string | undefined;
+
+    try {
+      const provider = await getActiveProvider();
+      const { system, user } = buildPositioningPrompt({
+        headline: fields.headline,
+        about: fields.about,
+        topSkills: fields.topSkills,
+        recentPostThemes: fields.recentPostThemes,
+      });
+      positioningSummary = await provider.generate({
+        system,
+        user,
+        maxTokens: 120,
+        temperature: 0.4,
+        topP: 0.9,
+      });
+      providerName = provider.name;
+      isCloud = provider.isCloud;
+    } catch (err) {
+      warning = `Profile captured with fallback summary because AI summary failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      console.warn('[linkmate] profile positioning summary failed; using fallback:', err);
+    }
+
     sendResponse({
       ok: true,
       positioningSummary,
-      provider: provider.name,
-      isCloud: provider.isCloud,
+      provider: providerName,
+      isCloud,
+      warning,
     });
   } catch (err) {
     console.error('profile.capture failed:', err);
@@ -775,6 +835,18 @@ async function handleProfileCapture(
   } finally {
     keepAlive.stop();
   }
+}
+
+function buildFallbackPositioningSummary(fields: RawProfileFields): string {
+  const headline = fields.headline || 'LinkedIn professional';
+  const skills = fields.topSkills.slice(0, 4).join(', ');
+  const themes = fields.recentPostThemes.slice(0, 2).join(', ');
+  const first = `${fields.fullName || 'This person'} is ${headline}.`;
+  const second =
+    skills || themes
+      ? `Their visible profile signals focus on ${[skills, themes].filter(Boolean).join(', ')}.`
+      : 'Their profile context was captured from LinkedIn for feed personalization.';
+  return `${first} ${second}`.slice(0, 280);
 }
 
 // ─── Reply generation (standard + with comments) ────────────────────────────

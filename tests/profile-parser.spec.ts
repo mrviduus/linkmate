@@ -161,6 +161,39 @@ describe('profile-parser (v0.5.6 real-DOM)', () => {
       expect(f.recentPostThemes.length).toBeGreaterThanOrEqual(2);
       expect(f.recentPostThemes[0]).toContain('LinkMate');
     });
+
+    it('ignores LinkedIn empty-activity placeholder copy', () => {
+      const html = `
+        <main>
+          <h1>Name</h1>
+          <p>HR Business Partner | Technology & Product</p>
+          <section>
+            <h2>Activity</h2>
+            <p>Posts you share will be displayed here.</p>
+          </section>
+        </main>
+      `;
+      const f = parse(html);
+      expect(f.recentPostThemes).toEqual([]);
+    });
+  });
+
+  describe('name fallback', () => {
+    it('falls back to document title when the top-card h1 is missing', () => {
+      const html = `
+        <html>
+          <head><title>Jane Doe | LinkedIn</title></head>
+          <body>
+            <main>
+              <p>HR Business Partner | Technology & Product</p>
+            </main>
+          </body>
+        </html>
+      `;
+      const f = parse(html);
+      expect(f.fullName).toBe('Jane Doe');
+      expect(f.headline).toBe('HR Business Partner | Technology & Product');
+    });
   });
 
   describe('robustness', () => {

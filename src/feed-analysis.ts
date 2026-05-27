@@ -149,3 +149,114 @@ export function buildFeedPostAnalysis(input: {
     },
   };
 }
+
+interface AiRankedItem {
+  id?: unknown;
+  score?: unknown;
+  highlight?: unknown;
+  whyItRanks?: unknown;
+  strongPoints?: unknown;
+  especiallyRelevantBecause?: unknown;
+  whatThisProvides?: unknown;
+  weaknesses?: unknown;
+  tags?: unknown;
+  recommendation?: unknown;
+}
+
+interface AiRankedResponse {
+  items?: unknown;
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value.slice(0, 500) : fallback;
+}
+
+function asStringArray(value: unknown, max: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.slice(0, 240))
+    .slice(0, max);
+}
+
+function categoryFromScore(score: number): RelevanceScore['category'] {
+  if (score >= 7) return 'engage_now';
+  if (score >= 4) return 'consider';
+  return 'skip';
+}
+
+function parseJsonObject(raw: string): AiRankedResponse | null {
+  try {
+    return JSON.parse(raw) as AiRankedResponse;
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]) as AiRankedResponse;
+    } catch {
+      return null;
+    }
+  }
+}
+
+export function parseAiFeedAnalysis(input: {
+  raw: string;
+  posts: ParsedPost[];
+  generatedAt?: number;
+}): FeedPostAnalysis[] | null {
+  const parsed = parseJsonObject(input.raw);
+  if (!parsed || !Array.isArray(parsed.items)) return null;
+
+  const byPostId = new Map(input.posts.map((post) => [post.id, post]));
+  const generatedAt = input.generatedAt ?? Date.now();
+  const out: FeedPostAnalysis[] = [];
+
+  for (const rawItem of parsed.items as AiRankedItem[]) {
+    if (!rawItem || typeof rawItem !== 'object') continue;
+    const id = asString(rawItem.id);
+    const post = byPostId.get(id);
+    if (!post) continue;
+
+    const numericScore = typeof rawItem.score === 'number' ? rawItem.score : Number(rawItem.score);
+    const score = Number.isFinite(numericScore) ? Math.max(0, Math.min(10, numericScore)) : 0;
+    const category = categoryFromScore(score);
+
+    out.push({
+      apiVersion: 'linkmate.feed.analysis.v1',
+      generatedAt,
+      post: {
+        id: post.id,
+        authorName: post.authorName,
+        authorTitle: post.authorTitle,
+        authorUrn: post.authorUrn,
+        text: post.text,
+        postedAt: post.postedAt,
+        engagement: {
+          likes: post.likeCount,
+          comments: post.commentCount,
+        },
+        relationship: post.degree,
+        followerTier: post.followerTier,
+        isOwn: post.isOwn,
+      },
+      score: {
+        value: Math.round(score * 10) / 10,
+        raw: Math.round(score * 100) / 10,
+        scale: '0-10',
+        category,
+      },
+      highlight: typeof rawItem.highlight === 'boolean' ? rawItem.highlight : category === 'engage_now',
+      sections: {
+        whyItRanks: asString(rawItem.whyItRanks, 'The model did not provide a ranking reason.'),
+        strongPoints: asStringArray(rawItem.strongPoints, 5),
+        especiallyRelevantBecause: asStringArray(rawItem.especiallyRelevantBecause, 4),
+        whatThisProvides: asStringArray(rawItem.whatThisProvides, 4),
+        weaknesses: asStringArray(rawItem.weaknesses, 3),
+        tags: asStringArray(rawItem.tags, 6),
+        recommendation: asString(rawItem.recommendation, 'No recommendation returned.'),
+      },
+    });
+  }
+
+  return out.length === input.posts.length ? out : null;
+}

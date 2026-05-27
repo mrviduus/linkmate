@@ -769,6 +769,15 @@ async function openPostModal(): Promise<void> {
 
 function closePostModal(): void {
   if (postModal) postModal.style.display = 'none';
+  if (postModalBody) postModalBody.innerHTML = '';
+}
+
+async function resetPostModalOnStartup(): Promise<void> {
+  closePostModal();
+  const state = await readPostDraftsState();
+  if (state.status === 'inFlight' || state.status === 'error') {
+    await writePostDraftsState({ status: 'idle' });
+  }
 }
 
 function shouldStartFresh(state: PostDraftsStateDto): boolean {
@@ -975,6 +984,7 @@ function wire(): void {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  await resetPostModalOnStartup();
   wire();
   await Promise.all([
     loadProviderConfig(),
