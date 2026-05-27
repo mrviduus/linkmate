@@ -399,10 +399,15 @@ export async function setPostDraftsState(s: PostDraftsState): Promise<void> {
 
 // ─── Settings: capture-full-profile toggle (Issue #16) ──────────────────────
 
-/** Whether the popup's Capture Profile button should also scrape activity. Default ON. */
+/**
+ * Whether the popup's Capture Profile button should also scrape activity
+ * (recent posts + recent comments via the user's active tab). Default OFF so
+ * existing users who upgrade don't get silent full-scrape behaviour — only
+ * users who explicitly click Get Started in the welcome flow opt in.
+ */
 export async function getCaptureFullProfile(): Promise<boolean> {
   const stored = await readKey<boolean>(STORAGE_KEYS.captureFullProfile);
-  return stored ?? true;
+  return stored ?? false;
 }
 
 export async function setCaptureFullProfile(value: boolean): Promise<void> {

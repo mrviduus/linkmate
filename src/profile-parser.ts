@@ -325,9 +325,14 @@ function parseSkillsList(root: Element | Document | DocumentFragment): string[] 
   if (!section) return [];
   const ps = paragraphTexts(section);
   const out: string[] = [];
-  for (let i = 0; i < ps.length; i += 2) {
-    const s = ps[i];
+  // LinkedIn renders pairs: <p>skill</p><p>Role at Company</p>. Walk every
+  // <p> but reject the role-context lines so an unexpected stride shift
+  // (extra <p> for endorsement count, separator badge) doesn't pollute
+  // skills with strings like "Senior Software Engineer at Pinnacle".
+  const ROLE_CONTEXT = /\bat\s+\S/i;
+  for (const s of ps) {
     if (!s || s.length < 2 || s.length > 80) continue;
+    if (ROLE_CONTEXT.test(s)) continue;
     if (out.includes(s)) continue;
     out.push(s);
     if (out.length >= MAX_TOP_SKILLS) break;
@@ -376,10 +381,16 @@ function parseTopcardMeta(
   const nameH2 = topcard.querySelector('h2');
   const startIdx = nameH2 ? all.indexOf(nameH2) : -1;
   const after = startIdx >= 0 ? all.slice(startIdx + 1) : all;
+  // Known noise inside topcard that passes the loose letter regex below:
+  // status chips, badges, button labels. Filter explicitly so the FIRST
+  // letters-only line isn't "Open to work" instead of "Toronto, Canada".
+  const LOC_BLACKLIST =
+    /^(open to work|open to|premium|verified|contact info|message|connect|follow|more|edit profile|view profile|add section|resources|share that|get started|show details)$/i;
   for (const el of after) {
     const t = readText(el);
     if (!t || t.length > 80) continue;
     if (/connection|follower|contact info|premium|•|·|\|/i.test(t)) continue;
+    if (LOC_BLACKLIST.test(t)) continue;
     // Allow single-token country names ("Canada") OR comma-separated city tuples.
     if (/^[A-Za-zА-Яа-яЇЄІїєі' .-]{2,}(,\s*[A-Za-zА-Яа-яЇЄІїєі' .-]{2,}){0,2}$/.test(t)) {
       location = t;

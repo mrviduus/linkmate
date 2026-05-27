@@ -54,6 +54,9 @@ async function handleGetStarted(): Promise<void> {
 }
 
 async function handleSkip(): Promise<void> {
+  // Skip = explicit "no" to capture. Also clear the full-profile flag so a
+  // later manual icon click doesn't fall through to a privacy-surprising scrape.
+  await setCaptureFullProfile(false);
   await setOnboardingCompleted(true);
   window.close();
 }

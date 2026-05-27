@@ -484,8 +484,21 @@ async function captureFullUserProfile(
         profile.recentComments = parseRecentComments(d, handle);
       }
     } finally {
-      // Always return the tab to the user's original page, even on partial failure.
-      await chrome.tabs.update(tabId, { url });
+      // Return tab to original profile URL only if it's still on one of OUR
+      // scrape destinations. If the user navigated elsewhere during the
+      // capture, respect their navigation and don't hijack them back.
+      try {
+        const current = await chrome.tabs.get(tabId);
+        const onOurScrapePage =
+          current.url?.startsWith(postsUrl) ||
+          current.url?.startsWith(commentsUrl) ||
+          current.url === url;
+        if (onOurScrapePage && current.url !== url) {
+          await chrome.tabs.update(tabId, { url });
+        }
+      } catch {
+        /* tab may be closed; nothing to restore */
+      }
     }
   }
 
