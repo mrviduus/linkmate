@@ -9,7 +9,6 @@ import {
 } from './ssi-tracker';
 import {
   getCaptureFullProfile,
-  getOnboardingCompleted,
   getSsiLastError,
   setCaptureFullProfile,
 } from './storage-schema';
@@ -329,19 +328,18 @@ async function ensureOnOwnProfile(): Promise<boolean> {
   return true;
 }
 
-const AUTO_CAPTURE_TTL_MS = 24 * 60 * 60 * 1000;
+const PENDING_CAPTURE_KEY = 'linkmate.pendingCapture.v1';
 
 /**
- * On popup open, if our cached snapshot is missing or older than 24h, fire
- * Capture without a click — hijacking the active tab to /in/me/ if needed.
- * Inside handleCaptureProfile, ensureOnOwnProfile() handles the redirect.
+ * One-shot auto-capture: fires only when the Welcome page set a pending flag
+ * (i.e. user just clicked Get Started). Subsequent panel opens are no-ops —
+ * refresh is fully user-driven via the Hero card's Refresh button.
  */
 async function maybeAutoCapture(): Promise<void> {
-  // Welcome screen handles the very first capture; don't pre-empt it.
-  if (!(await getOnboardingCompleted())) return;
-  const existing = await profileService.get();
-  if (existing && Date.now() - existing.capturedAt < AUTO_CAPTURE_TTL_MS) return;
-  showProfileMessage('Profile stale — opening your LinkedIn profile to refresh…', 'info');
+  const { [PENDING_CAPTURE_KEY]: pending } = await chrome.storage.local.get(PENDING_CAPTURE_KEY);
+  if (!pending) return;
+  // Consume the flag immediately so we don't loop on panel reload.
+  await chrome.storage.local.remove(PENDING_CAPTURE_KEY);
   await handleCaptureProfile();
 }
 
