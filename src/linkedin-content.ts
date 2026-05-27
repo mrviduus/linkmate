@@ -1193,6 +1193,36 @@ if (window.location.hostname.includes('linkedin.com')) {
   window.addEventListener('beforeunload', () => {
     linkedInLinkMate.destroy();
   });
+
+  // Issue #16: side panel can't open without user gesture. On any LinkedIn
+  // profile page (/in/<handle>/), the first click/scroll/keydown forwards a
+  // message to background, which opens the side panel on behalf of the user.
+  // Gated behind onboardingCompleted so we don't auto-open before consent.
+  void (async () => {
+    const PROFILE_RE = /^\/in\/[^/?#]+\/?$/;
+    if (!PROFILE_RE.test(window.location.pathname)) return;
+    const ONBOARDED_KEY = 'linkmate.settings.onboardingCompleted.v1';
+    const stored = await chrome.storage.local.get(ONBOARDED_KEY);
+    if (!stored[ONBOARDED_KEY]) return;
+    let fired = false;
+    const open = () => {
+      if (fired) return;
+      fired = true;
+      try {
+        chrome.runtime.sendMessage({ action: 'sidepanel.openFromGesture' });
+      } catch {
+        /* extension reload race; ignore */
+      }
+      window.removeEventListener('click', open, true);
+      window.removeEventListener('keydown', open, true);
+      window.removeEventListener('scroll', open, true);
+    };
+    window.addEventListener('click', open, { capture: true });
+    window.addEventListener('keydown', open, { capture: true });
+    // Passive so we don't block the compositor on every scroll event before
+    // the first gesture fires.
+    window.addEventListener('scroll', open, { capture: true, passive: true });
+  })();
 }
 
 // Debug function to test if custom prompts are being used

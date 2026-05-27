@@ -1,12 +1,13 @@
 {
   "name": "linkmate-extension",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "AI-powered LinkedIn assistant: SSI tracker, profile audit, comment drafts via OpenAI.",
   "private": true,
   "scripts": {
     "dev": "parcel watch src/manifest.json --config @parcel/config-webextension",
     "build": "parcel build src/manifest.json --config @parcel/config-webextension",
     "zip": "npm run build && cd dist && zip -r ../linkmate.zip . && cd ..",
+    "release": "./scripts/release.sh",
     "clean": "rm -rf dist .parcel-cache linkmate.zip",
     "test": "jest",
     "test:watch": "jest --watch",
