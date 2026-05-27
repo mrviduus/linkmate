@@ -234,11 +234,26 @@ async function handleCaptureProfile(): Promise<void> {
         showProfileMessage('Profile is fresh (<24h). Using cached snapshot.', 'info');
       } else if (result.summaryError) {
         showProfileMessage(
-          'Profile captured (AI summary skipped — check OpenAI key in Settings).',
+          '✅ Profile captured. (AI summary skipped — check OpenAI key in Settings.)',
           'info',
         );
       } else {
-        showProfileMessage('Profile captured.', 'success');
+        showProfileMessage('✅ Profile captured successfully.', 'success');
+      }
+      // System notification so the user knows even if focus moved elsewhere.
+      try {
+        const exp = result.userProfile?.experience.length ?? 0;
+        const edu = result.userProfile?.education.length ?? 0;
+        const sk = result.userProfile?.skills.length ?? 0;
+        chrome.notifications?.create?.('linkmate-capture-done', {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+          title: 'LinkMate — profile captured',
+          message: `${exp} experiences · ${edu} education · ${sk} skills saved.`,
+          priority: 1,
+        });
+      } catch {
+        /* notifications permission may be denied; ignore */
       }
       await refreshProfileDisplay();
     } else {

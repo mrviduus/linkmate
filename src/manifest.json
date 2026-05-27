@@ -35,7 +35,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage", "tabs", "activeTab", "windows", "alarms", "scripting", "sidePanel"],
+  "permissions": ["storage", "tabs", "activeTab", "windows", "alarms", "scripting", "sidePanel", "notifications"],
   "host_permissions": ["https://*.linkedin.com/*"],
   "web_accessible_resources": [
     {
