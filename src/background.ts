@@ -10,6 +10,7 @@ import { keepAlive } from './keep-alive';
 import { buildPositioningPrompt, buildCommentPrompt } from './prompt-builder';
 import type { RawProfileFields } from './profile-parser';
 import { scoreRelevance } from './relevance-scorer';
+import { buildFeedPostAnalysis } from './feed-analysis';
 import { getActiveProvider } from './providers';
 import {
   getProfile,
@@ -26,9 +27,13 @@ import {
   getCadenceTargets,
   setCadenceTargets,
   getCadenceStreak,
+  getFeedAnalysis,
+  setFeedAnalysis,
 } from './storage-schema';
 import type {
+  FeedAnalysisState,
   ParsedPost,
+  ProfileContext,
   ScoredPost,
   ToneKey,
   LengthKey,
@@ -343,6 +348,16 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     handleQueueScoreFeed(request.posts as ParsedPost[], sendResponse);
     return true;
   }
+  if (request.action === 'queue.debugAnalyzeFeed') {
+    handleQueueScoreFeed(request.posts as ParsedPost[], sendResponse, { allowDebugProfile: true });
+    return true;
+  }
+  if (request.action === 'queue.getFeedAnalysis') {
+    getFeedAnalysis()
+      .then((analysis) => sendResponse({ ok: true, analysis }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
   if (request.action === 'queue.draftComment') {
     handleQueueDraftComment(
       request.post as ParsedPost,
@@ -623,23 +638,30 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 async function handleQueueScoreFeed(
   posts: ParsedPost[],
   sendResponse: (response: unknown) => void,
+  options: { allowDebugProfile?: boolean } = {},
 ): Promise<void> {
   try {
-    const profile = await getProfile();
+    let profile = await getProfile();
+    let source: FeedAnalysisState['source'] = 'local_heuristic';
     if (!profile) {
-      sendResponse({
-        ok: false,
-        error: 'No profile captured. Open popup → Capture Profile first.',
-      });
-      return;
+      if (options.allowDebugProfile) {
+        profile = makeDebugProfile();
+        source = 'debug_fallback';
+      } else {
+        sendResponse({
+          ok: false,
+          error: 'No profile captured. Open popup → Capture Profile first.',
+        });
+        return;
+      }
     }
     const [engaged, dismissed] = await Promise.all([getEngagedPosts(), getDismissedPostIds()]);
     const engagedIds = new Set(engaged.map((e) => e.postId));
     const dismissedIds = new Set(dismissed);
     const recentlyDisplayedAuthors: string[] = [];
-    const scored: ScoredPost[] = posts.map((p) => ({
-      ...p,
-      relevance: scoreRelevance({
+    const generatedAt = Date.now();
+    const scored: ScoredPost[] = posts.map((p) => {
+      const relevance = scoreRelevance({
         post: p,
         profile,
         signals: {
@@ -647,13 +669,47 @@ async function handleQueueScoreFeed(
           dismissed: dismissedIds.has(p.id),
           recentlyDisplayedAuthors,
         },
-      }),
-    }));
-    sendResponse({ ok: true, scored });
+      });
+      return {
+        ...p,
+        relevance,
+        analysis: buildFeedPostAnalysis({ post: p, profile, relevance, generatedAt }),
+      };
+    });
+    const analysis: FeedAnalysisState = {
+      apiVersion: 'linkmate.feed.analysis.v1',
+      generatedAt,
+      source,
+      profileCapturedAt: profile.capturedAt,
+      items: scored.map((post) => post.analysis!),
+    };
+    await setFeedAnalysis(analysis);
+    sendResponse({ ok: true, scored, analysis });
   } catch (err) {
     console.error('queue.scoreFeed failed:', err);
     sendResponse({ ok: false, error: String(err) });
   }
+}
+
+function makeDebugProfile(): ProfileContext {
+  return {
+    fullName: 'Debug User',
+    headline: 'Machine learning and software engineering profile',
+    about: 'Debug fallback profile for inspecting the LinkMate feed analysis API.',
+    topSkills: [
+      'AI systems',
+      'machine learning',
+      'software engineering',
+      'infrastructure',
+      'startups',
+      'privacy',
+      'distributed systems',
+    ],
+    recentPostThemes: ['AI engineering', 'ML systems', 'startup strategy', 'data science'],
+    positioningSummary:
+      'Technical user interested in AI engineering, ML systems, infrastructure, startups, and practical operator insights.',
+    capturedAt: 0,
+  };
 }
 
 async function handleQueueDraftComment(

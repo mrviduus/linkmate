@@ -19,6 +19,7 @@ export const STORAGE_KEYS = {
   queueEngaged: 'linkmate.queue.engaged.v1',
   queueDismissed: 'linkmate.queue.dismissed.v1',
   queuePreferences: 'linkmate.queue.preferences.v1',
+  feedAnalysis: 'linkmate.feed.analysis.v1',
   ssiHistory: 'linkmate.ssi.history.v1',
   ssiLastError: 'linkmate.ssi.lastError.v1',
   connectionsSuggestions: 'linkmate.connections.suggestions.v1',
@@ -74,8 +75,45 @@ export interface RelevanceScore {
   category: ScoreCategory;
 }
 
+export interface FeedPostAnalysis {
+  apiVersion: 'linkmate.feed.analysis.v1';
+  generatedAt: number;
+  post: {
+    id: string;
+    authorName: string;
+    authorTitle: string;
+    authorUrn: string;
+    text: string;
+    postedAt: number;
+    engagement: {
+      likes: number;
+      comments: number;
+    };
+    relationship: ConnectionDegree;
+    followerTier: FollowerTier;
+    isOwn: boolean;
+  };
+  score: {
+    value: number; // 0..10, one decimal place
+    raw: number; // 0..100 internal scorer value
+    scale: '0-10';
+    category: ScoreCategory;
+  };
+  highlight: boolean;
+  sections: {
+    whyItRanks: string;
+    strongPoints: string[];
+    especiallyRelevantBecause: string[];
+    whatThisProvides: string[];
+    weaknesses: string[];
+    tags: string[];
+    recommendation: string;
+  };
+}
+
 export interface ScoredPost extends ParsedPost {
   relevance: RelevanceScore;
+  analysis?: FeedPostAnalysis;
 }
 
 export interface DraftComment {
@@ -128,6 +166,14 @@ export interface QueuePreferences {
   defaultLength: LengthKey;
   autoRefreshMinutes: number;
   sidebarPosition: { top: number; right: number };
+}
+
+export interface FeedAnalysisState {
+  apiVersion: 'linkmate.feed.analysis.v1';
+  generatedAt: number;
+  source: 'local_heuristic' | 'debug_fallback';
+  profileCapturedAt: number;
+  items: FeedPostAnalysis[];
 }
 
 /**
@@ -274,6 +320,16 @@ export async function addDismissedPostId(postId: string): Promise<void> {
 export async function isDismissed(postId: string): Promise<boolean> {
   const list = await getDismissedPostIds();
   return list.includes(postId);
+}
+
+// ─── Feed analysis API cache ───────────────────────────────────────────────
+
+export async function getFeedAnalysis(): Promise<FeedAnalysisState | null> {
+  return readKey<FeedAnalysisState>(STORAGE_KEYS.feedAnalysis);
+}
+
+export async function setFeedAnalysis(state: FeedAnalysisState): Promise<void> {
+  await writeKey(STORAGE_KEYS.feedAnalysis, state);
 }
 
 // ─── Migration ──────────────────────────────────────────────────────────────

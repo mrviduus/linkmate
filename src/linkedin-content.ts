@@ -5,7 +5,7 @@ import { EngagementQueue } from './engagement-queue';
 import { scanPostForOutcome } from './outcome-scanner';
 import type { ScoreFeedResult } from './engagement-queue';
 import { parseFeedDom } from './feed-parser';
-import type { ParsedPost, ScoredPost } from './storage-schema';
+import type { FeedAnalysisState, ParsedPost, ScoredPost } from './storage-schema';
 
 console.log('LinkMate LinkedIn content script loaded');
 
@@ -35,6 +35,7 @@ class LinkedInLinkMate {
   constructor() {
     this.showComplianceWarning();
     this.init();
+    this.installConsoleBridgeListener();
   }
 
   private showComplianceWarning(): void {
@@ -98,6 +99,7 @@ class LinkedInLinkMate {
         const posts = parseFeedDom(document);
         void this.engagementQueue.refresh(posts);
       }, 2500);
+
     } else if (!onFeed && this.engagementQueue) {
       this.engagementQueue.unmount();
       this.engagementQueue = null;
@@ -119,6 +121,74 @@ class LinkedInLinkMate {
         console.warn('Queue message threw:', err);
         resolve(undefined);
       }
+    });
+  }
+
+  private async analyzeFeedForConsole(): Promise<unknown> {
+    const posts = parseFeedDom(document);
+    const response = await this.sendQueueMessage<{
+      ok?: boolean;
+      scored?: ScoredPost[];
+      analysis?: FeedAnalysisState;
+      error?: string;
+    }>({ action: 'queue.debugAnalyzeFeed', posts });
+
+    console.log('[LinkMate] Parsed feed posts:', posts);
+    console.log('[LinkMate] Feed analysis API response:', response);
+    if (response?.analysis) {
+      console.table(
+        response.analysis.items.map((item) => ({
+          postId: item.post.id,
+          author: item.post.authorName,
+          score: item.score.value,
+          category: item.score.category,
+          highlight: item.highlight,
+          tags: item.sections.tags.join(', '),
+          recommendation: item.sections.recommendation,
+        }))
+      );
+    }
+    return response;
+  }
+
+  private async getFeedAnalysisForConsole(): Promise<unknown> {
+    return this.sendQueueMessage<{
+      ok?: boolean;
+      analysis?: FeedAnalysisState | null;
+      error?: string;
+    }>({ action: 'queue.getFeedAnalysis' });
+  }
+
+  private installConsoleBridgeListener(): void {
+    window.addEventListener('message', (event) => {
+      if (event.source !== window) return;
+      const data = event.data as { type?: string; action?: string; requestId?: string };
+      if (data?.type !== 'LINKMATE_CONSOLE_REQUEST' || !data.requestId) return;
+
+      const run =
+        data.action === 'analyzeFeed'
+          ? this.analyzeFeedForConsole()
+          : data.action === 'getFeedAnalysis'
+            ? this.getFeedAnalysisForConsole()
+            : Promise.resolve({ ok: false, error: `Unknown LinkMate action: ${data.action}` });
+
+      run
+        .then((payload) => {
+          window.postMessage(
+            { type: 'LINKMATE_CONSOLE_RESPONSE', requestId: data.requestId, payload },
+            '*'
+          );
+        })
+        .catch((err) => {
+          window.postMessage(
+            {
+              type: 'LINKMATE_CONSOLE_RESPONSE',
+              requestId: data.requestId,
+              payload: { ok: false, error: String(err) },
+            },
+            '*'
+          );
+        });
     });
   }
 
@@ -1184,3 +1254,4 @@ function verifyStoredPrompts() {
 console.log('💡 LinkMate Debug Functions Available:');
 console.log('   - window.testLinkMatePrompts() - Test prompt generation');
 console.log('   - window.verifyLinkMatePrompts() - Verify stored prompts');
+console.log('   - window.linkmateAnalyzeFeed() - Print standardized feed analysis response');

@@ -23,6 +23,12 @@
   "content_scripts": [
     {
       "matches": ["https://*.linkedin.com/*"],
+      "js": ["linkedin-console-bridge.ts"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.linkedin.com/*"],
       "js": ["linkedin-content.ts"],
       "css": ["linkedin-styles.css"],
       "run_at": "document_idle"
