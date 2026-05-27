@@ -28,10 +28,17 @@
  * Returns a typed Result; never throws. Caller (popup) renders an error chip.
  */
 
-import { parseProfileDom } from './profile-parser';
+import {
+  parseProfileDom,
+  parseUserProfile,
+  parseRecentPosts,
+  parseRecentComments,
+} from './profile-parser';
 import type { RawProfileFields } from './profile-parser';
-import { getProfile, setProfile } from './storage-schema';
+import { getCaptureFullProfile, getProfile, setProfile } from './storage-schema';
 import type { ProfileContext } from './storage-schema';
+import { getUserProfile, isFresh, saveUserProfile } from './user-profile-store';
+import type { UserProfile } from './lib/idb';
 
 const PROFILE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -48,7 +55,13 @@ export type CaptureFailureReason =
   | 'summary-failed';
 
 export type CaptureResult =
-  | { ok: true; profile: ProfileContext }
+  | {
+      ok: true;
+      profile?: ProfileContext;
+      cached?: boolean;
+      userProfile?: UserProfile;
+      summaryError?: string;
+    }
   | { ok: false; reason: CaptureFailureReason; message: string };
 
 interface ProfileCaptureResponse {
@@ -57,13 +70,58 @@ interface ProfileCaptureResponse {
   error?: string;
 }
 
+/**
+ * Detached popup windows (chrome.windows.create) become their own
+ * "currentWindow" — so chrome.tabs.query({active,currentWindow:true}) returns
+ * the popup itself, NOT the LinkedIn tab. The background passes the real tab
+ * id via ?targetTab=… so we can target it explicitly.
+ */
+function getExplicitTargetTabId(): number | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('targetTab');
+    if (id && /^\d+$/.test(id)) return Number(id);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export class ProfileContextService {
   async capture(): Promise<CaptureResult> {
-    // Step 1: active tab
+    // Issue #16 — when full-capture is ON and IDB snapshot is <24h, short-circuit
+    // before doing any DOM grab. Falls through to full capture otherwise.
+    // IDB read is fail-soft: in environments without IndexedDB (jsdom tests,
+    // some service-worker contexts) we just proceed with the regular flow.
+    const fullProfileEnabled = await getCaptureFullProfile();
+    if (fullProfileEnabled) {
+      try {
+        const cached = await getUserProfile();
+        if (cached && isFresh(cached)) {
+          // IDB is the source of truth for the new flow; legacy chrome.storage
+          // ProfileContext may be absent (e.g. user has no OpenAI key) but the
+          // IDB snapshot is still valid — surface it as cached without forcing
+          // a 30s re-scrape.
+          const existingProfile = (await getProfile()) ?? undefined;
+          return { ok: true, profile: existingProfile, cached: true, userProfile: cached };
+        }
+      } catch (err) {
+        console.warn('[LinkMate] UserProfile cache check failed; proceeding with fresh capture:', err);
+      }
+    }
+
+    // Step 1: target tab — prefer explicit ?targetTab= from the side panel URL,
+    // otherwise find the active tab in the last-focused window (side panel
+    // shares window context with content).
     let activeTab: chrome.tabs.Tab | undefined;
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      activeTab = tabs[0];
+      const explicitId = getExplicitTargetTabId();
+      if (explicitId !== null) {
+        activeTab = await chrome.tabs.get(explicitId);
+      } else {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        activeTab = tabs[0];
+      }
     } catch (err) {
       return {
         ok: false,
@@ -102,14 +160,88 @@ export class ProfileContextService {
         func: async () => {
           const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
           const originalScroll = window.scrollY;
-          // Scroll to ~mid then bottom to trigger lazy section loads
-          window.scrollTo({ top: document.body.scrollHeight / 2, behavior: 'instant' });
-          await wait(1500);
-          window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
-          await wait(1500);
+          const main = document.querySelector('main');
+          const scope = main ?? document;
+          const heightLog: number[] = [];
+
+          // Phase 1 — brute scroll until ALL expected sections appear in DOM
+          // OR scrollHeight has been stable for 3 iterations. Bails as soon as
+          // experience/education/skills/projects h2s are present.
+          const TARGETS = /^(experience|education|skills(\s*\(\d+\))?|projects(\s*\(\d+\))?)/i;
+          const hasAllTargets = () => {
+            const seen = new Set<string>();
+            const list = Array.from((main ?? document).querySelectorAll('h2, h3'));
+            for (const h of list) {
+              const t = (h.textContent ?? '').trim();
+              const m = t.match(/^(experience|education|skills|projects)/i);
+              if (m) seen.add(m[1].toLowerCase());
+            }
+            return seen.size >= 4;
+          };
+          let lastHeight = 0;
+          let stableCount = 0;
+          for (let i = 0; i < 20; i++) {
+            const h = Math.max(
+              document.documentElement.scrollHeight,
+              document.body.scrollHeight,
+              main?.scrollHeight ?? 0,
+            );
+            heightLog.push(h);
+            window.scrollTo({ top: h, behavior: 'instant' });
+            if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
+            document.documentElement.scrollTop = h;
+            await wait(700);
+            if (i >= 4 && hasAllTargets()) break;
+            if (h === lastHeight) {
+              stableCount++;
+              if (stableCount >= 3 && i >= 6) break;
+            } else {
+              stableCount = 0;
+            }
+            lastHeight = h;
+          }
+
+          // Phase 2 — only scrollIntoView the target sections (not every h2).
+          // Wait 500ms each; LinkedIn 2026 uses <div componentkey> + <p>, not
+          // <li>, so the old "if items==0 wait more" heuristic was wrong.
+          const headings = Array.from(scope.querySelectorAll('h2, h3')) as HTMLElement[];
+          for (const h of headings) {
+            if (!TARGETS.test((h.textContent ?? '').trim())) continue;
+            try {
+              h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+              await wait(500);
+            } catch {
+              /* ignore */
+            }
+          }
+          await wait(400);
+
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
+          if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
           await wait(300);
-          return document.documentElement.outerHTML;
+
+          // Diagnostic dump alongside HTML so popup can console.log it.
+          const targets = ['experience', 'education', 'skills', 'licenses', 'languages', 'projects', 'certifications'];
+          const diag = {
+            heightLog,
+            finalHeight: Math.max(
+              document.documentElement.scrollHeight,
+              document.body.scrollHeight,
+              main?.scrollHeight ?? 0,
+            ),
+            h2List: headings.map((h) => (h.textContent ?? '').trim()).slice(0, 40),
+            sectionItemCounts: targets.map((t) => {
+              const h = headings.find((el) =>
+                new RegExp(`^${t}(\\s*\\(\\d+\\))?\\b`, 'i').test((el.textContent ?? '').trim()),
+              );
+              const card = h?.closest('section, div[componentkey]') ?? null;
+              return { t, found: !!h, items: card?.querySelectorAll('li').length ?? 0 };
+            }),
+          };
+          return (
+            document.documentElement.outerHTML +
+            `\n<!-- LINKMATE_DIAG:${JSON.stringify(diag)} -->`
+          );
         },
       });
       html = (results?.[0]?.result as string | undefined) ?? null;
@@ -132,6 +264,17 @@ export class ProfileContextService {
     const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
     const rawFields: RawProfileFields = parseProfileDom(parsedDoc);
 
+    // Extract diagnostic block embedded by the inject script (issue #16 debug)
+    const diagMatch = html.match(/<!-- LINKMATE_DIAG:({[\s\S]*?}) -->/);
+    if (diagMatch) {
+      try {
+        const diag = JSON.parse(diagMatch[1]);
+        console.log('[LinkMate diag]', diag);
+      } catch {
+        /* ignore parse error */
+      }
+    }
+
     // v0.5.2 — sanity check: if EVERY extracted field is empty, the parser
     // doesn't match the current LinkedIn DOM. Surface a loud error instead of
     // letting the AI hallucinate a positioning summary from nothing.
@@ -150,36 +293,47 @@ export class ProfileContextService {
       };
     }
 
-    // Step 5 + 6: ship raw fields to background, get positioning summary
-    let response: ProfileCaptureResponse;
+    // Step 5 — Issue #16: pure-algorithm DOM scrape → IDB. Runs FIRST and is
+    // independent of any AI. If OpenAI key isn't configured or the API errors
+    // out later, we still have the structured profile saved.
+    let userProfile: UserProfile | undefined;
+    if (fullProfileEnabled && activeTab?.id !== undefined) {
+      try {
+        userProfile = await captureFullUserProfile(url, parsedDoc, activeTab.id);
+        await saveUserProfile(userProfile);
+      } catch (err) {
+        console.warn('[LinkMate] Full profile capture failed:', err);
+      }
+    }
+
+    // Step 6 — legacy: OpenAI positioning summary + chrome.storage ProfileContext.
+    // This powers AI-drafted comments elsewhere in the extension. NON-BLOCKING:
+    // failure here doesn't invalidate the IDB write above.
+    let profile: ProfileContext | undefined;
+    let summaryError: string | undefined;
     try {
-      response = (await chrome.runtime.sendMessage({
+      const response = (await chrome.runtime.sendMessage({
         action: 'profile.capture',
         fields: rawFields,
       })) as ProfileCaptureResponse;
+      if (response?.ok && response.positioningSummary) {
+        profile = {
+          ...rawFields,
+          positioningSummary: response.positioningSummary,
+          capturedAt: Date.now(),
+        };
+        await setProfile(profile);
+      } else {
+        summaryError = response?.error ?? 'No positioning summary returned.';
+      }
     } catch (err) {
-      return {
-        ok: false,
-        reason: 'summary-failed',
-        message: `Background did not respond: ${String(err)}`,
-      };
+      summaryError = `Background did not respond: ${String(err)}`;
     }
-    if (!response?.ok || !response.positioningSummary) {
-      return {
-        ok: false,
-        reason: 'summary-failed',
-        message: response?.error ?? 'No positioning summary returned.',
-      };
+    if (summaryError) {
+      console.warn('[LinkMate] positioning summary skipped:', summaryError);
     }
 
-    // Step 7: persist
-    const profile: ProfileContext = {
-      ...rawFields,
-      positioningSummary: response.positioningSummary,
-      capturedAt: Date.now(),
-    };
-    await setProfile(profile);
-    return { ok: true, profile };
+    return { ok: true, profile, userProfile, summaryError };
   }
 
   /** Read the currently-stored profile (or null). Cheap; no network/DOM access. */
@@ -193,4 +347,160 @@ export class ProfileContextService {
     if (!profile) return true;
     return Date.now() - profile.capturedAt > PROFILE_TTL_MS;
   }
+}
+
+// ─── Issue #16 — full-profile + recent-activity ─────────────────────────────
+
+function extractHandle(url: string): string | null {
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Navigate the user's active tab to `url`, wait for load + LinkedIn SDUI to
+ * hydrate, scroll to trigger lazy loads, and return the full outer HTML.
+ *
+ * Why not fetch(): the recent-activity page renders server-side as an empty
+ * SDUI shell; activity items are loaded by post-render XHR calls that require
+ * runtime auth tokens. The only reliable read is in a real browser tab.
+ * Background tabs are banned by spec; we re-use the user's active tab and
+ * restore the original URL at the end.
+ */
+async function scrapeInActiveTab(tabId: number, url: string): Promise<string | null> {
+  await chrome.tabs.update(tabId, { url });
+
+  // Wait for the navigation to fully complete. Two failure modes guarded:
+  //   1) onUpdated 'complete' fires before listener attaches (cached/fast nav).
+  //      → post-attach we re-check tab.status and resolve if already complete.
+  //   2) Listener fires first; setTimeout must be cleared to avoid leaked
+  //      closures across rapid recaptures.
+  await new Promise<void>((resolve) => {
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timer !== null) clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    };
+    const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo) => {
+      if (updatedTabId === tabId && info.status === 'complete') finish();
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    timer = setTimeout(finish, 15000);
+    // Catch the case where 'complete' fired between update() and addListener().
+    chrome.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status === 'complete') finish();
+      },
+      () => finish(),
+    );
+  });
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async () => {
+        // Authwall guard: LinkedIn 302's expired sessions to /authwall or
+        // /uas/login. We must NOT silently scrape the logged-out shell as
+        // if it were the activity HTML.
+        if (/\/(authwall|login|uas\/login|checkpoint)\b/i.test(window.location.pathname)) {
+          return '__LINKMATE_AUTHWALL__';
+        }
+        const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const main = document.querySelector('main');
+        await wait(900);
+        // Scroll until enough activity items show up OR scrollHeight stable.
+        let lastHeight = 0;
+        let stable = 0;
+        for (let i = 0; i < 8; i++) {
+          const h = Math.max(
+            document.documentElement.scrollHeight,
+            document.body.scrollHeight,
+            main?.scrollHeight ?? 0,
+          );
+          window.scrollTo({ top: h, behavior: 'instant' });
+          if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
+          document.documentElement.scrollTop = h;
+          await wait(700);
+          const itemCount = (main ?? document).querySelectorAll(
+            '[data-urn^="urn:li:activity"]',
+          ).length;
+          if (itemCount >= 10) break;
+          if (h === lastHeight) {
+            stable++;
+            if (stable >= 2 && i >= 3) break;
+          } else {
+            stable = 0;
+          }
+          lastHeight = h;
+        }
+        window.scrollTo({ top: 0, behavior: 'instant' });
+        if (main && 'scrollTo' in main) main.scrollTo({ top: 0, behavior: 'instant' });
+        await wait(200);
+        return document.documentElement.outerHTML;
+      },
+    });
+    return (results?.[0]?.result as string | undefined) ?? null;
+  } catch (err) {
+    console.warn('[LinkMate] scrapeInActiveTab failed:', err);
+    return null;
+  }
+}
+
+/**
+ * Build a UserProfile from the already-loaded main-profile DOM, then enrich
+ * with recent posts/comments by navigating the user's active tab through
+ * the recent-activity subpages and finally restoring the original profile URL.
+ */
+async function captureFullUserProfile(
+  url: string,
+  parsedDoc: Document,
+  tabId: number
+): Promise<UserProfile> {
+  const handle = extractHandle(url);
+  const canonical = handle ? `https://www.linkedin.com/in/${handle}/` : url;
+  const profile = parseUserProfile(parsedDoc, canonical);
+
+  if (handle) {
+    const postsUrl = `https://www.linkedin.com/in/${handle}/recent-activity/all/`;
+    const commentsUrl = `https://www.linkedin.com/in/${handle}/recent-activity/comments/`;
+    try {
+      const postsHtml = await scrapeInActiveTab(tabId, postsUrl);
+      if (postsHtml === '__LINKMATE_AUTHWALL__') {
+        throw new Error('LinkedIn session expired (authwall). Sign in and try again.');
+      }
+      if (postsHtml) {
+        const d = new DOMParser().parseFromString(postsHtml, 'text/html');
+        profile.recentPosts = parseRecentPosts(d);
+      }
+      const commentsHtml = await scrapeInActiveTab(tabId, commentsUrl);
+      if (commentsHtml === '__LINKMATE_AUTHWALL__') {
+        throw new Error('LinkedIn session expired (authwall). Sign in and try again.');
+      }
+      if (commentsHtml) {
+        const d = new DOMParser().parseFromString(commentsHtml, 'text/html');
+        profile.recentComments = parseRecentComments(d, handle);
+      }
+    } finally {
+      // Return tab to original profile URL only if it's still on one of OUR
+      // scrape destinations. If the user navigated elsewhere during the
+      // capture, respect their navigation and don't hijack them back.
+      try {
+        const current = await chrome.tabs.get(tabId);
+        const onOurScrapePage =
+          current.url?.startsWith(postsUrl) ||
+          current.url?.startsWith(commentsUrl) ||
+          current.url === url;
+        if (onOurScrapePage && current.url !== url) {
+          await chrome.tabs.update(tabId, { url });
+        }
+      } catch {
+        /* tab may be closed; nothing to restore */
+      }
+    }
+  }
+
+  return profile;
 }

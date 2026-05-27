@@ -7,7 +7,13 @@ import {
   renderTrend as renderSsiTrend,
   getInsight as getSsiInsight,
 } from './ssi-tracker';
-import { getSsiLastError } from './storage-schema';
+import {
+  getCaptureFullProfile,
+  getSsiLastError,
+  setCaptureFullProfile,
+} from './storage-schema';
+import { getUserProfile } from './user-profile-store';
+import type { UserProfile } from './lib/idb';
 import type { ProfileContext, SsiSnapshot } from './storage-schema';
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -89,10 +95,129 @@ async function handleProviderSave(): Promise<void> {
   }
 }
 
+// ─── Capture Hero (top-of-panel status + stats; issue #16 UX) ───────────────
+
+const heroSection = $('captureHero');
+const heroIcon = $('captureHeroIcon');
+const heroTitle = $('captureHeroTitle');
+const heroSubtitle = $('captureHeroSubtitle');
+const heroStats = $('captureHeroStats');
+const heroStatExp = $('statExp');
+const heroStatEdu = $('statEdu');
+const heroStatSkl = $('statSkl');
+const heroStatPst = $('statPst');
+const heroStatCmt = $('statCmt');
+const heroRefreshBtn = $<HTMLButtonElement>('heroRefresh');
+const heroCopyBtn = $<HTMLButtonElement>('heroCopyJson');
+const heroMessageEl = $('captureHeroMessage');
+
+type HeroState =
+  | { kind: 'empty' }
+  | { kind: 'loading' }
+  | { kind: 'ok'; profile: UserProfile }
+  | { kind: 'error'; message: string };
+
+function setHeroClass(variant: 'empty' | 'loading' | 'ok' | 'error'): void {
+  if (!heroSection) return;
+  heroSection.classList.remove(
+    'capture-hero--empty',
+    'capture-hero--loading',
+    'capture-hero--ok',
+    'capture-hero--error',
+  );
+  heroSection.classList.add(`capture-hero--${variant}`);
+}
+
+function showHeroMessage(text: string): void {
+  if (!heroMessageEl) return;
+  heroMessageEl.textContent = text;
+  heroMessageEl.style.display = '';
+  setTimeout(() => {
+    if (heroMessageEl) heroMessageEl.style.display = 'none';
+  }, 4000);
+}
+
+function renderHero(state: HeroState): void {
+  if (!heroSection) return;
+  setHeroClass(state.kind);
+  if (heroStats) heroStats.style.display = state.kind === 'ok' ? '' : 'none';
+  if (heroCopyBtn) heroCopyBtn.style.display = state.kind === 'ok' ? '' : 'none';
+  if (heroRefreshBtn) heroRefreshBtn.disabled = state.kind === 'loading';
+
+  if (state.kind === 'empty') {
+    if (heroIcon) heroIcon.textContent = '○';
+    if (heroTitle) heroTitle.textContent = 'No profile captured yet';
+    if (heroSubtitle) heroSubtitle.textContent = 'Click below to scan your LinkedIn profile.';
+    if (heroRefreshBtn) heroRefreshBtn.innerHTML = '<i class="fa fa-camera"></i> Capture profile';
+    return;
+  }
+  if (state.kind === 'loading') {
+    if (heroIcon) heroIcon.textContent = '⏳';
+    if (heroTitle) heroTitle.textContent = 'Capturing your profile…';
+    if (heroSubtitle)
+      heroSubtitle.textContent = 'This usually takes about 20 seconds — leave the side panel open.';
+    if (heroRefreshBtn)
+      heroRefreshBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Working…';
+    return;
+  }
+  if (state.kind === 'error') {
+    if (heroIcon) heroIcon.textContent = '✕';
+    if (heroTitle) heroTitle.textContent = 'Capture failed';
+    if (heroSubtitle) heroSubtitle.textContent = state.message;
+    if (heroRefreshBtn) heroRefreshBtn.innerHTML = '<i class="fa fa-redo"></i> Try again';
+    return;
+  }
+  // ok
+  const p = state.profile;
+  if (heroIcon) heroIcon.textContent = '✅';
+  if (heroTitle) heroTitle.textContent = p.name || 'Profile captured';
+  if (heroSubtitle)
+    heroSubtitle.textContent = `Captured ${formatRelativeIso(p.capturedAt)} · ${
+      p.location ?? 'no location'
+    }`;
+  if (heroStatExp) heroStatExp.textContent = String(p.experience.length);
+  if (heroStatEdu) heroStatEdu.textContent = String(p.education.length);
+  if (heroStatSkl) heroStatSkl.textContent = String(p.skills.length);
+  if (heroStatPst) heroStatPst.textContent = String(p.recentPosts.length);
+  if (heroStatCmt) heroStatCmt.textContent = String(p.recentComments.length);
+  if (heroRefreshBtn) heroRefreshBtn.innerHTML = '<i class="fa fa-redo"></i> Refresh capture';
+}
+
+function formatRelativeIso(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 'recently';
+  return formatRelativeTime(t);
+}
+
+async function refreshCaptureHero(): Promise<void> {
+  try {
+    const profile = await getUserProfile();
+    renderHero(profile ? { kind: 'ok', profile } : { kind: 'empty' });
+  } catch {
+    renderHero({ kind: 'empty' });
+  }
+}
+
+async function handleHeroRefresh(): Promise<void> {
+  renderHero({ kind: 'loading' });
+  await handleCaptureProfile();
+  await refreshCaptureHero();
+}
+
+async function handleHeroCopyJson(): Promise<void> {
+  try {
+    const profile = await getUserProfile();
+    if (!profile) return;
+    await navigator.clipboard.writeText(JSON.stringify(profile, null, 2));
+    showHeroMessage('Copied JSON to clipboard.');
+  } catch (err) {
+    showHeroMessage(`Copy failed: ${String(err)}`);
+  }
+}
+
 // ─── Profile Context ────────────────────────────────────────────────────────
 
 const captureProfileBtn = $<HTMLButtonElement>('captureProfile');
-const openMyProfileBtn = $<HTMLButtonElement>('openMyProfile');
 const profileNoneState = $('profileNoneState');
 const profileCapturedState = $('profileCapturedState');
 const profileFullName = $('profileFullName');
@@ -102,6 +227,7 @@ const profileCapturedAt = $('profileCapturedAt');
 const profileSkillsCount = $('profileSkillsCount');
 const profileStaleChip = $('profileStaleChip');
 const profileMessage = $('profileMessage');
+const captureFullProfileToggle = $<HTMLInputElement>('captureFullProfile');
 const profileService = new ProfileContextService();
 
 function formatRelativeTime(timestamp: number): string {
@@ -145,17 +271,144 @@ async function refreshProfileDisplay(): Promise<void> {
   const profile = await profileService.get();
   const stale = await profileService.shouldRefresh();
   renderProfile(profile, profile !== null && stale);
+  // Hero card uses IDB data (richer than chrome.storage ProfileContext) — keep them in sync.
+  await refreshCaptureHero();
 }
 
-async function handleCaptureProfile(): Promise<void> {
-  if (!captureProfileBtn) return;
-  captureProfileBtn.disabled = true;
-  const prevText = captureProfileBtn.innerHTML;
-  captureProfileBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
+/**
+ * Read a `targetTab` query param from the popup URL. When the background
+ * service worker opens us in a detached chrome.windows.create() popup, it
+ * passes the LinkedIn tab id so we don't end up grabbing this popup's own
+ * window as the "active currentWindow" tab.
+ */
+function getTargetTabId(): number | null {
   try {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('targetTab');
+    if (id && /^\d+$/.test(id)) return Number(id);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function getLinkedInTabId(): Promise<number | null> {
+  const explicit = getTargetTabId();
+  if (explicit !== null) return explicit;
+  // Side panel UI runs alongside the browser content; `currentWindow` is the
+  // window the panel is attached to, so this still finds the LinkedIn tab.
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tab?.id ?? null;
+}
+
+/**
+ * If the LinkedIn tab isn't already on a profile, navigate it to /in/me/.
+ * Returns true once the tab is on a profile URL.
+ */
+async function ensureOnOwnProfile(): Promise<boolean> {
+  const PROFILE_URL_RE = /^https?:\/\/(www\.)?linkedin\.com\/in\/[^/?#]+\/?(\?[^#]*)?(#.*)?$/;
+  const tabId = await getLinkedInTabId();
+  if (tabId === null) return false;
+  const tab = await chrome.tabs.get(tabId);
+  if (PROFILE_URL_RE.test(tab.url ?? '')) return true;
+  await chrome.tabs.update(tabId, { url: 'https://www.linkedin.com/in/me/' });
+  await new Promise<void>((resolve) => {
+    const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+      if (id === tabId && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 15000);
+  });
+  return true;
+}
+
+const PENDING_CAPTURE_KEY = 'linkmate.pendingCapture.v1';
+
+/**
+ * One-shot auto-capture: fires only when the Welcome page set a pending flag
+ * (i.e. user just clicked Get Started). Subsequent panel opens are no-ops —
+ * refresh is fully user-driven via the Hero card's Refresh button.
+ */
+async function maybeAutoCapture(): Promise<void> {
+  const { [PENDING_CAPTURE_KEY]: pending } = await chrome.storage.local.get(PENDING_CAPTURE_KEY);
+  if (!pending) return;
+  // Consume the flag immediately so we don't loop on panel reload.
+  await chrome.storage.local.remove(PENDING_CAPTURE_KEY);
+  await handleCaptureProfile();
+}
+
+// Module-level guard so concurrent triggers (welcome auto-fire, Hero refresh
+// click, legacy Profile Context button) don't race each other on the same
+// tab — each capture nav-jumps the user's LinkedIn tab, parallel runs would
+// trash each other's state.
+let captureInFlight = false;
+
+async function handleCaptureProfile(): Promise<void> {
+  if (captureInFlight) {
+    console.warn('[LinkMate] capture already in flight; ignoring duplicate trigger');
+    return;
+  }
+  captureInFlight = true;
+  if (!captureProfileBtn) {
+    // Allow flow to continue even without the legacy button mounted.
+  }
+  const prevText = captureProfileBtn?.innerHTML;
+  if (captureProfileBtn) {
+    captureProfileBtn.disabled = true;
+    captureProfileBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
+  }
+  try {
+    await ensureOnOwnProfile();
     const result = await profileService.capture();
     if (result.ok) {
-      showProfileMessage('Profile captured.', 'success');
+      if (result.cached) {
+        showProfileMessage('Profile is fresh (<24h). Using cached snapshot.', 'info');
+      } else if (result.summaryError) {
+        showProfileMessage(
+          '✅ Profile captured. (AI summary skipped — check OpenAI key in Settings.)',
+          'info',
+        );
+      } else {
+        showProfileMessage('✅ Profile captured successfully.', 'success');
+      }
+      // Issue #16 follow-up: also kick off an SSI snapshot so both visuals
+      // light up together. Fire-and-forget; SSI refresh updates its own panel
+      // section via loadSsiData when it completes.
+      if (!result.cached) {
+        void (async () => {
+          try {
+            await new Promise<void>((resolve) => {
+              chrome.runtime.sendMessage({ action: 'ssi.captureNow' }, () => resolve());
+            });
+            await loadSsiData();
+          } catch {
+            /* SSI capture is best-effort; ignore failures */
+          }
+        })();
+      }
+      // System notification so the user knows even if focus moved elsewhere.
+      try {
+        const exp = result.userProfile?.experience.length ?? 0;
+        const edu = result.userProfile?.education.length ?? 0;
+        const sk = result.userProfile?.skills.length ?? 0;
+        // Unique id per capture so back-to-back successes don't silently
+        // replace each other (Chrome treats same id as an update).
+        chrome.notifications?.create?.(`linkmate-capture-${Date.now()}`, {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+          title: 'LinkMate — profile captured',
+          message: `${exp} experiences · ${edu} education · ${sk} skills saved.`,
+          priority: 1,
+        });
+      } catch {
+        /* notifications permission may be denied; ignore */
+      }
       await refreshProfileDisplay();
     } else {
       showProfileMessage(result.message, 'error');
@@ -163,13 +416,22 @@ async function handleCaptureProfile(): Promise<void> {
   } catch (err) {
     showProfileMessage(`Unexpected error: ${String(err)}`, 'error');
   } finally {
-    captureProfileBtn.disabled = false;
-    captureProfileBtn.innerHTML = prevText;
+    captureInFlight = false;
+    if (captureProfileBtn) {
+      captureProfileBtn.disabled = false;
+      if (prevText !== undefined) captureProfileBtn.innerHTML = prevText;
+    }
   }
 }
 
-function handleOpenMyProfile(): void {
-  chrome.tabs.update({ url: 'https://www.linkedin.com/in/me/' });
+async function loadCaptureFullProfileToggle(): Promise<void> {
+  if (!captureFullProfileToggle) return;
+  captureFullProfileToggle.checked = await getCaptureFullProfile();
+}
+
+async function handleCaptureFullProfileToggle(): Promise<void> {
+  if (!captureFullProfileToggle) return;
+  await setCaptureFullProfile(captureFullProfileToggle.checked);
 }
 
 // ─── SSI Tracker ────────────────────────────────────────────────────────────
@@ -478,7 +740,9 @@ interface ActionRowDto {
   submitted: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const streakCount = $('streakCount');
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const cadenceBars = $('cadenceBars');
 const recommendCards = $('recommendCards');
 const pendingChips = $('pendingChips');
@@ -527,25 +791,6 @@ const PILLAR_COPY: Record<Pillar, { label: string; cta: string; href: string; re
     reason: 'Building pillar — back-and-forth replies signal real relationships.',
   },
 };
-
-function renderProgressBars(progress: WeeklyProgressDto, weakest: Pillar): void {
-  if (!cadenceBars) return;
-  const rows = cadenceBars.querySelectorAll<HTMLElement>('.cadence-row');
-  rows.forEach((row) => {
-    const pillar = row.getAttribute('data-pillar') as Pillar;
-    const p = progress[pillar];
-    const fill = row.querySelector<HTMLElement>('.cadence-fill');
-    const num = row.querySelector<HTMLElement>('.cadence-num');
-    if (fill) fill.style.width = `${p.pct}%`;
-    if (num) num.textContent = `${p.done} / ${p.target}`;
-    row.classList.toggle('weakest', pillar === weakest);
-    row.classList.toggle('complete', p.target > 0 && p.done >= p.target);
-  });
-}
-
-function renderStreak(count: number): void {
-  if (streakCount) streakCount.textContent = String(count);
-}
 
 interface RecommendCardDto {
   action: string;
@@ -602,6 +847,7 @@ function relativeTime(ts: number): string {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function loadPending(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; rows: ActionRowDto[] }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'action.log.pending' }, (r) =>
@@ -663,39 +909,19 @@ async function recordOutcome(
   // Refresh cadence (no change to counts, but streak might shift on outcome boundaries later).
 }
 
+/**
+ * Issue #16: the Today (cadence) section was removed from popup.html. The
+ * background handlers it called (recommender.getCards, recommender.getRetro)
+ * have side effects (AI calls, retroLastShown bookkeeping) — firing them
+ * on every panel open with no UI to consume the result was wasted compute
+ * + drifting state. Keeping the function as a no-op so existing callers
+ * (DOMContentLoaded, handleSsiRefresh) don't need to know.
+ */
 async function loadToday(): Promise<void> {
-  const [progressResp, streakResp, cardsResp, retroResp] = await Promise.all([
-    new Promise<{ ok: boolean; progress: WeeklyProgressDto; weakest: Pillar }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'action.log.weeklyProgress' }, (r) =>
-        resolve(r ?? { ok: false, progress: emptyProgress(), weakest: 'engaging' }),
-      );
-    }),
-    new Promise<{ ok: boolean; count: number }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'cadence.streak' }, (r) =>
-        resolve(r ?? { ok: false, count: 0 }),
-      );
-    }),
-    new Promise<{ ok: boolean; state?: RecommenderStateDto }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'recommender.getCards' }, (r) =>
-        resolve(r ?? { ok: false }),
-      );
-    }),
-    new Promise<{ ok: boolean; retro?: string | null }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'recommender.getRetro' }, (r) =>
-        resolve(r ?? { ok: false }),
-      );
-    }),
-  ]);
-  const progress = progressResp.progress ?? emptyProgress();
-  const weakest = progressResp.weakest ?? 'engaging';
-  renderProgressBars(progress, weakest);
-  renderStreak(streakResp.count ?? 0);
-  if (cardsResp.state) renderRecommendations(cardsResp.state);
-  renderRetro(retroResp.retro ?? null);
-  void loadPending();
-  void loadTopics();
+  // Intentionally no-op. See block comment above.
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function renderRetro(text: string | null): void {
   if (!retroCard || !retroText) return;
   if (!text) {
@@ -769,6 +995,7 @@ async function openPostModal(): Promise<void> {
 
 function closePostModal(): void {
   if (postModal) postModal.style.display = 'none';
+  clearInFlightWatchdog();
 }
 
 function shouldStartFresh(state: PostDraftsStateDto): boolean {
@@ -790,15 +1017,42 @@ async function writePostDraftsState(s: PostDraftsStateDto): Promise<void> {
   await chrome.storage.local.set({ [POST_DRAFTS_KEY]: s });
 }
 
+let inFlightWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+function clearInFlightWatchdog(): void {
+  if (inFlightWatchdog !== null) {
+    clearTimeout(inFlightWatchdog);
+    inFlightWatchdog = null;
+  }
+}
+
 function renderPostDraftsState(state: PostDraftsStateDto): void {
   if (!postModalBody) return;
   postModalBody.innerHTML = '';
+  clearInFlightWatchdog();
   if (state.status === 'inFlight') {
     const loading = document.createElement('div');
     loading.className = 'post-modal__loading';
     loading.innerHTML =
       '<i class="fa fa-circle-notch fa-spin"></i> Drafting (this can take 10–30s)…';
     postModalBody.append(loading);
+    // Watchdog: MV3 service workers can be evicted mid-call. If the state
+    // doesn't move past `inFlight` by the stale threshold, surface an error
+    // with retry rather than hanging on the spinner indefinitely.
+    const elapsed = Date.now() - state.startedAt;
+    const remaining = Math.max(2000, POST_DRAFTS_STALE_INFLIGHT_MS - elapsed);
+    inFlightWatchdog = setTimeout(() => {
+      void (async () => {
+        const fresh = await readPostDraftsState();
+        if (fresh.status === 'inFlight') {
+          await writePostDraftsState({
+            status: 'error',
+            finishedAt: Date.now(),
+            error: 'Drafting timed out. The background worker may have been evicted — try again.',
+          });
+        }
+      })();
+    }, remaining);
     return;
   }
   if (state.status === 'error') {
@@ -867,6 +1121,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (next) renderPostDraftsState(next);
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function loadTopics(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; topics?: Array<{ topic: string; count: number }> }>(
     (resolve) => {
@@ -895,6 +1150,7 @@ async function loadTopics(): Promise<void> {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function emptyProgress(): WeeklyProgressDto {
   return {
     brand: { done: 0, target: 1, pct: 0 },
@@ -957,7 +1213,9 @@ async function handleCadenceSave(): Promise<void> {
 function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
-  openMyProfileBtn?.addEventListener('click', handleOpenMyProfile);
+  captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
+  heroRefreshBtn?.addEventListener('click', () => void handleHeroRefresh());
+  heroCopyBtn?.addEventListener('click', () => void handleHeroCopyJson());
   ssiRefreshBtn?.addEventListener('click', () => void handleSsiRefresh());
   ssiOpenPageBtn?.addEventListener('click', handleSsiOpenPage);
   temperatureSlider?.addEventListener('input', handleTemperatureChange);
@@ -974,11 +1232,26 @@ function wire(): void {
   postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
 }
 
+/**
+ * Make sure the Post-drafts modal starts hidden, and don't carry an orphaned
+ * `inFlight` flag across popup sessions. MV3 service workers can be evicted
+ * mid-call, leaving the state stuck — sanitize before any code reads it.
+ */
+async function sanitizePostDraftsState(): Promise<void> {
+  if (postModal) postModal.style.display = 'none';
+  const state = await readPostDraftsState();
+  if (state.status === 'inFlight' && Date.now() - state.startedAt > POST_DRAFTS_STALE_INFLIGHT_MS) {
+    await writePostDraftsState({ status: 'idle' });
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   wire();
+  await sanitizePostDraftsState();
   await Promise.all([
     loadProviderConfig(),
     refreshProfileDisplay(),
+    loadCaptureFullProfileToggle(),
     loadSsiData(),
     loadAIParameters(),
     loadPrompts(),
@@ -986,4 +1259,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadToday(),
   ]);
   chrome.runtime.sendMessage({ action: 'popupReady' });
+  // Fire-and-forget: don't block the popup paint on a 10–20s capture.
+  void maybeAutoCapture();
 });

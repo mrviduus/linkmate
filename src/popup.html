@@ -21,195 +21,55 @@
       </header>
 
       <div id="settings-content" class="settings-main">
-        <!-- Today: cadence quotas + 3 cards -->
-        <div class="settings-section" id="todaySection">
-          <h3>
-            <i class="fa fa-bolt"></i>
-            Today
-          </h3>
-          <p class="settings-description">
-            Rolling 7-day quotas. The recommender biases your actions toward the weakest pillar.
-          </p>
-
-          <div id="retroCard" class="retro-card" style="display: none">
-            <div class="retro-card__text" id="retroText">—</div>
-            <button id="retroDismiss" class="retro-card__close" title="Dismiss">✕</button>
-          </div>
-
-          <div id="cadenceBars" class="cadence-bars">
-            <div class="cadence-row" data-pillar="brand">
-              <span class="cadence-label">Brand</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 1</span>
-            </div>
-            <div class="cadence-row" data-pillar="finding">
-              <span class="cadence-label">Finding</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 5</span>
-            </div>
-            <div class="cadence-row" data-pillar="engaging">
-              <span class="cadence-label">Engaging</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 3</span>
-            </div>
-            <div class="cadence-row" data-pillar="building">
-              <span class="cadence-label">Building</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 2</span>
-            </div>
-          </div>
-
-          <div class="today-meta">
-            <span id="cardsSource" class="cards-source">—</span>
-            <button id="cardsRefresh" class="cards-refresh" title="Regenerate now">
-              <i class="fa fa-sync"></i>
-            </button>
-          </div>
-          <div id="recommendCards" class="recommend-cards"></div>
-
-          <button id="suggestPostBtn" class="btn btn-secondary suggest-post-btn">
-            <i class="fa fa-magic"></i> Suggest a post
-          </button>
-
-          <div id="pendingChips" class="pending-chips" style="display: none">
-            <h4 class="pending-chips__hdr">Did this work?</h4>
-            <div id="pendingChipsList"></div>
-          </div>
-
-          <div id="topicsRow" class="topics-row" style="display: none">
-            <h4 class="topics-row__hdr">Topics (last 14 days)</h4>
-            <div id="topicsChips" class="topics-chips"></div>
-          </div>
-        </div>
-
-        <!-- OpenAI key + model -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-key"></i>
-            OpenAI
-          </h3>
-          <p class="settings-description">
-            LinkMate uses OpenAI for all AI generation. Bring your own key — stored locally in this
-            browser only, never synced.
-          </p>
-
-          <div class="provider-openai-config">
-            <label class="provider-field">
-              <span>API Key</span>
-              <input
-                type="password"
-                id="providerOpenAIKey"
-                placeholder="sk-..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <small class="provider-field__hint">
-                Get one at platform.openai.com/api-keys
-              </small>
-            </label>
-
-            <label class="provider-field">
-              <span>Model</span>
-              <select id="providerOpenAIModel">
-                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
-                <option value="gpt-4o">gpt-4o (best quality)</option>
-                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                <option value="gpt-4.1">gpt-4.1</option>
-                <option value="o4-mini">o4-mini (reasoning)</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="provider-actions">
-            <button id="providerSave" class="btn btn-primary">
-              <i class="fa fa-save"></i>
-              Save
-            </button>
-          </div>
-
-          <div id="providerStatus" class="status-message" style="display: none"></div>
-        </div>
-
-        <!-- Weekly cadence targets -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-calendar-week"></i>
-            Weekly Targets
-          </h3>
-          <p class="settings-description">
-            How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.
-          </p>
-          <div class="cadence-targets-form">
-            <label class="provider-field">
-              <span>Posts (Brand)</span>
-              <input type="number" id="targetBrand" min="0" max="20" value="1" />
-            </label>
-            <label class="provider-field">
-              <span>Invites (Finding)</span>
-              <input type="number" id="targetFinding" min="0" max="50" value="5" />
-            </label>
-            <label class="provider-field">
-              <span>Comments (Engaging)</span>
-              <input type="number" id="targetEngaging" min="0" max="30" value="3" />
-            </label>
-            <label class="provider-field">
-              <span>Replies (Building)</span>
-              <input type="number" id="targetBuilding" min="0" max="20" value="2" />
-            </label>
-          </div>
-          <div class="provider-actions">
-            <button id="cadenceSaveBtn" class="btn btn-primary">
-              <i class="fa fa-save"></i> Save targets
-            </button>
-          </div>
-          <div id="cadenceStatus" class="status-message" style="display: none"></div>
-        </div>
-
-        <!-- Profile Context -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-user-circle"></i>
-            Profile Context
-          </h3>
-          <p class="settings-description">
-            Capture your LinkedIn profile so AI drafts read in your voice. Open your own profile
-            page, then click Capture below.
-          </p>
-
-          <div id="profileStatus" class="profile-status">
-            <div id="profileNoneState" class="profile-none">
-              <i class="fa fa-info-circle"></i>
-              <span>No profile captured yet.</span>
-            </div>
-            <div id="profileCapturedState" class="profile-captured" style="display: none">
-              <div class="profile-row"><strong id="profileFullName">-</strong></div>
-              <div class="profile-row profile-headline" id="profileHeadline">-</div>
-              <div class="profile-row profile-positioning" id="profilePositioning">-</div>
-              <div class="profile-meta">
-                Captured <span id="profileCapturedAt">-</span> ·
-                <span id="profileSkillsCount">0</span> skills
-                <span id="profileStaleChip" class="profile-stale-chip" style="display: none"
-                  >stale</span
-                >
+        <!-- Capture Hero: status + stats. First thing the user sees. -->
+        <section id="captureHero" class="capture-hero capture-hero--empty">
+          <div class="capture-hero__head">
+            <span id="captureHeroIcon" class="capture-hero__icon">○</span>
+            <div class="capture-hero__title-wrap">
+              <h2 id="captureHeroTitle" class="capture-hero__title">No profile captured yet</h2>
+              <div id="captureHeroSubtitle" class="capture-hero__subtitle">
+                Click below to scan your LinkedIn profile.
               </div>
             </div>
           </div>
-
-          <div class="profile-actions">
-            <button id="captureProfile" class="btn btn-primary">
-              <i class="fa fa-camera"></i>
-              Capture Profile
+          <div id="captureHeroStats" class="capture-hero__stats" style="display: none">
+            <div class="capture-hero__stat">
+              <span id="statExp" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">experience</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statEdu" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">education</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statSkl" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">skills</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statPst" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">posts</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statCmt" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">comments</span>
+            </div>
+          </div>
+          <div class="capture-hero__actions">
+            <button id="heroRefresh" class="btn btn-primary capture-hero__btn">
+              <i class="fa fa-camera"></i> Capture profile
             </button>
-            <button id="openMyProfile" class="btn btn-secondary">
-              <i class="fa fa-external-link-alt"></i>
-              Open My Profile
+            <button
+              id="heroCopyJson"
+              class="btn btn-secondary capture-hero__btn"
+              style="display: none"
+            >
+              <i class="fa fa-copy"></i> Copy JSON
             </button>
           </div>
+          <div id="captureHeroMessage" class="capture-hero__message" style="display: none"></div>
+        </section>
 
-          <div id="profileMessage" class="status-message" style="display: none"></div>
-        </div>
-
-        <!-- SSI Tracker -->
+        <!-- SSI Tracker (moved up for visual completion indicator after capture) -->
         <div class="settings-section">
           <h3>
             <i class="fa fa-chart-line"></i>
@@ -284,12 +144,140 @@
           <div id="ssiMessage" class="status-message" style="display: none"></div>
         </div>
 
-        <!-- AI Generation Parameters -->
+        <!-- OpenAI key + model -->
         <div class="settings-section">
           <h3>
+            <i class="fa fa-key"></i>
+            OpenAI
+          </h3>
+          <p class="settings-description">
+            LinkMate uses OpenAI for all AI generation. Bring your own key — stored locally in this
+            browser only, never synced.
+          </p>
+
+          <div class="provider-openai-config">
+            <label class="provider-field">
+              <span>API Key</span>
+              <input
+                type="password"
+                id="providerOpenAIKey"
+                placeholder="sk-..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <small class="provider-field__hint">
+                Get one at platform.openai.com/api-keys
+              </small>
+            </label>
+
+            <label class="provider-field">
+              <span>Model</span>
+              <select id="providerOpenAIModel">
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                <option value="gpt-4o">gpt-4o (best quality)</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="o4-mini">o4-mini (reasoning)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="provider-actions">
+            <button id="providerSave" class="btn btn-primary">
+              <i class="fa fa-save"></i>
+              Save
+            </button>
+          </div>
+
+          <div id="providerStatus" class="status-message" style="display: none"></div>
+        </div>
+
+        <!-- Weekly cadence targets -->
+        <details class="settings-section settings-section--collapsible">
+          <summary>
+            <i class="fa fa-calendar-week"></i>
+            Weekly Targets
+          </summary>
+          <p class="settings-description">
+            How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.
+          </p>
+          <div class="cadence-targets-form">
+            <label class="provider-field">
+              <span>Posts (Brand)</span>
+              <input type="number" id="targetBrand" min="0" max="20" value="1" />
+            </label>
+            <label class="provider-field">
+              <span>Invites (Finding)</span>
+              <input type="number" id="targetFinding" min="0" max="50" value="5" />
+            </label>
+            <label class="provider-field">
+              <span>Comments (Engaging)</span>
+              <input type="number" id="targetEngaging" min="0" max="30" value="3" />
+            </label>
+            <label class="provider-field">
+              <span>Replies (Building)</span>
+              <input type="number" id="targetBuilding" min="0" max="20" value="2" />
+            </label>
+          </div>
+          <div class="provider-actions">
+            <button id="cadenceSaveBtn" class="btn btn-primary">
+              <i class="fa fa-save"></i> Save targets
+            </button>
+          </div>
+          <div id="cadenceStatus" class="status-message" style="display: none"></div>
+        </details>
+
+        <!-- Profile Context (legacy AI summary view — also holds capture-full toggle) -->
+        <details class="settings-section settings-section--collapsible">
+          <summary>
+            <i class="fa fa-user-circle"></i>
+            Profile Context
+          </summary>
+          <p class="settings-description">
+            Capture your LinkedIn profile so AI drafts read in your voice. Open your own profile
+            page, then click Capture below.
+          </p>
+
+          <div id="profileStatus" class="profile-status">
+            <div id="profileNoneState" class="profile-none">
+              <i class="fa fa-info-circle"></i>
+              <span>No profile captured yet.</span>
+            </div>
+            <div id="profileCapturedState" class="profile-captured" style="display: none">
+              <div class="profile-row"><strong id="profileFullName">-</strong></div>
+              <div class="profile-row profile-headline" id="profileHeadline">-</div>
+              <div class="profile-row profile-positioning" id="profilePositioning">-</div>
+              <div class="profile-meta">
+                Captured <span id="profileCapturedAt">-</span> ·
+                <span id="profileSkillsCount">0</span> skills
+                <span id="profileStaleChip" class="profile-stale-chip" style="display: none"
+                  >stale</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-actions">
+            <button id="captureProfile" class="btn btn-primary">
+              <i class="fa fa-camera"></i>
+              Capture Profile
+            </button>
+          </div>
+
+          <label class="profile-toggle-row" for="captureFullProfile">
+            <input type="checkbox" id="captureFullProfile" checked />
+            <span>Capture full LinkedIn profile and activity</span>
+          </label>
+
+          <div id="profileMessage" class="status-message" style="display: none"></div>
+        </details>
+
+        <!-- AI Generation Parameters -->
+        <details class="settings-section settings-section--collapsible">
+          <summary>
             <i class="fa fa-sliders-h"></i>
             AI Generation Parameters
-          </h3>
+          </summary>
           <p class="settings-description">Fine-tune AI response generation settings</p>
 
           <div class="parameter-group">
@@ -344,14 +332,14 @@
           </div>
 
           <div id="parameterStatus" class="status-message" style="display: none"></div>
-        </div>
+        </details>
 
         <!-- Prompts -->
-        <div class="settings-section">
-          <h3>
+        <details class="settings-section settings-section--collapsible">
+          <summary>
             <i class="fa fa-edit"></i>
             AI Prompt Customization
-          </h3>
+          </summary>
           <p class="settings-description">Customize how the AI generates LinkedIn replies</p>
 
           <div id="settingsContent" class="settings-content">
@@ -394,7 +382,7 @@
 
             <div id="settingsStatus" class="status-message" style="display: none"></div>
           </div>
-        </div>
+        </details>
       </div>
     </div>
 

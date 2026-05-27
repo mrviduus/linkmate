@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to LinkMate</title>
+    <link rel="stylesheet" href="./welcome.css" />
+  </head>
+  <body>
+    <main class="welcome">
+      <header class="welcome__hdr">
+        <img src="icons/icon-64.png" width="56" height="56" alt="LinkMate" />
+        <h1>Welcome to LinkMate</h1>
+      </header>
+
+      <p class="welcome__lede">
+        LinkMate reads your LinkedIn profile to power AI-drafted comments and posts that sound like
+        you.
+      </p>
+
+      <p class="welcome__privacy">
+        <strong>Your data stays in this browser.</strong> No backend, no upload — everything runs
+        locally.
+      </p>
+
+      <label class="welcome__toggle">
+        <input type="checkbox" id="captureFull" checked />
+        <span>Capture full profile and activity (recommended)</span>
+      </label>
+
+      <div class="welcome__actions">
+        <button id="getStarted" class="welcome__primary">
+          Open my LinkedIn and capture profile
+        </button>
+        <button id="skip" class="welcome__secondary">Skip for now</button>
+      </div>
+
+      <p class="welcome__notice">
+        ⏱ Capture takes about 30 seconds. Don't close the side panel while it runs.
+      </p>
+
+      <p class="welcome__footnote">
+        You can always re-capture later by clicking the LinkMate icon while on your profile.
+      </p>
+    </main>
+
+    <script type="module" src="./welcome.ts"></script>
+  </body>
+</html>

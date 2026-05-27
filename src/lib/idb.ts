@@ -39,6 +39,52 @@ export interface OutcomeRow {
   manualVerdict?: 'positive' | 'negative';
 }
 
+/** Full LinkedIn profile + activity snapshot. Issue #16. */
+export interface UserProfile {
+  capturedAt: string;
+  profileUrl: string;
+  name: string;
+  headline: string;
+  location?: string;
+  connectionsCount?: number;
+  followersCount?: number;
+  about?: string;
+  skills: string[];
+  experience: Array<{
+    company: string;
+    title: string;
+    dateRange: string;
+    location?: string;
+    description?: string;
+  }>;
+  education: Array<{
+    school: string;
+    degree?: string;
+    field?: string;
+    dateRange?: string;
+  }>;
+  certifications?: Array<{
+    name: string;
+    issuer?: string;
+    date?: string;
+  }>;
+  languages?: string[];
+  recentPosts: Array<{
+    id: string;
+    text: string;
+    timestamp: string;
+    engagement?: { likes: number; comments: number; reposts: number };
+    isRepost: boolean;
+  }>;
+  recentComments: Array<{
+    id: string;
+    text: string;
+    timestamp: string;
+    originalPostText: string;
+    originalAuthor: string;
+  }>;
+}
+
 interface LinkMateDB extends DBSchema {
   actions: {
     key: number;
@@ -50,10 +96,14 @@ interface LinkMateDB extends DBSchema {
     value: OutcomeRow;
     indexes: { 'by-action': number };
   };
+  userProfile: {
+    key: string;
+    value: UserProfile;
+  };
 }
 
 const DB_NAME = 'linkmate';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase<LinkMateDB>> | null = null;
 
@@ -73,6 +123,9 @@ export function getDb(): Promise<IDBPDatabase<LinkMateDB>> {
             autoIncrement: true,
           });
           outcomes.createIndex('by-action', 'actionId');
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore('userProfile');
         }
       },
     });

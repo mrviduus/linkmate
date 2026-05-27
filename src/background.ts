@@ -26,6 +26,7 @@ import {
   getCadenceTargets,
   setCadenceTargets,
   getCadenceStreak,
+  getOnboardingCompleted,
 } from './storage-schema';
 import type {
   ParsedPost,
@@ -54,6 +55,79 @@ import {
 } from './recommender';
 
 console.log('LinkMate background service worker loaded');
+
+// ─── Onboarding — Option A welcome flow (issue #16) ────────────────────────
+//
+// On first install, open welcome.html in a new tab. The user explicitly opts
+// in there before we touch their LinkedIn data. No auto-redirect or
+// auto-capture on Chrome startup — that would surprise existing users.
+
+function findWelcomePath(): string {
+  const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
+    web_accessible_resources?: Array<{ resources?: string[] }>;
+  };
+  for (const entry of manifest.web_accessible_resources ?? []) {
+    for (const r of entry.resources ?? []) {
+      if (r.startsWith('welcome') && r.endsWith('.html')) return r;
+    }
+  }
+  return 'welcome.html';
+}
+
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason !== 'install') return;
+  if (await getOnboardingCompleted()) return;
+  try {
+    await chrome.tabs.create({
+      url: chrome.runtime.getURL(findWelcomePath()),
+      active: true,
+    });
+  } catch (err) {
+    console.warn('[LinkMate] failed to open welcome tab:', err);
+  }
+});
+
+// Action icon click → open the side panel automatically (instead of a popup).
+(
+  chrome.sidePanel as unknown as {
+    setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
+  }
+)
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((err) => console.warn('[LinkMate] setPanelBehavior failed:', err));
+
+// Issue #16 — content-script forwards the first user gesture on a LinkedIn
+// profile page so we can open the side panel without the user clicking the
+// extension icon. Chrome preserves the user-gesture token across this hop.
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.action === 'sidepanel.openFromGesture' && sender.tab?.id !== undefined) {
+    const tabId = sender.tab.id;
+    const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
+      side_panel?: { default_path?: string };
+    };
+    const sidePanelPath = manifest.side_panel?.default_path ?? 'popup.html';
+    const sp = chrome.sidePanel as unknown as {
+      setOptions: (o: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>;
+      open: (o: { tabId?: number; windowId?: number }) => Promise<void>;
+    };
+    void (async () => {
+      try {
+        await sp.setOptions({
+          tabId,
+          path: `${sidePanelPath}?targetTab=${tabId}&auto=1`,
+          enabled: true,
+        });
+        await sp.open({ tabId });
+        sendResponse({ ok: true });
+      } catch (err) {
+        console.warn('[LinkMate] sidepanel.openFromGesture failed:', err);
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
+    return true; // keep channel open for async sendResponse
+  }
+  return undefined;
+});
 
 // ─── AI generation parameters ───────────────────────────────────────────────
 
