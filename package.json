@@ -7,6 +7,7 @@
     "dev": "parcel watch src/manifest.json --config @parcel/config-webextension",
     "build": "parcel build src/manifest.json --config @parcel/config-webextension",
     "zip": "npm run build && cd dist && zip -r ../linkmate.zip . && cd ..",
+    "release": "./scripts/release.sh",
     "clean": "rm -rf dist .parcel-cache linkmate.zip",
     "test": "jest",
     "test:watch": "jest --watch",
