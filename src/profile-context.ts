@@ -160,13 +160,23 @@ export class ProfileContextService {
           const scope = main ?? document;
           const heightLog: number[] = [];
 
-          // Phase 1 — brute-force scroll. LinkedIn hydrates sections only as
-          // they enter the viewport, and the page's scrollHeight grows in
-          // chunks. Run for at least ~18s, bailing only after 8 consecutive
-          // iterations with no growth. Data quality > capture speed (#16).
+          // Phase 1 — brute scroll until ALL expected sections appear in DOM
+          // OR scrollHeight has been stable for 3 iterations. Bails as soon as
+          // experience/education/skills/projects h2s are present.
+          const TARGETS = /^(experience|education|skills(\s*\(\d+\))?|projects(\s*\(\d+\))?)/i;
+          const hasAllTargets = () => {
+            const seen = new Set<string>();
+            const list = Array.from((main ?? document).querySelectorAll('h2, h3'));
+            for (const h of list) {
+              const t = (h.textContent ?? '').trim();
+              const m = t.match(/^(experience|education|skills|projects)/i);
+              if (m) seen.add(m[1].toLowerCase());
+            }
+            return seen.size >= 4;
+          };
           let lastHeight = 0;
           let stableCount = 0;
-          for (let i = 0; i < 36; i++) {
+          for (let i = 0; i < 20; i++) {
             const h = Math.max(
               document.documentElement.scrollHeight,
               document.body.scrollHeight,
@@ -176,36 +186,31 @@ export class ProfileContextService {
             window.scrollTo({ top: h, behavior: 'instant' });
             if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
             document.documentElement.scrollTop = h;
-            // Also scroll by viewport increments to trigger IntersectionObservers
-            // on partially-rendered cards.
-            window.scrollBy({ top: 200, behavior: 'instant' });
-            await wait(800);
+            await wait(700);
+            if (i >= 4 && hasAllTargets()) break;
             if (h === lastHeight) {
               stableCount++;
-              if (stableCount >= 8 && i >= 22) break; // ≥18s minimum
+              if (stableCount >= 3 && i >= 6) break;
             } else {
               stableCount = 0;
             }
             lastHeight = h;
           }
 
-          // Phase 2 — scrollIntoView every h2/h3 in <main> with a long wait
-          // each so SDUI cards load their <li> items. We do ALL headings, not
-          // a curated list, since LinkedIn occasionally renames sections.
+          // Phase 2 — only scrollIntoView the target sections (not every h2).
+          // Wait 500ms each; LinkedIn 2026 uses <div componentkey> + <p>, not
+          // <li>, so the old "if items==0 wait more" heuristic was wrong.
           const headings = Array.from(scope.querySelectorAll('h2, h3')) as HTMLElement[];
           for (const h of headings) {
+            if (!TARGETS.test((h.textContent ?? '').trim())) continue;
             try {
               h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
-              await wait(700);
-              // If the card is still empty, wait a bit more.
-              const card = h.closest('section, div[componentkey]');
-              const itemCount = card?.querySelectorAll('li').length ?? 0;
-              if (itemCount === 0) await wait(1500);
+              await wait(500);
             } catch {
               /* ignore */
             }
           }
-          await wait(1000);
+          await wait(400);
 
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
@@ -382,12 +387,11 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
       func: async () => {
         const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
         const main = document.querySelector('main');
-        // Extra wait for the SDUI XHR hydration cycle.
-        await wait(1500);
-        // Loop scroll while scrollHeight grows OR until 10 attempts.
+        await wait(900);
+        // Scroll until enough activity items show up OR scrollHeight stable.
         let lastHeight = 0;
         let stable = 0;
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 8; i++) {
           const h = Math.max(
             document.documentElement.scrollHeight,
             document.body.scrollHeight,
@@ -396,10 +400,14 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
           window.scrollTo({ top: h, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
           document.documentElement.scrollTop = h;
-          await wait(900);
+          await wait(700);
+          const itemCount = (main ?? document).querySelectorAll(
+            '[data-urn^="urn:li:activity"]',
+          ).length;
+          if (itemCount >= 10) break;
           if (h === lastHeight) {
             stable++;
-            if (stable >= 2) break;
+            if (stable >= 2 && i >= 3) break;
           } else {
             stable = 0;
           }
@@ -407,7 +415,7 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
         }
         window.scrollTo({ top: 0, behavior: 'instant' });
         if (main && 'scrollTo' in main) main.scrollTo({ top: 0, behavior: 'instant' });
-        await wait(300);
+        await wait(200);
         return document.documentElement.outerHTML;
       },
     });
