@@ -397,7 +397,9 @@ async function handleCaptureProfile(): Promise<void> {
         const exp = result.userProfile?.experience.length ?? 0;
         const edu = result.userProfile?.education.length ?? 0;
         const sk = result.userProfile?.skills.length ?? 0;
-        chrome.notifications?.create?.('linkmate-capture-done', {
+        // Unique id per capture so back-to-back successes don't silently
+        // replace each other (Chrome treats same id as an update).
+        chrome.notifications?.create?.(`linkmate-capture-${Date.now()}`, {
           type: 'basic',
           iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
           title: 'LinkMate — profile captured',
@@ -738,7 +740,9 @@ interface ActionRowDto {
   submitted: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const streakCount = $('streakCount');
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const cadenceBars = $('cadenceBars');
 const recommendCards = $('recommendCards');
 const pendingChips = $('pendingChips');
@@ -787,25 +791,6 @@ const PILLAR_COPY: Record<Pillar, { label: string; cta: string; href: string; re
     reason: 'Building pillar — back-and-forth replies signal real relationships.',
   },
 };
-
-function renderProgressBars(progress: WeeklyProgressDto, weakest: Pillar): void {
-  if (!cadenceBars) return;
-  const rows = cadenceBars.querySelectorAll<HTMLElement>('.cadence-row');
-  rows.forEach((row) => {
-    const pillar = row.getAttribute('data-pillar') as Pillar;
-    const p = progress[pillar];
-    const fill = row.querySelector<HTMLElement>('.cadence-fill');
-    const num = row.querySelector<HTMLElement>('.cadence-num');
-    if (fill) fill.style.width = `${p.pct}%`;
-    if (num) num.textContent = `${p.done} / ${p.target}`;
-    row.classList.toggle('weakest', pillar === weakest);
-    row.classList.toggle('complete', p.target > 0 && p.done >= p.target);
-  });
-}
-
-function renderStreak(count: number): void {
-  if (streakCount) streakCount.textContent = String(count);
-}
 
 interface RecommendCardDto {
   action: string;
@@ -862,6 +847,7 @@ function relativeTime(ts: number): string {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function loadPending(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; rows: ActionRowDto[] }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'action.log.pending' }, (r) =>
@@ -923,39 +909,19 @@ async function recordOutcome(
   // Refresh cadence (no change to counts, but streak might shift on outcome boundaries later).
 }
 
+/**
+ * Issue #16: the Today (cadence) section was removed from popup.html. The
+ * background handlers it called (recommender.getCards, recommender.getRetro)
+ * have side effects (AI calls, retroLastShown bookkeeping) — firing them
+ * on every panel open with no UI to consume the result was wasted compute
+ * + drifting state. Keeping the function as a no-op so existing callers
+ * (DOMContentLoaded, handleSsiRefresh) don't need to know.
+ */
 async function loadToday(): Promise<void> {
-  const [progressResp, streakResp, cardsResp, retroResp] = await Promise.all([
-    new Promise<{ ok: boolean; progress: WeeklyProgressDto; weakest: Pillar }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'action.log.weeklyProgress' }, (r) =>
-        resolve(r ?? { ok: false, progress: emptyProgress(), weakest: 'engaging' }),
-      );
-    }),
-    new Promise<{ ok: boolean; count: number }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'cadence.streak' }, (r) =>
-        resolve(r ?? { ok: false, count: 0 }),
-      );
-    }),
-    new Promise<{ ok: boolean; state?: RecommenderStateDto }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'recommender.getCards' }, (r) =>
-        resolve(r ?? { ok: false }),
-      );
-    }),
-    new Promise<{ ok: boolean; retro?: string | null }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'recommender.getRetro' }, (r) =>
-        resolve(r ?? { ok: false }),
-      );
-    }),
-  ]);
-  const progress = progressResp.progress ?? emptyProgress();
-  const weakest = progressResp.weakest ?? 'engaging';
-  renderProgressBars(progress, weakest);
-  renderStreak(streakResp.count ?? 0);
-  if (cardsResp.state) renderRecommendations(cardsResp.state);
-  renderRetro(retroResp.retro ?? null);
-  void loadPending();
-  void loadTopics();
+  // Intentionally no-op. See block comment above.
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function renderRetro(text: string | null): void {
   if (!retroCard || !retroText) return;
   if (!text) {
@@ -1155,6 +1121,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (next) renderPostDraftsState(next);
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function loadTopics(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; topics?: Array<{ topic: string; count: number }> }>(
     (resolve) => {
@@ -1183,6 +1150,7 @@ async function loadTopics(): Promise<void> {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function emptyProgress(): WeeklyProgressDto {
   return {
     brand: { done: 0, target: 1, pct: 0 },

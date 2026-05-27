@@ -1147,9 +1147,11 @@ if (window.location.hostname.includes('linkedin.com')) {
       window.removeEventListener('keydown', open, true);
       window.removeEventListener('scroll', open, true);
     };
-    window.addEventListener('click', open, true);
-    window.addEventListener('keydown', open, true);
-    window.addEventListener('scroll', open, true);
+    window.addEventListener('click', open, { capture: true });
+    window.addEventListener('keydown', open, { capture: true });
+    // Passive so we don't block the compositor on every scroll event before
+    // the first gesture fires.
+    window.addEventListener('scroll', open, { capture: true, passive: true });
   })();
 }
 

@@ -100,34 +100,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // profile page so we can open the side panel without the user clicking the
 // extension icon. Chrome preserves the user-gesture token across this hop.
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Welcome → LinkedIn handoff: opens side panel inside the user-activation
-  // window of the welcome page's Get-Started click, then triggers nav.
-  if (request?.action === 'onboarding.start' && sender.tab?.id !== undefined) {
-    const tabId = sender.tab.id;
-    const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
-      side_panel?: { default_path?: string };
-    };
-    const sidePanelPath = manifest.side_panel?.default_path ?? 'popup.html';
-    const sp = chrome.sidePanel as unknown as {
-      setOptions: (o: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>;
-      open: (o: { tabId?: number; windowId?: number }) => Promise<void>;
-    };
-    void (async () => {
-      try {
-        await sp.setOptions({
-          tabId,
-          path: `${sidePanelPath}?targetTab=${tabId}&auto=1`,
-          enabled: true,
-        });
-        await sp.open({ tabId });
-        sendResponse({ ok: true });
-      } catch (err) {
-        console.warn('[LinkMate] onboarding.start sidePanel.open failed:', err);
-        sendResponse({ ok: false, error: String(err) });
-      }
-    })();
-    return true;
-  }
   if (request?.action === 'sidepanel.openFromGesture' && sender.tab?.id !== undefined) {
     const tabId = sender.tab.id;
     const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
