@@ -21,6 +21,54 @@
       </header>
 
       <div id="settings-content" class="settings-main">
+        <!-- Capture Hero: status + stats. First thing the user sees. -->
+        <section id="captureHero" class="capture-hero capture-hero--empty">
+          <div class="capture-hero__head">
+            <span id="captureHeroIcon" class="capture-hero__icon">○</span>
+            <div class="capture-hero__title-wrap">
+              <h2 id="captureHeroTitle" class="capture-hero__title">No profile captured yet</h2>
+              <div id="captureHeroSubtitle" class="capture-hero__subtitle">
+                Click below to scan your LinkedIn profile.
+              </div>
+            </div>
+          </div>
+          <div id="captureHeroStats" class="capture-hero__stats" style="display: none">
+            <div class="capture-hero__stat">
+              <span id="statExp" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">experience</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statEdu" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">education</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statSkl" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">skills</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statPst" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">posts</span>
+            </div>
+            <div class="capture-hero__stat">
+              <span id="statCmt" class="capture-hero__stat-num">0</span>
+              <span class="capture-hero__stat-label">comments</span>
+            </div>
+          </div>
+          <div class="capture-hero__actions">
+            <button id="heroRefresh" class="btn btn-primary capture-hero__btn">
+              <i class="fa fa-camera"></i> Capture profile
+            </button>
+            <button
+              id="heroCopyJson"
+              class="btn btn-secondary capture-hero__btn"
+              style="display: none"
+            >
+              <i class="fa fa-copy"></i> Copy JSON
+            </button>
+          </div>
+          <div id="captureHeroMessage" class="capture-hero__message" style="display: none"></div>
+        </section>
+
         <!-- Today: cadence quotas + 3 cards -->
         <div class="settings-section" id="todaySection">
           <h3>

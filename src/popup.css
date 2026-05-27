@@ -278,6 +278,118 @@ body {
   user-select: none;
 }
 
+/* ── Capture Hero ────────────────────────────────────────────────────────── */
+
+.capture-hero {
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.capture-hero--empty {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+.capture-hero--ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+.capture-hero--loading {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.capture-hero--error {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.capture-hero__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.capture-hero__icon {
+  font-size: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+}
+
+.capture-hero__title-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.capture-hero__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 2px 0;
+  color: #1f2937;
+}
+
+.capture-hero__subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.capture-hero__stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.capture-hero__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.capture-hero__stat-num {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.1;
+}
+
+.capture-hero__stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.capture-hero__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.capture-hero__btn {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.capture-hero__message {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #374151;
+}
+
 .profile-toggle-row input[type='checkbox'] {
   margin: 0;
 }

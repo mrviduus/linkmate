@@ -13,6 +13,8 @@ import {
   getSsiLastError,
   setCaptureFullProfile,
 } from './storage-schema';
+import { getUserProfile } from './user-profile-store';
+import type { UserProfile } from './lib/idb';
 import type { ProfileContext, SsiSnapshot } from './storage-schema';
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -94,6 +96,126 @@ async function handleProviderSave(): Promise<void> {
   }
 }
 
+// ─── Capture Hero (top-of-panel status + stats; issue #16 UX) ───────────────
+
+const heroSection = $('captureHero');
+const heroIcon = $('captureHeroIcon');
+const heroTitle = $('captureHeroTitle');
+const heroSubtitle = $('captureHeroSubtitle');
+const heroStats = $('captureHeroStats');
+const heroStatExp = $('statExp');
+const heroStatEdu = $('statEdu');
+const heroStatSkl = $('statSkl');
+const heroStatPst = $('statPst');
+const heroStatCmt = $('statCmt');
+const heroRefreshBtn = $<HTMLButtonElement>('heroRefresh');
+const heroCopyBtn = $<HTMLButtonElement>('heroCopyJson');
+const heroMessageEl = $('captureHeroMessage');
+
+type HeroState =
+  | { kind: 'empty' }
+  | { kind: 'loading' }
+  | { kind: 'ok'; profile: UserProfile }
+  | { kind: 'error'; message: string };
+
+function setHeroClass(variant: 'empty' | 'loading' | 'ok' | 'error'): void {
+  if (!heroSection) return;
+  heroSection.classList.remove(
+    'capture-hero--empty',
+    'capture-hero--loading',
+    'capture-hero--ok',
+    'capture-hero--error',
+  );
+  heroSection.classList.add(`capture-hero--${variant}`);
+}
+
+function showHeroMessage(text: string): void {
+  if (!heroMessageEl) return;
+  heroMessageEl.textContent = text;
+  heroMessageEl.style.display = '';
+  setTimeout(() => {
+    if (heroMessageEl) heroMessageEl.style.display = 'none';
+  }, 4000);
+}
+
+function renderHero(state: HeroState): void {
+  if (!heroSection) return;
+  setHeroClass(state.kind);
+  if (heroStats) heroStats.style.display = state.kind === 'ok' ? '' : 'none';
+  if (heroCopyBtn) heroCopyBtn.style.display = state.kind === 'ok' ? '' : 'none';
+  if (heroRefreshBtn) heroRefreshBtn.disabled = state.kind === 'loading';
+
+  if (state.kind === 'empty') {
+    if (heroIcon) heroIcon.textContent = '○';
+    if (heroTitle) heroTitle.textContent = 'No profile captured yet';
+    if (heroSubtitle) heroSubtitle.textContent = 'Click below to scan your LinkedIn profile.';
+    if (heroRefreshBtn) heroRefreshBtn.innerHTML = '<i class="fa fa-camera"></i> Capture profile';
+    return;
+  }
+  if (state.kind === 'loading') {
+    if (heroIcon) heroIcon.textContent = '⏳';
+    if (heroTitle) heroTitle.textContent = 'Capturing your profile…';
+    if (heroSubtitle)
+      heroSubtitle.textContent = 'This usually takes about 20 seconds — leave the side panel open.';
+    if (heroRefreshBtn)
+      heroRefreshBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Working…';
+    return;
+  }
+  if (state.kind === 'error') {
+    if (heroIcon) heroIcon.textContent = '✕';
+    if (heroTitle) heroTitle.textContent = 'Capture failed';
+    if (heroSubtitle) heroSubtitle.textContent = state.message;
+    if (heroRefreshBtn) heroRefreshBtn.innerHTML = '<i class="fa fa-redo"></i> Try again';
+    return;
+  }
+  // ok
+  const p = state.profile;
+  if (heroIcon) heroIcon.textContent = '✅';
+  if (heroTitle) heroTitle.textContent = p.name || 'Profile captured';
+  if (heroSubtitle)
+    heroSubtitle.textContent = `Captured ${formatRelativeIso(p.capturedAt)} · ${
+      p.location ?? 'no location'
+    }`;
+  if (heroStatExp) heroStatExp.textContent = String(p.experience.length);
+  if (heroStatEdu) heroStatEdu.textContent = String(p.education.length);
+  if (heroStatSkl) heroStatSkl.textContent = String(p.skills.length);
+  if (heroStatPst) heroStatPst.textContent = String(p.recentPosts.length);
+  if (heroStatCmt) heroStatCmt.textContent = String(p.recentComments.length);
+  if (heroRefreshBtn) heroRefreshBtn.innerHTML = '<i class="fa fa-redo"></i> Refresh capture';
+}
+
+function formatRelativeIso(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 'recently';
+  return formatRelativeTime(t);
+}
+
+async function refreshCaptureHero(): Promise<void> {
+  try {
+    const profile = await getUserProfile();
+    renderHero(profile ? { kind: 'ok', profile } : { kind: 'empty' });
+  } catch {
+    renderHero({ kind: 'empty' });
+  }
+}
+
+async function handleHeroRefresh(): Promise<void> {
+  renderHero({ kind: 'loading' });
+  await handleCaptureProfile();
+  await refreshCaptureHero();
+}
+
+async function handleHeroCopyJson(): Promise<void> {
+  try {
+    const profile = await getUserProfile();
+    if (!profile) return;
+    await navigator.clipboard.writeText(JSON.stringify(profile, null, 2));
+    showHeroMessage('Copied JSON to clipboard.');
+  } catch (err) {
+    showHeroMessage(`Copy failed: ${String(err)}`);
+  }
+}
+
 // ─── Profile Context ────────────────────────────────────────────────────────
 
 const captureProfileBtn = $<HTMLButtonElement>('captureProfile');
@@ -150,6 +272,8 @@ async function refreshProfileDisplay(): Promise<void> {
   const profile = await profileService.get();
   const stale = await profileService.shouldRefresh();
   renderProfile(profile, profile !== null && stale);
+  // Hero card uses IDB data (richer than chrome.storage ProfileContext) — keep them in sync.
+  await refreshCaptureHero();
 }
 
 /**
@@ -1091,6 +1215,8 @@ function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
   captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
+  heroRefreshBtn?.addEventListener('click', () => void handleHeroRefresh());
+  heroCopyBtn?.addEventListener('click', () => void handleHeroCopyJson());
   ssiRefreshBtn?.addEventListener('click', () => void handleSsiRefresh());
   ssiOpenPageBtn?.addEventListener('click', handleSsiOpenPage);
   temperatureSlider?.addEventListener('input', handleTemperatureChange);
