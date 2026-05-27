@@ -362,6 +362,21 @@ async function handleCaptureProfile(): Promise<void> {
       } else {
         showProfileMessage('✅ Profile captured successfully.', 'success');
       }
+      // Issue #16 follow-up: also kick off an SSI snapshot so both visuals
+      // light up together. Fire-and-forget; SSI refresh updates its own panel
+      // section via loadSsiData when it completes.
+      if (!result.cached) {
+        void (async () => {
+          try {
+            await new Promise<void>((resolve) => {
+              chrome.runtime.sendMessage({ action: 'ssi.captureNow' }, () => resolve());
+            });
+            await loadSsiData();
+          } catch {
+            /* SSI capture is best-effort; ignore failures */
+          }
+        })();
+      }
       // System notification so the user knows even if focus moved elsewhere.
       try {
         const exp = result.userProfile?.experience.length ?? 0;

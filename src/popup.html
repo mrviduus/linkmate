@@ -144,67 +144,6 @@
           <div id="ssiMessage" class="status-message" style="display: none"></div>
         </div>
 
-        <!-- Today: cadence quotas + 3 cards -->
-        <div class="settings-section" id="todaySection">
-          <h3>
-            <i class="fa fa-bolt"></i>
-            Today
-          </h3>
-          <p class="settings-description">
-            Rolling 7-day quotas. The recommender biases your actions toward the weakest pillar.
-          </p>
-
-          <div id="retroCard" class="retro-card" style="display: none">
-            <div class="retro-card__text" id="retroText">—</div>
-            <button id="retroDismiss" class="retro-card__close" title="Dismiss">✕</button>
-          </div>
-
-          <div id="cadenceBars" class="cadence-bars">
-            <div class="cadence-row" data-pillar="brand">
-              <span class="cadence-label">Brand</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 1</span>
-            </div>
-            <div class="cadence-row" data-pillar="finding">
-              <span class="cadence-label">Finding</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 5</span>
-            </div>
-            <div class="cadence-row" data-pillar="engaging">
-              <span class="cadence-label">Engaging</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 3</span>
-            </div>
-            <div class="cadence-row" data-pillar="building">
-              <span class="cadence-label">Building</span>
-              <div class="cadence-track"><div class="cadence-fill"></div></div>
-              <span class="cadence-num">0 / 2</span>
-            </div>
-          </div>
-
-          <div class="today-meta">
-            <span id="cardsSource" class="cards-source">—</span>
-            <button id="cardsRefresh" class="cards-refresh" title="Regenerate now">
-              <i class="fa fa-sync"></i>
-            </button>
-          </div>
-          <div id="recommendCards" class="recommend-cards"></div>
-
-          <button id="suggestPostBtn" class="btn btn-secondary suggest-post-btn">
-            <i class="fa fa-magic"></i> Suggest a post
-          </button>
-
-          <div id="pendingChips" class="pending-chips" style="display: none">
-            <h4 class="pending-chips__hdr">Did this work?</h4>
-            <div id="pendingChipsList"></div>
-          </div>
-
-          <div id="topicsRow" class="topics-row" style="display: none">
-            <h4 class="topics-row__hdr">Topics (last 14 days)</h4>
-            <div id="topicsChips" class="topics-chips"></div>
-          </div>
-        </div>
-
         <!-- OpenAI key + model -->
         <div class="settings-section">
           <h3>
@@ -254,11 +193,11 @@
         </div>
 
         <!-- Weekly cadence targets -->
-        <div class="settings-section">
-          <h3>
+        <details class="settings-section settings-section--collapsible">
+          <summary>
             <i class="fa fa-calendar-week"></i>
             Weekly Targets
-          </h3>
+          </summary>
           <p class="settings-description">
             How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.
           </p>
@@ -286,14 +225,14 @@
             </button>
           </div>
           <div id="cadenceStatus" class="status-message" style="display: none"></div>
-        </div>
+        </details>
 
-        <!-- Profile Context -->
-        <div class="settings-section">
-          <h3>
+        <!-- Profile Context (legacy AI summary view — also holds capture-full toggle) -->
+        <details class="settings-section settings-section--collapsible">
+          <summary>
             <i class="fa fa-user-circle"></i>
             Profile Context
-          </h3>
+          </summary>
           <p class="settings-description">
             Capture your LinkedIn profile so AI drafts read in your voice. Open your own profile
             page, then click Capture below.
@@ -331,14 +270,14 @@
           </label>
 
           <div id="profileMessage" class="status-message" style="display: none"></div>
-        </div>
+        </details>
 
         <!-- AI Generation Parameters -->
-        <div class="settings-section">
-          <h3>
+        <details class="settings-section settings-section--collapsible">
+          <summary>
             <i class="fa fa-sliders-h"></i>
             AI Generation Parameters
-          </h3>
+          </summary>
           <p class="settings-description">Fine-tune AI response generation settings</p>
 
           <div class="parameter-group">
@@ -393,14 +332,14 @@
           </div>
 
           <div id="parameterStatus" class="status-message" style="display: none"></div>
-        </div>
+        </details>
 
         <!-- Prompts -->
-        <div class="settings-section">
-          <h3>
+        <details class="settings-section settings-section--collapsible">
+          <summary>
             <i class="fa fa-edit"></i>
             AI Prompt Customization
-          </h3>
+          </summary>
           <p class="settings-description">Customize how the AI generates LinkedIn replies</p>
 
           <div id="settingsContent" class="settings-content">
@@ -443,7 +382,7 @@
 
             <div id="settingsStatus" class="status-message" style="display: none"></div>
           </div>
-        </div>
+        </details>
       </div>
     </div>
 

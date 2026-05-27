@@ -84,6 +84,52 @@ body {
   color: #0a66c2;
 }
 
+/* Collapsible settings sections (<details>) — mute when collapsed, open on click */
+.settings-section--collapsible {
+  padding: 0 0 10px 0;
+  border-top: 1px solid #f0f0f0;
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.settings-section--collapsible > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  padding: 12px 0;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.settings-section--collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-section--collapsible > summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.settings-section--collapsible[open] > summary {
+  color: #1d1d1f;
+  font-weight: 600;
+}
+
+.settings-section--collapsible[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.settings-section--collapsible > summary i {
+  color: #0a66c2;
+}
+
 .settings-description {
   font-size: 12px;
   color: #6a737d;
