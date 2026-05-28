@@ -9,11 +9,9 @@ import {
 } from './ssi-tracker';
 import {
   getCaptureFullProfile,
-  getDeepScrape,
   getProfile,
   getSsiLastError,
   setCaptureFullProfile,
-  setDeepScrape,
   setDeepScrapeCancel,
   STORAGE_KEYS,
 } from './storage-schema';
@@ -234,7 +232,6 @@ const profileSkillsCount = $('profileSkillsCount');
 const profileStaleChip = $('profileStaleChip');
 const profileMessage = $('profileMessage');
 const captureFullProfileToggle = $<HTMLInputElement>('captureFullProfile');
-const deepScrapeToggle = $<HTMLInputElement>('deepScrape');
 const deepScrapeProgressEl = $<HTMLDivElement>('deepScrapeProgress');
 const deepScrapeProgressText = $<HTMLSpanElement>('deepScrapeProgressText');
 const deepScrapeCancelBtn = $<HTMLButtonElement>('deepScrapeCancelBtn');
@@ -414,16 +411,6 @@ async function loadCaptureFullProfileToggle(): Promise<void> {
 async function handleCaptureFullProfileToggle(): Promise<void> {
   if (!captureFullProfileToggle) return;
   await setCaptureFullProfile(captureFullProfileToggle.checked);
-}
-
-async function loadDeepScrapeToggle(): Promise<void> {
-  if (!deepScrapeToggle) return;
-  deepScrapeToggle.checked = await getDeepScrape();
-}
-
-async function handleDeepScrapeToggle(): Promise<void> {
-  if (!deepScrapeToggle) return;
-  await setDeepScrape(deepScrapeToggle.checked);
 }
 
 function renderDeepScrapeProgress(p: DeepScrapeProgress | null): void {
@@ -1304,7 +1291,6 @@ function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
   captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
-  deepScrapeToggle?.addEventListener('change', () => void handleDeepScrapeToggle());
   deepScrapeCancelBtn?.addEventListener('click', () => void handleDeepScrapeCancel());
   wireDeepScrapeProgressListener();
   heroRefreshBtn?.addEventListener('click', () => void handleHeroRefresh());
@@ -1347,7 +1333,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadProviderConfig(),
     refreshProfileDisplay(),
     loadCaptureFullProfileToggle(),
-    loadDeepScrapeToggle(),
     loadSsiData(),
     loadAIParameters(),
     loadPrompts(),

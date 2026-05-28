@@ -30,7 +30,6 @@ export const STORAGE_KEYS = {
   retroLastShown: 'linkmate.retro.lastShown.v1',
   postDraftsState: 'linkmate.recommender.postDrafts.v1',
   captureFullProfile: 'linkmate.settings.captureFullProfile.v1',
-  deepScrape: 'linkmate.settings.deepScrape.v1',
   deepScrapeCancel: 'linkmate.deepScrape.cancel.v1',
   deepScrapeProgress: 'linkmate.deepScrape.progress.v1',
   onboardingCompleted: 'linkmate.settings.onboardingCompleted.v1',
@@ -418,21 +417,6 @@ export async function getCaptureFullProfile(): Promise<boolean> {
 
 export async function setCaptureFullProfile(value: boolean): Promise<void> {
   await writeKey(STORAGE_KEYS.captureFullProfile, value);
-}
-
-// ─── Settings: deep-scrape toggle (experiment) ──────────────────────────────
-//
-// When ON, captureFullProfile scrolls recent-activity pages until scrollHeight
-// stabilises (instead of stopping at ~10 items) and removes the post/comment
-// caps in the parser. First run is slow + visible to user; gives data
-// scientists full history for fine-tuning / RAG. Default OFF.
-
-export async function getDeepScrape(): Promise<boolean> {
-  return (await readKey<boolean>(STORAGE_KEYS.deepScrape)) ?? false;
-}
-
-export async function setDeepScrape(value: boolean): Promise<void> {
-  await writeKey(STORAGE_KEYS.deepScrape, value);
 }
 
 // ─── Deep scrape live progress + cancel signal ──────────────────────────────

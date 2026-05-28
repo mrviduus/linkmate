@@ -37,7 +37,6 @@ import {
 import type { RawProfileFields } from './profile-parser';
 import {
   getCaptureFullProfile,
-  getDeepScrape,
   getProfile,
   getProviderConfig,
   setDeepScrapeCancel,
@@ -328,14 +327,11 @@ export class ProfileContextService {
     // So we scroll the page programmatically, wait for SDUI to fetch the async
     // sections, then grab the HTML. ~3.5s total wait inside keepAlive.
     progress('scraping');
-    // Read deepScrape ahead of time — passed to scrapeInActiveTab (activity
-    // subpages) downstream. The main-profile inject below intentionally does
-    // NOT use deep/cancel/progress — that's what v0.4.0 did and what works.
-    const deepScrapeEnabled = await getDeepScrape();
-    if (deepScrapeEnabled) {
-      await setDeepScrapeCancel(false);
-      await setDeepScrapeProgress(null);
-    }
+    // Deep mode is the only mode now. Clear stale cancel/progress before the
+    // recent-activity scrape can poll them. The main-profile inject below
+    // intentionally does NOT use deep/cancel/progress — byte-for-byte v0.4.0.
+    await setDeepScrapeCancel(false);
+    await setDeepScrapeProgress(null);
     let html: string | null = null;
     try {
       // INTENTIONAL: this inject is byte-for-byte the v0.4.0 main-profile
@@ -488,7 +484,7 @@ export class ProfileContextService {
     let userProfile: UserProfile | undefined;
     if (fullProfileEnabled && activeTab?.id !== undefined) {
       try {
-        const fresh = await captureFullUserProfile(url, parsedDoc, activeTab.id, deepScrapeEnabled);
+        const fresh = await captureFullUserProfile(url, parsedDoc, activeTab.id);
         // URN-merge with previous snapshot — accumulates history across runs
         // so old activity isn't lost when LinkedIn paginates it out of view.
         const previous = await getUserProfile().catch(() => null);
@@ -496,10 +492,8 @@ export class ProfileContextService {
         await saveUserProfile(userProfile);
       } catch (err) {
         if (err instanceof CheckpointError) {
-          if (deepScrapeEnabled) {
-            await setDeepScrapeProgress(null);
-            await setDeepScrapeCancel(false);
-          }
+          await setDeepScrapeProgress(null);
+          await setDeepScrapeCancel(false);
           return {
             ok: false,
             reason: 'checkpoint',
@@ -513,10 +507,8 @@ export class ProfileContextService {
     // Always clear the progress badge on the way out.
     // captureFullUserProfile's finally{} does the same for the normal path,
     // but this catches early-return paths above (parser-empty, etc).
-    if (deepScrapeEnabled) {
-      await setDeepScrapeProgress(null);
-      await setDeepScrapeCancel(false);
-    }
+    await setDeepScrapeProgress(null);
+    await setDeepScrapeCancel(false);
 
     // Step 6 — OpenAI positioning summary + chrome.storage ProfileContext.
     // Powers AI-drafted comments elsewhere in the extension. NON-BLOCKING:
@@ -717,21 +709,19 @@ async function scrapeAllSkills(tabId: number, handle: string): Promise<string[]>
 async function scrapeInActiveTab(
   tabId: number,
   url: string,
-  opts: { deep?: boolean; phase?: 'posts' | 'comments' } = {}
+  opts: { phase?: 'posts' | 'comments' } = {}
 ): Promise<string | null> {
   // Announce the new phase BEFORE the tab navigates — otherwise the popup
   // keeps showing the previous phase's stale "iter N items M" for the 1-2s
   // of navigation + SDUI hydration. Reset to iter=0 / items=0 so the badge
   // reads "Scraping posts — 0 items, iter 0" immediately.
-  if (opts.deep) {
-    await setDeepScrapeProgress({
-      phase: opts.phase ?? 'posts',
-      iter: 0,
-      items: 0,
-      height: 0,
-      ts: Date.now(),
-    });
-  }
+  await setDeepScrapeProgress({
+    phase: opts.phase ?? 'posts',
+    iter: 0,
+    items: 0,
+    height: 0,
+    ts: Date.now(),
+  });
   await chrome.tabs.update(tabId, { url });
 
   // Wait for the navigation to fully complete. Two failure modes guarded:
@@ -766,12 +756,8 @@ async function scrapeInActiveTab(
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      args: [
-        { ...INJECT_RUNTIME, deep: !!opts.deep, phase: opts.phase ?? 'posts' },
-      ],
-      func: async (
-        cfg: InjectRuntime & { deep: boolean; phase: 'posts' | 'comments' }
-      ) => {
+      args: [{ ...INJECT_RUNTIME, phase: opts.phase ?? 'posts' }],
+      func: async (cfg: InjectRuntime & { phase: 'posts' | 'comments' }) => {
         // Checkpoint: LinkedIn detected suspicious activity (often triggered
         // by aggressive scroll in deep mode) and is asking the user to verify.
         // Two delivery modes:
@@ -798,46 +784,37 @@ async function scrapeInActiveTab(
           return cfg.authwallMarker;
         }
         const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-        // Deep-mode jitter: ±200ms randomisation makes the scroll cadence look
-        // less robotic. LinkedIn's anti-bot heuristics flag uniform 900ms
-        // beats; jittered waits stay safe. ~15% wall-clock cost.
-        const jitter = cfg.deep ? () => Math.floor(Math.random() * 400) - 200 : () => 0;
+        // Jitter ±200ms — uniform cadence looks robotic to LinkedIn anti-bot.
+        const jitter = () => Math.floor(Math.random() * 400) - 200;
         const main = document.querySelector('main');
         await wait(900 + jitter());
 
         // Inject script runs in isolated world and CAN call chrome.storage —
         // popup writes the cancel flag, we poll it; we write progress, popup
-        // observes it via storage.onChanged. Gated to deep mode only — quick
-        // mode finishes in ~6s, the UI flash isn't useful and adds noise.
-        const writeProgress = cfg.deep
-          ? async (iter: number, items: number, height: number) => {
-              try {
-                await chrome.storage.local.set({
-                  [cfg.progressKey]: { phase: cfg.phase, iter, items, height, ts: Date.now() },
-                });
-              } catch {
-                /* storage write failures shouldn't kill scrape */
-              }
-            }
-          : async (_iter: number, _items: number, _height: number) => {};
-        const isCancelled = cfg.deep
-          ? async (): Promise<boolean> => {
-              try {
-                const row = (await chrome.storage.local.get(cfg.cancelKey)) as Record<string, unknown>;
-                return !!row[cfg.cancelKey];
-              } catch {
-                return false;
-              }
-            }
-          : async (): Promise<boolean> => false;
+        // observes it via storage.onChanged.
+        const writeProgress = async (iter: number, items: number, height: number) => {
+          try {
+            await chrome.storage.local.set({
+              [cfg.progressKey]: { phase: cfg.phase, iter, items, height, ts: Date.now() },
+            });
+          } catch {
+            /* storage write failures shouldn't kill scrape */
+          }
+        };
+        const isCancelled = async (): Promise<boolean> => {
+          try {
+            const row = (await chrome.storage.local.get(cfg.cancelKey)) as Record<string, unknown>;
+            return !!row[cfg.cancelKey];
+          } catch {
+            return false;
+          }
+        };
 
-        // Deep mode: scroll until scrollHeight is stable N iterations in a row
-        // or we hit a safety cap (LinkedIn lazy-loads indefinitely; this is the
-        // "no more new content" signal). Quick mode: stop at ~10 items.
-        const MAX_ITERS = cfg.deep ? 200 : 8;
-        const ITEM_TARGET = cfg.deep ? Infinity : 10;
-        const STABLE_TARGET = cfg.deep ? 4 : 2;
-        const STABLE_MIN_ITER = cfg.deep ? 0 : 3;
+        // Scroll until scrollHeight + item count are stable 4 iterations in a
+        // row (LinkedIn lazy-loads indefinitely; "no more new content" signal)
+        // or we hit a safety cap of 200 iterations.
+        const MAX_ITERS = 200;
+        const STABLE_TARGET = 4;
 
         let lastHeight = 0;
         let stable = 0;
@@ -853,7 +830,7 @@ async function scrapeInActiveTab(
           window.scrollTo({ top: h, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
           document.documentElement.scrollTop = h;
-          await wait((cfg.deep ? 900 : 700) + jitter());
+          await wait(900 + jitter());
           // Recheck checkpoint each iteration — LinkedIn can inject a
           // challenge modal mid-scroll without changing the URL.
           if (hasCheckpoint()) {
@@ -868,13 +845,10 @@ async function scrapeInActiveTab(
             cancelled = true;
             break;
           }
-          if (itemCount >= ITEM_TARGET) break;
-          // Deep mode: stable means BOTH height AND item count unchanged.
-          const heightStable = h === lastHeight;
-          const itemsStable = itemCount === lastItemCount;
-          if (cfg.deep ? heightStable && itemsStable : heightStable) {
+          // Stable means BOTH height AND item count unchanged.
+          if (h === lastHeight && itemCount === lastItemCount) {
             stable++;
-            if (stable >= STABLE_TARGET && i >= STABLE_MIN_ITER) break;
+            if (stable >= STABLE_TARGET) break;
           } else {
             stable = 0;
           }
@@ -922,16 +896,14 @@ function stripCancelPrefix(html: string | null): string | null {
 async function captureFullUserProfile(
   url: string,
   parsedDoc: Document,
-  tabId: number,
-  deep: boolean
+  tabId: number
 ): Promise<UserProfile> {
   const handle = extractHandle(url);
   const canonical = handle ? `https://www.linkedin.com/in/${handle}/` : url;
   const profile = parseUserProfile(parsedDoc, canonical);
 
-  // Deep mode: keep everything we can scrape. The scrape loop is the real
-  // bottleneck; parser caps were just defensive defaults.
-  const parseOpts = deep ? { limit: Infinity } : {};
+  // Deep mode is the only mode — no caps on posts/comments.
+  const parseOpts = { limit: Infinity };
 
   if (handle) {
     // Skills enrichment — main profile only renders the top-2 skills for
@@ -955,7 +927,7 @@ async function captureFullUserProfile(
     // and flicker the progress badge between phase transitions.
     try {
       const postsHtml = stripCancelPrefix(
-        await scrapeInActiveTab(tabId, postsUrl, { deep, phase: 'posts' })
+        await scrapeInActiveTab(tabId, postsUrl, { phase: 'posts' })
       );
       if (postsHtml === CHECKPOINT_MARKER) {
         throw new CheckpointError();
@@ -968,7 +940,7 @@ async function captureFullUserProfile(
         profile.recentPosts = parseRecentPosts(d, parseOpts);
       }
       const commentsHtml = stripCancelPrefix(
-        await scrapeInActiveTab(tabId, commentsUrl, { deep, phase: 'comments' })
+        await scrapeInActiveTab(tabId, commentsUrl, { phase: 'comments' })
       );
       if (commentsHtml === CHECKPOINT_MARKER) {
         throw new CheckpointError();

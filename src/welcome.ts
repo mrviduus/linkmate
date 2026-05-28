@@ -7,14 +7,9 @@
  * first-gesture on profile page, popup auto-fire) are gated behind that flag.
  */
 
-import {
-  setCaptureFullProfile,
-  setDeepScrape,
-  setOnboardingCompleted,
-} from './storage-schema';
+import { setCaptureFullProfile, setOnboardingCompleted } from './storage-schema';
 
 const captureFull = document.getElementById('captureFull') as HTMLInputElement | null;
-const deepScrape = document.getElementById('deepScrape') as HTMLInputElement | null;
 const getStartedBtn = document.getElementById('getStarted') as HTMLButtonElement | null;
 const skipBtn = document.getElementById('skip') as HTMLButtonElement | null;
 
@@ -25,7 +20,6 @@ async function handleGetStarted(): Promise<void> {
   getStartedBtn.disabled = true;
   getStartedBtn.textContent = 'Opening LinkedIn…';
   await setCaptureFullProfile(captureFull?.checked ?? true);
-  await setDeepScrape(deepScrape?.checked ?? false);
   await setOnboardingCompleted(true);
   // One-shot signal to the side panel: kick off a capture on the very next
   // open. Subsequent opens won't re-capture (the panel consumes this flag).
