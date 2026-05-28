@@ -208,22 +208,6 @@ interface ProfileCaptureResponse {
   error?: string;
 }
 
-/**
- * Detached popup windows (chrome.windows.create) become their own
- * "currentWindow" — so chrome.tabs.query({active,currentWindow:true}) returns
- * the popup itself, NOT the LinkedIn tab. The background passes the real tab
- * id via ?targetTab=… so we can target it explicitly.
- */
-function getExplicitTargetTabId(): number | null {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get('targetTab');
-    if (id && /^\d+$/.test(id)) return Number(id);
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
 
 export class ProfileContextService {
   async capture(opts: CaptureOptions = {}): Promise<CaptureResult> {
