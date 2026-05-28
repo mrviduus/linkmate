@@ -136,6 +136,7 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
   user: string;
 } {
   const { profile, audit, goals, avoidStems } = input;
+  const isRegenerate = (avoidStems ?? []).length > 0;
 
   const system = [
     'ROLE: You are a senior LinkedIn profile copy editor reviewing one specific user\'s profile.',
@@ -160,9 +161,13 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
     '   field on LinkedIn — never skip without a specific reason.',
     '3. For other PASS items: only emit a recommendation if you can name a SPECIFIC fix',
     '   (verb X → Y, add metric Z, cut buzzword W). If you cannot, skip that item entirely.',
-    '4. ALWAYS emit "photoBanner" — but tailor it to the user\'s industry/skills',
-    '   (e.g. for an AI engineer: "background banner showing model architecture, prompt flow,',
-    '   or your tooling stack"; not "industry-relevant banner").',
+    '4. ALWAYS emit "photoBanner" with a CONCRETE VISUAL CONCEPT tailored to the user\'s field.',
+    '   Pick ONE concept per call from a pool like: system/architecture diagram, code-on-screen',
+    '   action shot, signature-project hero image, public-talk/stage photo, metric/chart',
+    '   visualisation, team/event photo, hand-drawn whiteboard, branded tooling icons collage.',
+    '   When the "Previous photoBanner concepts" list (below) is present, you MUST pick a',
+    '   visual concept that is semantically different from every entry in that list — not',
+    '   just a rephrasing. Diversity comes from concept rotation, not synonym swaps.',
     '5. Emit "openToWork" ONLY if the user\'s goals mention job-hunting or the headline indicates',
     '   active search. Otherwise skip it — irrelevant advice destroys trust.',
     '',
@@ -191,9 +196,18 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
     formatAuditState(audit),
   ];
   if (avoidStems && avoidStems.length > 0) {
-    userParts.push('', '=== Previous suggestion openings (write FRESH angles, do not repeat these) ===');
+    userParts.push('', '=== Previous suggestion openings (write FRESH angles — not just rephrased) ===');
     for (const s of avoidStems) userParts.push(`- ${oneLine(s, 100)}`);
+    userParts.push(
+      '',
+      'For photoBanner specifically: each entry above represents a visual concept already',
+      'proposed. Choose a DIFFERENT concept this time (e.g. if architecture diagrams were',
+      'suggested before, propose a code-action shot, signature project hero, or metric chart).',
+    );
   }
+  // Suppress the regenerate-only guidance flag in non-regen calls to keep
+  // the prompt lean.
+  void isRegenerate;
   userParts.push('', 'Return the recommendations JSON now.');
   return { system, user: userParts.join('\n') };
 }
@@ -287,13 +301,17 @@ export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
     '  conversation starter tied to their recent activity.',
     '',
     'OUTPUT RULES:',
-    'Produce 2–3 items. Allowed checkIds:',
-    '  - "ssi": the one tactical action that moves the WEAKEST pillar this week. Must name the',
+    'Produce 2–3 items. ALWAYS emit at least the "ssi" item when SSI snapshot is provided.',
+    'Allowed checkIds:',
+    '  - "ssi": the one tactical action that moves the WEAKEST pillar this week. MUST name the',
     '    pillar, cite its current /25 score, and give an exact weekly count (e.g. "Comment on 2',
-    '    posts from senior eng-lead voices about <user topic>"). Tie it to the lever above.',
-    '  - "engagementStrategy": a content/engagement bet grounded in the user\'s OWN top post or',
-    '    a recurring theme from their comments. MUST quote (in ≤80 chars) at least one specific',
-    '    post or comment from their history and explain how to double down on what worked.',
+    '    posts from senior eng-lead voices about <user topic>"). Anchor the topic in the user\'s',
+    '    headline or top skill when posts are missing.',
+    '  - "engagementStrategy": a content/engagement bet. PREFERRED: quote ≤80 chars from one of',
+    '    the user\'s own posts or comments. FALLBACK when posts/comments are empty: propose a',
+    '    specific content angle anchored in one of the user\'s top skills + a peer audience',
+    '    (e.g. "Write a teardown post on <user-skill> failure modes; target senior platform engs").',
+    '    Never produce generic "share insights about your industry" advice.',
     '  - "networkGrowth": a who/how-to-connect action. Emit ONLY if connectionsCount < 500 OR',
     '    findRightPeople < 15. Name a SPECIFIC archetype (role/seniority/industry) to target.',
     '',
@@ -306,12 +324,12 @@ export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
     '- diagnosis (≤140 chars): name the specific gap with a number — e.g. "engageWithInsights',
     '  10/25 is the weakest pillar; you\'ve made 1 comment in 30d."',
     '- suggestion (≤500 chars): step-by-step weekly action. Include exact counts, target audience,',
-    '  and a topic angle drawn from the user\'s skills or posts.',
-    '- rationale (≤140 chars): cite ONE SSI number AND/OR one specific post/comment of theirs.',
-    '  Generic rationale is forbidden.',
+    '  and a topic angle drawn from the user\'s skills, headline, or (if present) posts.',
+    '- rationale (≤140 chars): cite ONE SSI number OR one specific user detail (skill, role,',
+    '  post/comment). "Aligns with your background" is forbidden.',
     '',
-    'If SSI snapshot is missing: emit ONLY an "engagementStrategy" item grounded in the user\'s',
-    'recent posts/comments; skip "ssi" and "networkGrowth".',
+    'If SSI snapshot is missing: emit ONLY an "engagementStrategy" item anchored in the user\'s',
+    'top skill or headline; skip "ssi" and "networkGrowth".',
     '',
     'Respond in English. Output strict JSON only — no prose, no markdown fences:',
     '{"recommendations":[{"checkId":"<id>","diagnosis":"<t>","suggestion":"<t>","rationale":"<t>"}]}',
