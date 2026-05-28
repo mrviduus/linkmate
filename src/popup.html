@@ -115,22 +115,52 @@
           <div id="captureHeroMessage" class="capture-hero__message" style="display: none"></div>
         </section>
 
-        <!-- Profile audit: 6 deterministic checks + opt-in AI rewrites (issue #28) -->
-        <section id="profileAudit" class="profile-audit" style="display: none">
-          <header class="profile-audit__head">
+        <!-- Profile Improvement Plan: 6 essentials + 4 activity signals + AI rewrites -->
+        <details id="profileAudit" class="profile-audit" open style="display: none">
+          <summary class="profile-audit__head">
             <h3 class="profile-audit__title">
-              <i class="fa fa-clipboard-check"></i> Profile audit
+              <i class="fa fa-wand-magic-sparkles"></i> Profile Improvement Plan
             </h3>
-            <button id="profileAuditRerun" class="btn btn-sm btn-secondary" type="button" title="Recompute from latest capture">
+            <span class="profile-audit__head-spacer"></span>
+            <button id="profileAuditRerun" class="profile-audit__rerun" type="button" title="Recompute from latest capture">
               <i class="fa fa-rotate"></i> Re-run
             </button>
-          </header>
-          <div class="profile-audit__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div id="profileAuditProgressFill" class="profile-audit__progress-fill"></div>
+            <i class="fa fa-chevron-down profile-audit__chevron" aria-hidden="true"></i>
+          </summary>
+
+          <div class="profile-audit__strength">
+            <div class="profile-audit__score-ring" role="img" aria-label="Profile strength score">
+              <svg viewBox="0 0 100 100" class="profile-audit__score-svg" aria-hidden="true">
+                <circle class="profile-audit__score-track" cx="50" cy="50" r="42" />
+                <circle id="profileAuditScoreFg" class="profile-audit__score-fg" cx="50" cy="50" r="42" />
+              </svg>
+              <span id="profileAuditScoreText" class="profile-audit__score-num">0</span>
+            </div>
+            <div class="profile-audit__strength-copy">
+              <div id="profileAuditStrengthTitle" class="profile-audit__strength-title">Profile Strength</div>
+              <div id="profileAuditStrengthSub" class="profile-audit__strength-sub">
+                Your profile is being analyzed…
+              </div>
+            </div>
           </div>
-          <div id="profileAuditCounter" class="profile-audit__counter">0 of 0 essentials</div>
-          <ul id="profileAuditList" class="profile-audit__list"></ul>
-          <div id="profileAuditSignals" class="profile-audit__signals" style="display: none"></div>
+
+          <div id="profileAuditFilters" class="profile-audit__filters" role="tablist">
+            <button class="profile-audit__filter is-active" data-filter="all" type="button" role="tab" aria-selected="true">
+              <i class="fa fa-list"></i> All <span class="profile-audit__filter-count" data-count-for="all">0</span>
+            </button>
+            <button class="profile-audit__filter" data-filter="branding" type="button" role="tab" aria-selected="false">
+              <i class="fa fa-bolt"></i> Branding <span class="profile-audit__filter-count" data-count-for="branding">0</span>
+            </button>
+            <button class="profile-audit__filter" data-filter="professional" type="button" role="tab" aria-selected="false">
+              <i class="fa fa-briefcase"></i> Professional <span class="profile-audit__filter-count" data-count-for="professional">0</span>
+            </button>
+            <button class="profile-audit__filter" data-filter="network" type="button" role="tab" aria-selected="false">
+              <i class="fa fa-users"></i> Network <span class="profile-audit__filter-count" data-count-for="network">0</span>
+            </button>
+          </div>
+
+          <ul id="profileAuditList" class="profile-audit__list" role="tabpanel"></ul>
+
           <button
             id="profileAuditRewrite"
             class="btn btn-primary profile-audit__cta"
@@ -140,14 +170,17 @@
             <span id="profileAuditRewriteLabel">Get AI rewrites</span>
           </button>
           <div id="profileAuditStatus" class="status-message" style="display: none"></div>
-          <div id="profileAuditAdvisory" class="profile-audit__advisory">
-            <div class="profile-audit__advisory-title">Always worth checking</div>
+          <details id="profileAuditAdvisory" class="profile-audit__advisory">
+            <summary class="profile-audit__advisory-title">
+              Always worth checking
+              <i class="fa fa-chevron-down profile-audit__chevron profile-audit__chevron--sm" aria-hidden="true"></i>
+            </summary>
             <ul>
               <li>Profile photo + industry-relevant background banner</li>
               <li>"Open to Work" set to Recruiters Only (public flag can lower leverage)</li>
             </ul>
-          </div>
-        </section>
+          </details>
+        </details>
 
         <!-- SSI Tracker (moved up for visual completion indicator after capture) -->
         <div class="settings-section">
