@@ -32,7 +32,7 @@ Chart.register(
   DoughnutController,
   ArcElement,
   Tooltip,
-  Filler,
+  Filler
 );
 
 export { Chart };
