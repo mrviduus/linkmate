@@ -32,6 +32,15 @@ import {
 } from './storage-schema';
 import { aiScoreBatch, clearAiCache, AiParseError } from './ai-feed-analyzer';
 import { getUserProfile, profileContextFromUserProfile } from './user-profile-store';
+import { auditProfile } from './profile-audit';
+import {
+  generateProfileRecommendations,
+  ProfileRecommenderParseError,
+} from './profile-recommender';
+import {
+  getProfileAuditState,
+  setProfileAuditState,
+} from './storage-schema';
 import type { ProfileContext } from './storage-schema';
 
 /**
@@ -470,6 +479,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     handleQueueAiScoreFeed(request.posts as ParsedPost[], sendResponse);
     return true;
   }
+  if (request.action === 'profile.audit.get') {
+    handleProfileAuditGet(sendResponse);
+    return true;
+  }
+  if (request.action === 'profile.audit.rewrite') {
+    handleProfileAuditRewrite(sendResponse);
+    return true;
+  }
   if (request.action === 'settings.getGoalsOverride') {
     getGoalsOverride()
       .then((value) => sendResponse({ ok: true, value }))
@@ -888,6 +905,86 @@ async function handleQueueAiScoreFeed(
         sendResponse({ ok: false, reason: 'parse' });
       } else {
         console.warn('[linkmate] queue.aiScoreFeed failed:', err);
+        sendResponse({ ok: false, reason: 'network', error: String(err) });
+      }
+    }
+  } finally {
+    keepAlive.stop();
+  }
+}
+
+// ─── Issue #28 — profile audit + AI rewrite suggestions ───────────────────
+
+async function handleProfileAuditGet(
+  sendResponse: (response: unknown) => void,
+): Promise<void> {
+  try {
+    const up = await getUserProfile().catch(() => null);
+    if (!up) {
+      sendResponse({ ok: true, state: null });
+      return;
+    }
+    const audit = auditProfile(up);
+    const stored = await getProfileAuditState().catch(() => null);
+    const recommendations =
+      stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendations : null;
+    const recommendationsAt =
+      stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendationsAt : 0;
+    sendResponse({
+      ok: true,
+      state: {
+        profileCapturedAt: up.capturedAt,
+        audit,
+        recommendations,
+        recommendationsAt,
+      },
+    });
+  } catch (err) {
+    console.warn('[linkmate] profile.audit.get failed:', err);
+    sendResponse({ ok: false, error: String(err) });
+  }
+}
+
+async function handleProfileAuditRewrite(
+  sendResponse: (response: unknown) => void,
+): Promise<void> {
+  keepAlive.start();
+  try {
+    const up = await getUserProfile().catch(() => null);
+    if (!up) {
+      sendResponse({ ok: false, reason: 'no_profile' });
+      return;
+    }
+    let provider;
+    try {
+      provider = await getActiveProvider();
+    } catch {
+      sendResponse({ ok: false, reason: 'no_key' });
+      return;
+    }
+    const audit = auditProfile(up);
+    const goals = await getGoalsOverride();
+    try {
+      const recommendations = await generateProfileRecommendations({
+        provider,
+        profile: up,
+        audit,
+        goals,
+      });
+      const state = {
+        profileCapturedAt: up.capturedAt,
+        audit,
+        recommendations,
+        recommendationsAt: Date.now(),
+      };
+      await setProfileAuditState(state);
+      sendResponse({ ok: true, state });
+    } catch (err) {
+      if (err instanceof ProfileRecommenderParseError) {
+        console.warn('[linkmate] profile.audit.rewrite parse failure:', err.message);
+        sendResponse({ ok: false, reason: 'parse' });
+      } else {
+        console.warn('[linkmate] profile.audit.rewrite failed:', err);
         sendResponse({ ok: false, reason: 'network', error: String(err) });
       }
     }
