@@ -23,6 +23,7 @@ const SKILL_LIST_CAP = 10;
 const CURRENT_ROLE_DESC_CAP = 180;
 const EDU_CAP = 1;
 const GOALS_CAP = 240;
+const PAST_ROLE_LIST_CAP = 3;
 
 // SSI-strategy prompt caps.
 const POST_TEXT_CAP = 150;
@@ -30,6 +31,15 @@ const POST_LIST_CAP = 3;
 const COMMENT_TEXT_CAP = 110;
 const COMMENT_ORIG_CAP = 60;
 const COMMENT_LIST_CAP = 3;
+
+// Shared "banned phrases" black-list — keeps copy out of LinkedIn cliché
+// territory. The LLM sees this verbatim in BOTH prompts.
+const BANNED_PHRASES = [
+  'passionate', 'results-driven', 'team player', 'go-getter', 'synergy',
+  'dynamic professional', 'proven track record', 'leverage (as verb)',
+  'detail-oriented', 'strategic thinker', 'self-starter', 'thought leader',
+  'changing the world', 'movers and shakers',
+].join(', ');
 
 function oneLine(s: string | undefined | null, cap: number): string {
   if (!s) return '';
@@ -53,13 +63,33 @@ function formatProfileForRewrite(profile: UserProfile): string {
   );
   sections.push(`About: ${oneLine(profile.about, ABOUT_CAP) || '(empty)'}`);
 
-  const current = (profile.experience ?? [])[0];
+  const allRoles = profile.experience ?? [];
+  const current = allRoles[0];
   if (current) {
     const head = `- ${oneLine(current.title, 80) || '(role)'} at ${
       oneLine(current.company, 80) || '(company)'
     }${current.dateRange ? ` (${oneLine(current.dateRange, 40)})` : ''}`;
     const desc = oneLine(current.description ?? '', CURRENT_ROLE_DESC_CAP);
     sections.push(`Current role:\n${desc ? `${head} — ${desc}` : head}`);
+  }
+  // Past trajectory (titles + companies only — no descriptions) gives the LLM
+  // narrative context for the rewrite without bloating tokens. Helps it spot
+  // a story arc like "QA → Backend → ML → AI Engineer".
+  const past = allRoles.slice(1, 1 + PAST_ROLE_LIST_CAP);
+  if (past.length > 0) {
+    sections.push(
+      'Career trajectory (older first → newer):\n' +
+        past
+          .slice()
+          .reverse()
+          .map(
+            (e) =>
+              `- ${oneLine(e.title, 80) || '(role)'} at ${oneLine(e.company, 80) || '(company)'}${
+                e.dateRange ? ` (${oneLine(e.dateRange, 40)})` : ''
+              }`,
+          )
+          .join('\n'),
+    );
   }
 
   const edu = (profile.education ?? []).slice(0, EDU_CAP);
@@ -108,18 +138,44 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
   const { profile, audit, goals, avoidStems } = input;
 
   const system = [
-    'You are a senior LinkedIn profile copy editor for a specific user.',
-    "Return concrete, paste-ready rewrites — not generic 'add a summary' advice.",
-    'For each FAIL item: rewrite from scratch with copy the user can paste directly.',
-    'For PASS items: only emit a recommendation if the existing copy is clearly improvable',
-    '  (vague verb, buzzwords, missing concrete impact). Otherwise skip that item.',
-    'You may additionally emit a "headline" item with a sharper rewrite when warranted',
-    '  (max 220 chars; LinkedIn cap). And an "about" rewrite up to 2000 chars when relevant.',
-    'Always append these two advisory items:',
-    '  - "photoBanner": one line on professional headshot + industry-relevant banner.',
-    '  - "openToWork": only suggest switching public frame to Recruiters Only if it is likely on.',
-    'Each item: {checkId, diagnosis (≤140 chars), suggestion (paste-ready), rationale (≤140 chars, ties to user\'s actual role/skills)}.',
-    'No buzzwords. No em-dash padding. No restating the rule.',
+    'ROLE: You are a senior LinkedIn profile copy editor reviewing one specific user\'s profile.',
+    'This is career-impacting work — the user will paste your copy into LinkedIn verbatim.',
+    'Generic, recycled advice is harmful. Every recommendation must reference at least one',
+    'concrete detail from the user data below (a specific skill, project, company, year, role).',
+    '',
+    'LINKEDIN COPY BEST PRACTICES (apply these implicitly, never cite them):',
+    '- Headline (≤220 chars): pattern is "[Specialty] | [Concrete value to a stakeholder]',
+    '  | [Optional: years of experience or signature project]." Avoid the job title alone.',
+    '- About (≤2000 chars): line 1 IS the preview — must hook in ≤180 chars stating who they help',
+    '  and the outcome they create. Then 2-4 short paragraphs: what they do, proof (metrics or named',
+    '  projects), and one CTA (book a call, DM about X). No "I am passionate about" openers.',
+    '- Experience bullets: STAR-shape — what was the situation, what did THEY do, what was the',
+    '  measurable result. Numbers beat adjectives. Verbs lead each bullet.',
+    `- Banned phrases (never use, never recommend): ${BANNED_PHRASES}.`,
+    '',
+    'OUTPUT RULES:',
+    '1. For each FAIL audit item: write a from-scratch rewrite the user can paste directly.',
+    '2. ALWAYS evaluate the headline (emit a "headline" item) unless the current one already',
+    '   follows the pattern above AND cites a concrete specialty. Headline is the highest-leverage',
+    '   field on LinkedIn — never skip without a specific reason.',
+    '3. For other PASS items: only emit a recommendation if you can name a SPECIFIC fix',
+    '   (verb X → Y, add metric Z, cut buzzword W). If you cannot, skip that item entirely.',
+    '4. ALWAYS emit "photoBanner" — but tailor it to the user\'s industry/skills',
+    '   (e.g. for an AI engineer: "background banner showing model architecture, prompt flow,',
+    '   or your tooling stack"; not "industry-relevant banner").',
+    '5. Emit "openToWork" ONLY if the user\'s goals mention job-hunting or the headline indicates',
+    '   active search. Otherwise skip it — irrelevant advice destroys trust.',
+    '',
+    'EVERY ITEM:',
+    '{"checkId","diagnosis","suggestion","rationale"}',
+    '- diagnosis (≤140 chars): name the specific weakness — quote the offending phrase if present.',
+    '- suggestion: paste-ready copy. Headline ≤220 chars. About ≤2000. Bullets ≤5 × 220 chars.',
+    '- rationale (≤140 chars): MUST cite ONE concrete user detail (skill, role, company, year).',
+    '  Generic "ties to your background" is forbidden.',
+    '',
+    'BEFORE EMITTING each item, silently ask: "Could this exact text apply to any senior person?"',
+    'If yes, rewrite to anchor it in user-specific evidence.',
+    '',
     'Respond in English. Output strict JSON only — no prose, no markdown fences:',
     '{"recommendations":[{"checkId":"<id>","diagnosis":"<t>","suggestion":"<t>","rationale":"<t>"}]}',
   ].join('\n');
@@ -213,18 +269,51 @@ export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
   const { profile, ssi, goals, avoidStems } = input;
 
   const system = [
-    "You are a LinkedIn growth strategist. Read the user's SSI breakdown and what they actually post/comment about.",
-    'Produce 2–3 concrete tactical recommendations targeting their weakest SSI pillar AND the strongest revealed theme in their activity.',
-    'Allowed checkIds:',
-    '  - "ssi": one action tied to the weakest pillar. Be specific (which pillar, why, what to do this week).',
-    '  - "engagementStrategy": one action grounded in their recent comments/posts — e.g. a topic to double down on, a sub-community to engage, a content angle that resonated.',
-    '  - "networkGrowth": one action for who/how to connect — only if their pillar weakness or activity makes it useful.',
-    "Each item's suggestion must be an action the user can take this week (e.g. 'Post 1 lesson-style update on RAG eval, citing your work at <company>'),",
-    'NOT a profile rewrite (the other call handles copy).',
-    'Each item: {checkId, diagnosis (≤140 chars), suggestion (paste-ready or step-by-step ≤500 chars), rationale (≤140 chars referencing concrete SSI numbers or specific post/comment)}.',
-    'If SSI is missing, emit only an "engagementStrategy" item based on what they post about; skip the rest.',
-    'No buzzwords. No em-dash padding. Respond in English.',
-    'Output strict JSON only:',
+    'ROLE: You are a LinkedIn growth strategist coaching one specific user this week.',
+    'Career-impacting — recommendations must be concrete, falsifiable actions with numbers.',
+    'Vague tactics like "engage authentically" or "post more often" are harmful and forbidden.',
+    '',
+    'WHAT MOVES EACH SSI PILLAR (apply these implicitly):',
+    '- establishBrand (≤25): profile completeness, posting cadence, posts with media/articles,',
+    '  consistent topic focus. Lever: 1 original post / week with media + 1 article / month.',
+    '- findRightPeople (≤25): targeted connection invites with notes, LinkedIn Recruiter / Sales',
+    '  Nav-style searches, following industry hashtags. Lever: 5 targeted invites / week to people',
+    '  in the user\'s target industry, with a 1-line personalised note citing a shared topic.',
+    '- engageWithInsights (≤25): commenting on others\' posts with original takes, reacting,',
+    '  sharing with commentary. Lever: 2 substantive comments / week on senior peers\' posts',
+    '  (3+ sentences, original POV, no "great post!" replies).',
+    '- buildRelationships (≤25): connection acceptance ratio, DMs to existing connections,',
+    '  replies to your own content. Lever: DM 2 existing connections / week with a specific',
+    '  conversation starter tied to their recent activity.',
+    '',
+    'OUTPUT RULES:',
+    'Produce 2–3 items. Allowed checkIds:',
+    '  - "ssi": the one tactical action that moves the WEAKEST pillar this week. Must name the',
+    '    pillar, cite its current /25 score, and give an exact weekly count (e.g. "Comment on 2',
+    '    posts from senior eng-lead voices about <user topic>"). Tie it to the lever above.',
+    '  - "engagementStrategy": a content/engagement bet grounded in the user\'s OWN top post or',
+    '    a recurring theme from their comments. MUST quote (in ≤80 chars) at least one specific',
+    '    post or comment from their history and explain how to double down on what worked.',
+    '  - "networkGrowth": a who/how-to-connect action. Emit ONLY if connectionsCount < 500 OR',
+    '    findRightPeople < 15. Name a SPECIFIC archetype (role/seniority/industry) to target.',
+    '',
+    'BANNED actions (never recommend): "post more often", "engage authentically", "be consistent",',
+    '"build your personal brand", "leverage your network", "share insights regularly".',
+    `BANNED phrases (never use): ${BANNED_PHRASES}.`,
+    '',
+    'EVERY ITEM:',
+    '{"checkId","diagnosis","suggestion","rationale"}',
+    '- diagnosis (≤140 chars): name the specific gap with a number — e.g. "engageWithInsights',
+    '  10/25 is the weakest pillar; you\'ve made 1 comment in 30d."',
+    '- suggestion (≤500 chars): step-by-step weekly action. Include exact counts, target audience,',
+    '  and a topic angle drawn from the user\'s skills or posts.',
+    '- rationale (≤140 chars): cite ONE SSI number AND/OR one specific post/comment of theirs.',
+    '  Generic rationale is forbidden.',
+    '',
+    'If SSI snapshot is missing: emit ONLY an "engagementStrategy" item grounded in the user\'s',
+    'recent posts/comments; skip "ssi" and "networkGrowth".',
+    '',
+    'Respond in English. Output strict JSON only — no prose, no markdown fences:',
     '{"recommendations":[{"checkId":"<id>","diagnosis":"<t>","suggestion":"<t>","rationale":"<t>"}]}',
   ].join('\n');
 
