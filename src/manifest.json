@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LinkMate",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "AI-powered LinkedIn assistant: SSI tracker, profile audit, comment drafts via OpenAI.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -24,27 +24,57 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.linkedin.com/*"],
-      "js": ["linkedin-content.ts"],
-      "css": ["linkedin-styles.css"],
+      "matches": [
+        "https://*.linkedin.com/*"
+      ],
+      "js": [
+        "linkedin-content.ts"
+      ],
+      "css": [
+        "linkedin-styles.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.linkedin.com/sales/ssi*"],
-      "js": ["ssi-content.ts"],
+      "matches": [
+        "https://www.linkedin.com/sales/ssi*"
+      ],
+      "js": [
+        "ssi-content.ts"
+      ],
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage", "tabs", "activeTab", "windows", "alarms", "scripting", "sidePanel", "notifications"],
-  "host_permissions": ["https://*.linkedin.com/*", "https://api.openai.com/*"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "windows",
+    "alarms",
+    "scripting",
+    "sidePanel",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.linkedin.com/*",
+    "https://api.openai.com/*"
+  ],
   "web_accessible_resources": [
     {
-      "resources": ["linkedin-styles.css"],
-      "matches": ["https://*.linkedin.com/*"]
+      "resources": [
+        "linkedin-styles.css"
+      ],
+      "matches": [
+        "https://*.linkedin.com/*"
+      ]
     },
     {
-      "resources": ["welcome.html"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "welcome.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
