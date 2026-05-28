@@ -10,7 +10,7 @@
     "128": "icons/icon-128.png"
   },
   "content_security_policy": {
-    "extension_pages": "style-src-elem 'self' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; script-src 'self'; default-src 'self' data:; connect-src 'self' data: https://api.openai.com; worker-src 'self'"
+    "extension_pages": "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; script-src 'self'; default-src 'self' data:; connect-src 'self' data: https://api.openai.com https://api.groq.com; worker-src 'self'"
   },
   "action": {
     "default_title": "LinkMate"
@@ -24,24 +24,14 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://*.linkedin.com/*"
-      ],
-      "js": [
-        "linkedin-content.ts"
-      ],
-      "css": [
-        "linkedin-styles.css"
-      ],
+      "matches": ["https://*.linkedin.com/*"],
+      "js": ["linkedin-content.ts"],
+      "css": ["linkedin-styles.css"],
       "run_at": "document_idle"
     },
     {
-      "matches": [
-        "https://www.linkedin.com/sales/ssi*"
-      ],
-      "js": [
-        "ssi-content.ts"
-      ],
+      "matches": ["https://www.linkedin.com/sales/ssi*"],
+      "js": ["ssi-content.ts"],
       "run_at": "document_idle"
     }
   ],
@@ -57,24 +47,17 @@
   ],
   "host_permissions": [
     "https://*.linkedin.com/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://api.groq.com/*"
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "linkedin-styles.css"
-      ],
-      "matches": [
-        "https://*.linkedin.com/*"
-      ]
+      "resources": ["linkedin-styles.css"],
+      "matches": ["https://*.linkedin.com/*"]
     },
     {
-      "resources": [
-        "welcome.html"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "resources": ["welcome.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

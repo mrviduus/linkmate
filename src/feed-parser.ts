@@ -97,6 +97,26 @@ function authorUrnFromHref(href: string): string {
   return '';
 }
 
+/** Check if this is a sponsored/promoted post by looking for "Promoted" badge */
+function isPromotedPost(el: Element): boolean {
+  const spans = Array.from(el.querySelectorAll('span, div'));
+  for (const span of spans) {
+    if (readText(span).toLowerCase() === 'promoted') {
+      // LinkedIn puts hidden "Promoted" spans on ALL posts to trick scrapers.
+      // Ignore if it's hidden by a common screen-reader class on it or its parent.
+      if (span.closest('[class*="visually-hidden"], [class*="sr-only"], [class*="hidden"]')) {
+        continue;
+      }
+      // In a real browser DOM, we can also check offsetParent (null if hidden)
+      if (span instanceof HTMLElement && span.offsetParent === null) {
+        continue;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * v0.5.9 main entry. Finds posts via componentkey (the 2026 SDUI marker)
  * AND falls back to legacy data-urn for older page caches.
@@ -148,6 +168,7 @@ export function parseFeedDom(
 function parseLegacyPost(el: Element, now: number): ParsedPost | null {
   const dataUrn = el.getAttribute('data-urn') ?? '';
   if (!dataUrn) return null;
+  if (isPromotedPost(el)) return null;
 
   const authorLink = el.querySelector('.update-components-actor__meta-link');
   const authorHref = authorLink?.getAttribute('href') ?? '';
@@ -197,6 +218,7 @@ function parseSduiPost(el: Element, now: number): ParsedPost | null {
   // ID: use componentkey value — opaque base64-like, unique per post
   const componentkey = el.getAttribute('componentkey') ?? '';
   if (!componentkey) return null;
+  if (isPromotedPost(el)) return null;
   const id = `urn:li:component:${componentkey}`;
 
   // Author: iterate /in/ and /company/ links — many /in/ links are mention

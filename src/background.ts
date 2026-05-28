@@ -59,10 +59,7 @@ async function getProfileOrDerive(): Promise<{
   profile: ProfileContext | null;
   userProfile: Awaited<ReturnType<typeof getUserProfile>>;
 }> {
-  const [stored, up] = await Promise.all([
-    getProfile(),
-    getUserProfile().catch(() => null),
-  ]);
+  const [stored, up] = await Promise.all([getProfile(), getUserProfile().catch(() => null)]);
   if (stored) return { profile: stored, userProfile: up };
   if (up) return { profile: profileContextFromUserProfile(up), userProfile: up };
   return { profile: null, userProfile: null };
@@ -199,8 +196,7 @@ function validateReplyQuality(reply: string): ValidationResult {
 
   if (wordCount < 10) return { valid: false, reason: 'too_short', score: 20 };
   if (wordCount > 80) return { valid: false, reason: 'too_long', score: 40 };
-  if (!/[.!?]$/.test(trimmedReply))
-    return { valid: false, reason: 'no_punctuation', score: 50 };
+  if (!/[.!?]$/.test(trimmedReply)) return { valid: false, reason: 'no_punctuation', score: 50 };
 
   const preamblePatterns = [
     /^here['']?s\s/i,
@@ -211,8 +207,7 @@ function validateReplyQuality(reply: string): ValidationResult {
     /^reply:/i,
   ];
   for (const pattern of preamblePatterns) {
-    if (pattern.test(trimmedReply))
-      return { valid: false, reason: 'has_preamble', score: 60 };
+    if (pattern.test(trimmedReply)) return { valid: false, reason: 'has_preamble', score: 60 };
   }
 
   const genericPatterns = [
@@ -461,7 +456,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       request.post as ParsedPost,
       request.tone as ToneKey,
       request.length as LengthKey,
-      sendResponse,
+      sendResponse
     );
     return true;
   }
@@ -602,7 +597,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.action === 'cadence.streak') {
     Promise.all([getCadenceStreak(), maybeAdvanceStreak()])
       .then(([prior, advance]) =>
-        sendResponse({ ok: true, count: advance.streak, advanced: advance.advanced, prior }),
+        sendResponse({ ok: true, count: advance.streak, advanced: advance.advanced, prior })
       )
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
     return true;
@@ -740,9 +735,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         await clearSsiLastError();
         console.log(`✅ SSI snapshot captured: total=${snap.total}`);
         // Chain recommender refresh — fresh SSI improves the prompt context.
-        rankDaily().catch((err) =>
-          console.warn('Post-SSI recommender refresh failed:', err),
-        );
+        rankDaily().catch((err) => console.warn('Post-SSI recommender refresh failed:', err));
       })
       .catch(async (err) => {
         const msg = err instanceof Error ? err.message : String(err);
@@ -762,7 +755,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 async function handleQueueScoreFeed(
   posts: ParsedPost[],
-  sendResponse: (response: unknown) => void,
+  sendResponse: (response: unknown) => void
 ): Promise<void> {
   try {
     const { profile } = await getProfileOrDerive();
@@ -800,7 +793,7 @@ async function handleQueueDraftComment(
   post: ParsedPost,
   tone: ToneKey,
   length: LengthKey,
-  sendResponse: (response: unknown) => void,
+  sendResponse: (response: unknown) => void
 ): Promise<void> {
   keepAlive.start();
   try {
@@ -829,7 +822,7 @@ async function handleQueueDraftComment(
 
 async function handleProfileCapture(
   fields: RawProfileFields,
-  sendResponse: (response: unknown) => void,
+  sendResponse: (response: unknown) => void
 ): Promise<void> {
   keepAlive.start();
   try {
@@ -870,7 +863,7 @@ const SCORE_BATCH_TOP_N = 10;
 
 async function handleQueueAiScoreFeed(
   posts: ParsedPost[],
-  sendResponse: (response: unknown) => void,
+  sendResponse: (response: unknown) => void
 ): Promise<void> {
   const top = (posts ?? []).slice(0, SCORE_BATCH_TOP_N);
   if (top.length === 0) {
@@ -1046,10 +1039,7 @@ function dedupeKeepLast(stems: string[]): string[] {
 
 // ─── Reply generation (standard + with comments) ────────────────────────────
 
-async function generateWithRetry(
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
+async function generateWithRetry(systemPrompt: string, userPrompt: string): Promise<string> {
   const provider = await getActiveProvider();
   const raw = await provider.generate({
     system: systemPrompt,
@@ -1081,7 +1071,7 @@ async function generateWithRetry(
 async function handleLinkedInReplyWithComments(
   postContent: string,
   topComments: Array<{ text: string; likeCount: number }>,
-  sendResponse: (response: unknown) => void,
+  sendResponse: (response: unknown) => void
 ) {
   try {
     const systemPrompt = await getUserPrompt('withComments');
@@ -1099,10 +1089,10 @@ async function handleLinkedInReplyWithComments(
                       : c.likeCount > 20
                         ? 'Medium'
                         : 'Standard'
-                }\n`,
+                }\n`
             )
             .join(
-              '\n',
+              '\n'
             )}\nKEY PATTERN: Notice what makes these comments successful and apply similar strategies.`
         : '\n\nNo high-engagement comments available. Focus on adding unique value and asking thoughtful questions.';
 

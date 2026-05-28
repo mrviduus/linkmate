@@ -548,7 +548,7 @@
 }
 .linkmate-post-chip__heuristic[data-tooltip]:hover::before,
 .linkmate-post-chip__ai[data-tooltip]:hover::before {
-  content: '';
+  content: "";
   position: absolute;
   bottom: calc(100% + 2px);
   right: 8px;
@@ -591,8 +591,13 @@
 }
 
 @keyframes linkmate-post-chip-pulse {
-  0%, 100% { opacity: 0.55; }
-  50%      { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -600,5 +605,189 @@
     background: rgba(40, 42, 44, 0.96);
     border-color: rgba(255, 255, 255, 0.1);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* ─── Focus Top Post Floating Button ─────────────── */
+
+.linkmate-fab-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(10, 102, 194, 0.15);
+  border-radius: 30px;
+  padding: 6px 12px 6px 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.linkmate-fab-container:hover {
+  box-shadow: 0 8px 32px rgba(10, 102, 194, 0.12);
+  border-color: rgba(10, 102, 194, 0.3);
+}
+
+.linkmate-fab-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  padding: 2px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.linkmate-fab-drag-handle:hover {
+  color: #0a66c2;
+  background: rgba(10, 102, 194, 0.08);
+}
+
+.linkmate-fab-drag-handle:active {
+  cursor: grabbing;
+}
+
+@media (prefers-color-scheme: dark) {
+  .linkmate-fab-container {
+    background: rgba(30, 30, 30, 0.8);
+    border-color: rgba(112, 181, 255, 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  }
+  .linkmate-fab-container:hover {
+    box-shadow: 0 8px 32px rgba(112, 181, 255, 0.12);
+    border-color: rgba(112, 181, 255, 0.3);
+  }
+  .linkmate-fab-drag-handle {
+    color: rgba(255, 255, 255, 0.35);
+  }
+  .linkmate-fab-drag-handle:hover {
+    color: #70b5ff;
+    background: rgba(112, 181, 255, 0.08);
+  }
+}
+
+.linkmate-focus-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #0a66c2 0%, #004182 100%);
+  color: white;
+  border: none;
+  border-radius: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(10, 102, 194, 0.3);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.linkmate-focus-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(10, 102, 194, 0.4);
+  background: linear-gradient(135deg, #004182 0%, #002d5c 100%);
+}
+
+.linkmate-focus-fab:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(10, 102, 194, 0.4);
+}
+
+.linkmate-skip-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0a66c2;
+  border: 1px solid rgba(10, 102, 194, 0.25);
+  border-radius: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.linkmate-skip-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(10, 102, 194, 0.15);
+  background: #ffffff;
+  border-color: #0a66c2;
+}
+
+.linkmate-skip-fab:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .linkmate-skip-fab {
+    background: rgba(30, 30, 30, 0.85);
+    color: #70b5ff;
+    border-color: rgba(112, 181, 255, 0.25);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .linkmate-skip-fab:hover {
+    background: #2a2a2a;
+    border-color: #70b5ff;
+    box-shadow: 0 6px 16px rgba(112, 181, 255, 0.15);
+  }
+}
+
+.linkmate-focus-icon.animate-pulse {
+  animation: linkmatePulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes linkmatePulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+/* ─── Highlight Animation for Focused Post ─────────────── */
+
+.linkmate-priority-highlight {
+  animation: linkmateHighlight 3s ease-out;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 2px #0a66c2,
+    0 0 20px rgba(10, 102, 194, 0.2);
+}
+
+@keyframes linkmateHighlight {
+  0% {
+    background-color: rgba(10, 102, 194, 0.1);
+    box-shadow:
+      0 0 0 2px #0a66c2,
+      0 0 20px rgba(10, 102, 194, 0.4);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow:
+      0 0 0 2px #0a66c2,
+      0 0 20px rgba(10, 102, 194, 0.2);
   }
 }

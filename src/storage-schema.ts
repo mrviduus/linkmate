@@ -145,7 +145,7 @@ export interface QueuePreferences {
  *
  * LinkMate ships OpenAI-only; the union is kept narrow but future-extensible.
  */
-export type ProviderMode = 'openai';
+export type ProviderMode = 'openai' | 'groq';
 
 export interface ProviderConfig {
   mode: ProviderMode;
@@ -154,11 +154,17 @@ export interface ProviderConfig {
     model: string; // e.g. "gpt-4o-mini"
     baseUrl?: string;
   };
+  groq?: {
+    apiKey: string;
+    model: string;
+    baseUrl?: string;
+  };
 }
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
   mode: 'openai',
   openai: { apiKey: '', model: 'gpt-4o-mini' },
+  groq: { apiKey: '', model: 'groq/compound' },
 };
 
 // ─── Storage helpers ────────────────────────────────────────────────────────

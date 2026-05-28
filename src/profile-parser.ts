@@ -247,7 +247,12 @@ function parseExperience(root: Element | Document | DocumentFragment): UserProfi
       company: (companyLine ?? '').split(' · ')[0],
       dateRange: (dateLine ?? '').split(' · ')[0],
       location: locLine ? locLine.split(' · ')[0] : undefined,
-      description: desc ? desc.replace(/…\s*more\s*$/i, '').trim().slice(0, 1500) : undefined,
+      description: desc
+        ? desc
+            .replace(/…\s*more\s*$/i, '')
+            .trim()
+            .slice(0, 1500)
+        : undefined,
     });
   }
   return out;
@@ -345,16 +350,16 @@ export function parseSkillsList(root: Element | Document | DocumentFragment): st
  * containing the literal substring "Topcard". Multiple matches may exist
  * (header + mobile variant); pick the first non-empty one.
  */
-function findTopcard(
-  root: Element | Document | DocumentFragment
-): Element | null {
+function findTopcard(root: Element | Document | DocumentFragment): Element | null {
   const candidates = Array.from(root.querySelectorAll('[componentkey*="Topcard" i]'));
   return candidates.find((el) => el.querySelector('h2')) ?? candidates[0] ?? null;
 }
 
-function parseTopcardMeta(
-  topcard: Element
-): { location?: string; connectionsCount?: number; followersCount?: number } {
+function parseTopcardMeta(topcard: Element): {
+  location?: string;
+  connectionsCount?: number;
+  followersCount?: number;
+} {
   let location: string | undefined;
   let connectionsCount: number | undefined;
   let followersCount: number | undefined;
@@ -413,11 +418,7 @@ function parseTopcardChip(topcard: Element): { company?: string; school?: string
     .map((p) => readText(p))
     .filter(
       (t) =>
-        t &&
-        t.includes(' · ') &&
-        !t.includes('|') &&
-        t.length < 200 &&
-        t.split(' · ').length === 2
+        t && t.includes(' · ') && !t.includes('|') && t.length < 200 && t.split(' · ').length === 2
     );
   for (const t of lines) {
     const [left, right] = t.split(' · ').map((s) => s.trim());
@@ -501,7 +502,9 @@ function extractUrn(el: Element): string {
   return `gen:${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function parseEngagement(scope: Element): { likes: number; comments: number; reposts: number } | undefined {
+function parseEngagement(
+  scope: Element
+): { likes: number; comments: number; reposts: number } | undefined {
   // LinkedIn 2026 exposes engagement counts as aria-label on the
   // reactions / comments / reposts pills — e.g. "18 reactions", "5 comments".
   // Body text is too noisy ("18 ... Like" mashed together) to regex reliably.
@@ -675,11 +678,10 @@ export function parseRecentComments(
   selfHandle = '',
   opts: { limit?: number } = {}
 ): UserProfile['recentComments'] {
+  const normalizedSelfHandle = selfHandle || '';
   const limit = opts.limit ?? MAX_RECENT_COMMENTS;
   const out: UserProfile['recentComments'] = [];
-  const cards = doc.querySelectorAll(
-    '[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
-  );
+  const cards = doc.querySelectorAll('[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]');
   const seenIds = new Set<string>();
 
   for (const card of Array.from(cards)) {
@@ -689,7 +691,7 @@ export function parseRecentComments(
     const originalPostText = pickLongestDirLtr(card, COMMENT_ARTICLE_SELECTOR);
     if (!originalPostText) continue;
 
-    const originalAuthor = findPostAuthor(card, selfHandle);
+    const originalAuthor = findPostAuthor(card, normalizedSelfHandle);
     if (!originalAuthor) {
       warnMiss('recentComments.originalAuthor');
       continue;
@@ -699,7 +701,8 @@ export function parseRecentComments(
       const authorLink = art.querySelector('a[href*="/in/"]') as HTMLAnchorElement | null;
       const authorHandle = authorLink ? extractInHandle(authorLink) : '';
       if (!authorHandle) continue;
-      if (selfHandle && authorHandle.toLowerCase() !== selfHandle.toLowerCase()) continue;
+      if (normalizedSelfHandle && authorHandle.toLowerCase() !== normalizedSelfHandle.toLowerCase())
+        continue;
 
       const id = art.getAttribute('data-id') ?? art.getAttribute('data-urn') ?? '';
       if (!id || seenIds.has(id)) continue;

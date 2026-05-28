@@ -72,7 +72,7 @@ export function djb2(str: string): string {
 export function buildCacheKey(
   profile: ProfileContext,
   goals: string,
-  userProfile?: UserProfile | null,
+  userProfile?: UserProfile | null
 ): string {
   // IDB-profile capturedAt is an ISO string; include it so a fresh full-
   // profile re-capture invalidates the cache without needing an explicit
@@ -114,7 +114,12 @@ export async function aiScoreBatch(input: AiScoreBatchInput): Promise<AiScoredPo
 
   if (uncached.length === 0) return fromCache;
 
-  const { system, user } = buildAiScoreBatchPrompt({ profile, goals, posts: uncached, userProfile });
+  const { system, user } = buildAiScoreBatchPrompt({
+    profile,
+    goals,
+    posts: uncached,
+    userProfile,
+  });
   const raw = await provider.generate({
     system,
     user,

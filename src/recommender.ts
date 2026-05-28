@@ -64,7 +64,10 @@ const FALLBACK_REASONS: Record<PillarKey, string> = {
   building: 'Building pillar — back-and-forth replies signal real relationships.',
 };
 
-function ruleBasedCards(weakest: PillarKey, progress: Record<PillarKey, { done: number; target: number }>): RecommendCard[] {
+function ruleBasedCards(
+  weakest: PillarKey,
+  progress: Record<PillarKey, { done: number; target: number }>
+): RecommendCard[] {
   const order = (['brand', 'finding', 'engaging', 'building'] as PillarKey[]).sort((a, b) => {
     if (a === weakest) return -1;
     if (b === weakest) return 1;
@@ -108,8 +111,7 @@ function parseCards(raw: string): RecommendCard[] | null {
       }
       // Only accept postId if it matches LinkedIn's URN shape — guards
       // against AI hallucinated IDs that would dead-link the "Open" button.
-      const postId =
-        c.postId && /^urn:li:activity:\d+$/.test(c.postId) ? c.postId : undefined;
+      const postId = c.postId && /^urn:li:activity:\d+$/.test(c.postId) ? c.postId : undefined;
       out.push({
         action: c.action as ActionVerb,
         pillar: c.pillar as PillarKey,
@@ -264,7 +266,9 @@ async function runSuggestPosts(): Promise<
   const [progress, topics] = await Promise.all([weeklyProgress(), topTopics(14, 8)]);
   const weakest = weakestPillar(progress);
   const userTopicSet = new Set(topics.map((t) => t.topic));
-  const underweightTopics = knownTopics().filter((t) => !userTopicSet.has(t)).slice(0, 6);
+  const underweightTopics = knownTopics()
+    .filter((t) => !userTopicSet.has(t))
+    .slice(0, 6);
 
   let provider;
   try {
@@ -327,7 +331,15 @@ export async function dismissRetro(): Promise<void> {
 }
 
 function ssiDeltaFromHistory(
-  history: Array<{ capturedAt: number; components: { establishBrand: number; findRightPeople: number; engageWithInsights: number; buildRelationships: number } }>,
+  history: Array<{
+    capturedAt: number;
+    components: {
+      establishBrand: number;
+      findRightPeople: number;
+      engageWithInsights: number;
+      buildRelationships: number;
+    };
+  }>
 ): { brand?: number; finding?: number; engaging?: number; building?: number } {
   if (history.length < 2) return {};
   const latest = history[history.length - 1];

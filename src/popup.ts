@@ -24,17 +24,26 @@ function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
 }
 
-// ─── Provider (OpenAI) ──────────────────────────────────────────────────────
+// ─── Provider (OpenAI/Groq) ───────────────────────────────────────────────────
 
 interface ProviderConfigDTO {
-  mode: 'openai';
+  mode: 'openai' | 'groq';
   openai?: { apiKey: string; model: string; baseUrl?: string };
+  groq?: { apiKey: string; model: string; baseUrl?: string };
 }
 
+const providerModeSelect = $<HTMLSelectElement>('providerMode');
 const providerOpenAIKeyInput = $<HTMLInputElement>('providerOpenAIKey');
 const providerOpenAIModelSelect = $<HTMLSelectElement>('providerOpenAIModel');
+const providerKeyHint = $('providerKeyHint');
 const providerSaveBtn = $<HTMLButtonElement>('providerSave');
 const providerStatus = $('providerStatus');
+
+let currentProviderConfig: ProviderConfigDTO = {
+  mode: 'openai',
+  openai: { apiKey: '', model: 'gpt-4o-mini' },
+  groq: { apiKey: '', model: 'groq/compound' },
+};
 
 function showProviderMessage(text: string, kind: 'success' | 'error' | 'info'): void {
   if (!providerStatus) return;
@@ -46,46 +55,130 @@ function showProviderMessage(text: string, kind: 'success' | 'error' | 'info'): 
   }, 6000);
 }
 
-function renderProviderForm(cfg: ProviderConfigDTO): void {
-  if (providerOpenAIKeyInput) providerOpenAIKeyInput.value = cfg.openai?.apiKey ?? '';
-  if (providerOpenAIModelSelect && cfg.openai?.model) {
-    const exists = Array.from(providerOpenAIModelSelect.options).some(
-      (o) => o.value === cfg.openai!.model,
-    );
-    if (!exists) {
-      const opt = document.createElement('option');
-      opt.value = cfg.openai.model;
-      opt.textContent = `${cfg.openai.model} (custom)`;
-      providerOpenAIModelSelect.appendChild(opt);
-    }
-    providerOpenAIModelSelect.value = cfg.openai.model;
+function updateProviderUI() {
+  if (!providerModeSelect) return;
+  const mode = providerModeSelect.value as 'openai' | 'groq';
+  if (providerKeyHint) {
+    providerKeyHint.textContent =
+      mode === 'openai'
+        ? 'Get one at platform.openai.com/api-keys'
+        : 'Get one at console.groq.com/keys';
   }
+  if (providerOpenAIKeyInput) {
+    providerOpenAIKeyInput.value =
+      mode === 'openai'
+        ? (currentProviderConfig.openai?.apiKey ?? '')
+        : (currentProviderConfig.groq?.apiKey ?? '');
+    providerOpenAIKeyInput.placeholder = mode === 'openai' ? 'sk-...' : 'gsk_...';
+  }
+  if (providerOpenAIModelSelect) {
+    providerOpenAIModelSelect.innerHTML = '';
+    const models =
+      mode === 'openai'
+        ? [
+            { value: 'gpt-4o-mini', text: 'gpt-4o-mini (fast, cheap)' },
+            { value: 'gpt-4o', text: 'gpt-4o (best quality)' },
+            { value: 'gpt-4.1-mini', text: 'gpt-4.1-mini' },
+            { value: 'gpt-4.1', text: 'gpt-4.1' },
+            { value: 'o4-mini', text: 'o4-mini (reasoning)' },
+          ]
+        : [
+            { value: 'groq/compound', text: 'groq/compound' },
+            { value: 'groq/compound-mini', text: 'groq/compound-mini' },
+            {
+              value: 'meta-llama/llama-4-scout-17b-16e-instruct',
+              text: 'llama-4-scout-17b-16e-instruct',
+            },
+          ];
+    models.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.value;
+      opt.textContent = m.text;
+      providerOpenAIModelSelect.appendChild(opt);
+    });
+    const currentModel =
+      mode === 'openai' ? currentProviderConfig.openai?.model : currentProviderConfig.groq?.model;
+    if (currentModel) {
+      const exists = Array.from(providerOpenAIModelSelect.options).some(
+        (o) => o.value === currentModel
+      );
+      if (!exists) {
+        const opt = document.createElement('option');
+        opt.value = currentModel;
+        opt.textContent = `${currentModel} (custom)`;
+        providerOpenAIModelSelect.appendChild(opt);
+      }
+      providerOpenAIModelSelect.value = currentModel;
+    }
+  }
+}
+
+providerModeSelect?.addEventListener('change', () => {
+  if (currentProviderConfig.mode === 'openai') {
+    currentProviderConfig.openai = {
+      ...currentProviderConfig.openai,
+      apiKey: providerOpenAIKeyInput?.value ?? '',
+      model: providerOpenAIModelSelect?.value ?? 'gpt-4o-mini',
+    };
+  } else {
+    currentProviderConfig.groq = {
+      ...currentProviderConfig.groq,
+      apiKey: providerOpenAIKeyInput?.value ?? '',
+      model: providerOpenAIModelSelect?.value ?? 'groq/compound',
+    };
+  }
+  currentProviderConfig.mode = providerModeSelect.value as 'openai' | 'groq';
+  updateProviderUI();
+});
+
+function renderProviderForm(cfg: ProviderConfigDTO): void {
+  currentProviderConfig = {
+    mode: cfg.mode || 'openai',
+    openai: cfg.openai || { apiKey: '', model: 'gpt-4o-mini' },
+    groq: cfg.groq || { apiKey: '', model: 'groq/compound' },
+  };
+  if (providerModeSelect) providerModeSelect.value = currentProviderConfig.mode;
+  updateProviderUI();
 }
 
 async function loadProviderConfig(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; config?: ProviderConfigDTO }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'provider.get' }, (r) => resolve(r ?? { ok: false }));
   });
-  const cfg = resp.config ?? { mode: 'openai', openai: { apiKey: '', model: 'gpt-4o-mini' } };
+  const cfg = resp.config ?? {
+    mode: 'openai',
+    openai: { apiKey: '', model: 'gpt-4o-mini' },
+    groq: { apiKey: '', model: 'groq/compound' },
+  };
   renderProviderForm(cfg);
 }
 
 async function handleProviderSave(): Promise<void> {
   if (!providerSaveBtn) return;
+  const mode = (providerModeSelect?.value as 'openai' | 'groq') ?? 'openai';
   const apiKey = providerOpenAIKeyInput?.value.trim() ?? '';
-  const model = providerOpenAIModelSelect?.value ?? 'gpt-4o-mini';
+  const model =
+    providerOpenAIModelSelect?.value ?? (mode === 'openai' ? 'gpt-4o-mini' : 'groq/compound');
+
   if (!apiKey) {
     showProviderMessage('API key is required.', 'error');
     return;
   }
+
+  if (mode === 'openai') {
+    currentProviderConfig.openai = { ...currentProviderConfig.openai, apiKey, model };
+  } else {
+    currentProviderConfig.groq = { ...currentProviderConfig.groq, apiKey, model };
+  }
+  currentProviderConfig.mode = mode;
+
   providerSaveBtn.disabled = true;
   const prev = providerSaveBtn.innerHTML;
   providerSaveBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Saving…';
   try {
     const resp = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      chrome.runtime.sendMessage(
-        { action: 'provider.set', config: { mode: 'openai', openai: { apiKey, model } } },
-        (r) => resolve(r ?? { ok: false, error: 'No response from background' }),
+      chrome.runtime.sendMessage({ action: 'provider.set', config: currentProviderConfig }, (r) =>
+        resolve(r ?? { ok: false, error: 'No response from background' })
       );
     });
     if (resp.ok) {
@@ -131,7 +224,7 @@ function setHeroClass(variant: 'empty' | 'loading' | 'ok' | 'error'): void {
     'capture-hero--empty',
     'capture-hero--loading',
     'capture-hero--ok',
-    'capture-hero--error',
+    'capture-hero--error'
   );
   heroSection.classList.add(`capture-hero--${variant}`);
 }
@@ -672,7 +765,7 @@ async function handleCaptureProfile(): Promise<void> {
       } else if (result.summaryError) {
         showProfileMessage(
           '✅ Profile captured. (AI summary skipped — check OpenAI key in Settings.)',
-          'info',
+          'info'
         );
       } else {
         showProfileMessage('✅ Profile captured successfully.', 'success');
@@ -742,7 +835,8 @@ function renderDeepScrapeProgress(p: DeepScrapeProgress | null): void {
   }
   deepScrapeProgressEl.style.display = 'flex';
   if (deepScrapeProgressText) {
-    const phaseLabel = p.phase === 'posts' ? 'posts' : p.phase === 'comments' ? 'comments' : 'profile';
+    const phaseLabel =
+      p.phase === 'posts' ? 'posts' : p.phase === 'comments' ? 'comments' : 'profile';
     deepScrapeProgressText.textContent = `Scraping ${phaseLabel} — ${p.items} items, iter ${p.iter}`;
   }
 }
@@ -756,7 +850,9 @@ function wireDeepScrapeProgressListener(): void {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (!(STORAGE_KEYS.deepScrapeProgress in changes)) return;
-    const next = changes[STORAGE_KEYS.deepScrapeProgress].newValue as DeepScrapeProgress | undefined;
+    const next = changes[STORAGE_KEYS.deepScrapeProgress].newValue as
+      | DeepScrapeProgress
+      | undefined;
     renderDeepScrapeProgress(next ?? null);
   });
 }
@@ -1020,7 +1116,10 @@ function showPromptsStatus(text: string, kind: 'success' | 'error'): void {
 }
 
 async function loadPrompts(): Promise<void> {
-  const resp = await new Promise<{ prompts: { standard?: string; withComments?: string }; defaults: typeof defaultPrompts }>((resolve) => {
+  const resp = await new Promise<{
+    prompts: { standard?: string; withComments?: string };
+    defaults: typeof defaultPrompts;
+  }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'getPrompts' }, (r) => resolve(r));
   });
   defaultPrompts = resp.defaults;
@@ -1159,7 +1258,9 @@ function renderRecommendations(state: RecommenderStateDto): void {
     const btn = document.createElement('button');
     btn.className = 'recommend-card__action';
     btn.textContent = PILLAR_COPY[c.pillar].cta;
-    btn.addEventListener('click', () => chrome.tabs.create({ url: cardHrefFor(c.pillar, c.postId) }));
+    btn.addEventListener('click', () =>
+      chrome.tabs.create({ url: cardHrefFor(c.pillar, c.postId) })
+    );
     card.append(title, reason, btn);
     recommendCards.append(card);
   }
@@ -1178,7 +1279,7 @@ function relativeTime(ts: number): string {
 async function loadPending(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; rows: ActionRowDto[] }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'action.log.pending' }, (r) =>
-      resolve(r ?? { ok: false, rows: [] }),
+      resolve(r ?? { ok: false, rows: [] })
     );
   });
   const rows = resp.rows ?? [];
@@ -1203,16 +1304,12 @@ async function loadPending(): Promise<void> {
     up.className = 'pending-chip__btn';
     up.title = 'It worked';
     up.textContent = '👍';
-    up.addEventListener('click', () =>
-      void recordOutcome(row.id, 'positive', chip),
-    );
+    up.addEventListener('click', () => void recordOutcome(row.id, 'positive', chip));
     const down = document.createElement('button');
     down.className = 'pending-chip__btn';
     down.title = "Didn't work";
     down.textContent = '👎';
-    down.addEventListener('click', () =>
-      void recordOutcome(row.id, 'negative', chip),
-    );
+    down.addEventListener('click', () => void recordOutcome(row.id, 'negative', chip));
     chip.append(txt, up, down);
     pendingChipsList.append(chip);
   }
@@ -1221,7 +1318,7 @@ async function loadPending(): Promise<void> {
 async function recordOutcome(
   actionId: number,
   verdict: 'positive' | 'negative',
-  chip: HTMLElement,
+  chip: HTMLElement
 ): Promise<void> {
   await new Promise<void>((resolve) => {
     chrome.runtime.sendMessage(
@@ -1229,7 +1326,7 @@ async function recordOutcome(
         action: 'action.log.attachOutcome',
         input: { actionId, source: 'manual', manualVerdict: verdict },
       },
-      () => resolve(),
+      () => resolve()
     );
   });
   chip.remove();
@@ -1274,7 +1371,7 @@ async function handleCardsRefresh(): Promise<void> {
   try {
     const resp = await new Promise<{ ok: boolean; state?: RecommenderStateDto }>((resolve) => {
       chrome.runtime.sendMessage({ action: 'recommender.refresh' }, (r) =>
-        resolve(r ?? { ok: false }),
+        resolve(r ?? { ok: false })
       );
     });
     if (resp.state) renderRecommendations(resp.state);
@@ -1453,9 +1550,9 @@ async function loadTopics(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; topics?: Array<{ topic: string; count: number }> }>(
     (resolve) => {
       chrome.runtime.sendMessage({ action: 'action.log.topTopics', days: 14, n: 6 }, (r) =>
-        resolve(r ?? { ok: false }),
+        resolve(r ?? { ok: false })
       );
-    },
+    }
   );
   const topics = resp.topics ?? [];
   if (!topicsRow || !topicsChips) return;
@@ -1505,7 +1602,7 @@ async function loadCadenceTargets(): Promise<void> {
     targets: { brand: number; finding: number; engaging: number; building: number };
   }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'cadence.getTargets' }, (r) =>
-      resolve(r ?? { ok: false, targets: { brand: 1, finding: 5, engaging: 3, building: 2 } }),
+      resolve(r ?? { ok: false, targets: { brand: 1, finding: 5, engaging: 3, building: 2 } })
     );
   });
   const t = resp.targets;
@@ -1524,7 +1621,7 @@ async function handleCadenceSave(): Promise<void> {
   };
   const resp = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'cadence.setTargets', targets }, (r) =>
-      resolve(r ?? { ok: false, error: 'No response' }),
+      resolve(r ?? { ok: false, error: 'No response' })
     );
   });
   if (resp.ok) {
@@ -1562,7 +1659,7 @@ function updateGoalsCount(): void {
 async function loadGoalsOverride(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; value?: string | null }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'settings.getGoalsOverride' }, (r) =>
-      resolve(r ?? { ok: false }),
+      resolve(r ?? { ok: false })
     );
   });
   if (goalsOverrideInput) {
@@ -1589,13 +1686,13 @@ async function handleGoalsOverrideSave(): Promise<void> {
   try {
     const resp = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
       chrome.runtime.sendMessage({ action: 'settings.setGoalsOverride', value }, (r) =>
-        resolve(r ?? { ok: false, error: 'No response' }),
+        resolve(r ?? { ok: false, error: 'No response' })
       );
     });
     if (resp.ok) {
       showGoalsOverrideStatus(
         value.length === 0 ? 'Cleared — using positioning summary.' : 'Saved.',
-        'success',
+        'success'
       );
     } else {
       showGoalsOverrideStatus(`Save failed: ${resp.error ?? 'unknown'}`, 'error');

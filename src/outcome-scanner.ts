@@ -45,11 +45,17 @@ function firstInt(s: string | null | undefined): number | null {
 function readCommentMetrics(commentRow: HTMLElement): { likes?: number; replies?: number } {
   const likes =
     firstInt(commentRow.querySelector<HTMLElement>('[aria-label*="reaction" i]')?.innerText) ??
-    firstInt(commentRow.querySelector<HTMLElement>('.comments-comment-social-bar__reactions-count')?.innerText) ??
+    firstInt(
+      commentRow.querySelector<HTMLElement>('.comments-comment-social-bar__reactions-count')
+        ?.innerText
+    ) ??
     undefined;
   const replies =
     firstInt(commentRow.querySelector<HTMLElement>('[aria-label*="repl" i]')?.innerText) ??
-    firstInt(commentRow.querySelector<HTMLElement>('.comments-comment-social-bar__replies-count')?.innerText) ??
+    firstInt(
+      commentRow.querySelector<HTMLElement>('.comments-comment-social-bar__replies-count')
+        ?.innerText
+    ) ??
     undefined;
   return { likes: likes ?? undefined, replies: replies ?? undefined };
 }
@@ -59,7 +65,7 @@ function findOwnComment(post: HTMLElement, fullName: string): HTMLElement | null
   const needle = fullName.toLowerCase();
   // Comment rows: try several known wrappers; fall back to any <article>-like region
   const rows = post.querySelectorAll<HTMLElement>(
-    'article.comments-comment-entity, article.comments-comment-item, article[data-id*="urn:li:comment"], div.comments-comment-item',
+    'article.comments-comment-entity, article.comments-comment-item, article[data-id*="urn:li:comment"], div.comments-comment-item'
   );
   for (const row of Array.from(rows)) {
     // Author name often in span.comments-post-meta__name-text or [aria-label*="View profile"]
@@ -86,7 +92,7 @@ export async function scanPostForOutcome(post: HTMLElement, postId: string): Pro
   // Check whether we have a pending action on this post
   const resp = await new Promise<ActionByPostResp>((resolve) => {
     chrome.runtime.sendMessage({ action: 'action.log.byPostId', postId }, (r) =>
-      resolve(r ?? { ok: false }),
+      resolve(r ?? { ok: false })
     );
   });
   const rows = resp.rows ?? [];
@@ -97,7 +103,7 @@ export async function scanPostForOutcome(post: HTMLElement, postId: string): Pro
   // Among them, find ones lacking an outcome — easiest: query pending list
   const pending = await new Promise<{ ok: boolean; rows?: PendingActionDTO[] }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'action.log.pending' }, (r) =>
-      resolve(r ?? { ok: false }),
+      resolve(r ?? { ok: false })
     );
   });
   const pendingForPost = (pending.rows ?? []).find((a) => a.postId === postId);
@@ -122,7 +128,7 @@ export async function scanPostForOutcome(post: HTMLElement, postId: string): Pro
           replies: metrics.replies,
         },
       },
-      () => resolve(),
+      () => resolve()
     );
   });
   SESSION_SCANNED.add(postId);
