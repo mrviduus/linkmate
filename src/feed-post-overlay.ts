@@ -1,28 +1,23 @@
 /**
  * Issue #18 follow-up — per-post inline relevance chips on the LinkedIn feed.
  *
- * Sits alongside the EngagementQueue sidebar (which still ranks the top-10).
  * For EVERY post visible in the feed, injects a floating chip in the top-right
  * showing:
- *   - 🎯 <heuristic>/10 — instant, free, computed from ProfileContext
  *   - 🤖 <ai>/10 — batched OpenAI call, lazy, cached
  *   - Why for you — tooltip with the AI narrative
  *
- * Reuses `queue.scoreFeed` + `queue.aiScoreFeed` background handlers via deps,
- * so it benefits from the existing in-memory AI cache (1h TTL) — no extra
- * cost when the sidebar + overlay both ask for the same posts.
+ * Reuses the `queue.aiScoreFeed` background handler via deps, so it benefits
+ * from the existing in-memory AI cache (1h TTL).
  *
  * Post root detection mirrors feed-parser.ts Strategy B: anchor on the
  * `Reaction button state` aria-label, walk up to the ancestor with a
- * `componentkey` attribute. Same heuristic as parseFeedDom so IDs line up.
+ * `componentkey` attribute. Same DOM walk as parseFeedDom so IDs line up.
  */
 
 import { parseFeedDom } from './feed-parser';
-import type { ParsedPost, ScoredPost } from './storage-schema';
+import type { ParsedPost } from './storage-schema';
 
 // ─── Types shared with linkedin-content.ts deps ──────────────────────────
-
-export type ScoreFeedResult = { ok: true; scored: ScoredPost[] } | { ok: false; warning: string };
 
 export interface AiScoredPostDTO {
   postId: string;
@@ -64,12 +59,11 @@ const SCAN_DEBOUNCE_MS = 800;
 const SCAN_MAX_WAIT_MS = 3_000;
 const REFRESH_INTERVAL_MS = 30_000;
 // Server-side handleQueueAiScoreFeed slices to 10. The overlay chunks all
-// non-skip posts into groups of this size and scores each chunk in parallel
-// so EVERY visible post gets an AI score, not just the heuristic top-10.
+// visible posts into groups of this size and scores each chunk so every
+// visible post gets an AI score.
 const AI_BATCH_SIZE = 10;
 
 export interface FeedPostOverlayDeps {
-  scoreFeed: (posts: ParsedPost[]) => Promise<ScoreFeedResult>;
   aiScoreFeed: (posts: ParsedPost[]) => Promise<AiScoreFeedResult>;
   now?: () => number;
 }
@@ -225,36 +219,41 @@ export class FeedPostOverlay {
     if (!injectedNew && now - this.lastRefreshAt < 8_000) return;
     this.inFlight = true;
     try {
-      const posts = parseFeedDom(document);
-      if (posts.length === 0) return;
-      const scoreResult = await this.deps.scoreFeed(posts);
-      if (!scoreResult.ok) {
-        // Profile missing → leave chips in 'loading' state; sidebar warning covers the why.
-        return;
+      const parsedPosts = parseFeedDom(document);
+      const postsById = new Map(parsedPosts.map((post) => [post.id, post]));
+      const visiblePosts: ParsedPost[] = [];
+      const missingPostIds = new Set<string>();
+
+      for (const root of roots) {
+        const post = postsById.get(root.id);
+        if (post) visiblePosts.push(post);
+        else missingPostIds.add(root.id);
       }
-      this.applyHeuristicScores(scoreResult.scored);
+
+      if (missingPostIds.size > 0) {
+        this.markIdsAi(
+          missingPostIds,
+          'na',
+          'AI score unavailable — could not parse this visible post'
+        );
+      }
+
+      if (visiblePosts.length === 0) return;
       this.lastRefreshAt = this.deps.now();
 
-      // AI scoring — score EVERY visible post, regardless of heuristic
-      // category. The user explicitly opted in to "AI score on every post"
-      // and the SW in-memory cache + the heuristic top-N ordering keep cost
-      // bounded. (Sidebar still filters skip — its purpose is actionable
-      // top-10 only.)
+      // AI scoring — score every visible post. The SW in-memory cache keeps
+      // repeated scans cheap while avoiding the old local pre-sort.
       if (this.aiUnavailable) {
         this.markAllAiUnavailable();
         return;
       }
-      const eligible = scoreResult.scored
-        .slice()
-        .sort((a, b) => b.relevance.score - a.relevance.score);
-      if (eligible.length === 0) return;
 
       // Chunk into AI_BATCH_SIZE-sized requests. Server-side handler slices to
-      // 10 per call; we loop on the client so every visible non-skip post gets
+      // 10 per call; we loop on the client so every visible post gets
       // scored. SW in-memory cache (1h) deduplicates re-scans cheaply.
-      const chunks: (typeof eligible)[] = [];
-      for (let i = 0; i < eligible.length; i += AI_BATCH_SIZE) {
-        chunks.push(eligible.slice(i, i + AI_BATCH_SIZE));
+      const chunks: ParsedPost[][] = [];
+      for (let i = 0; i < visiblePosts.length; i += AI_BATCH_SIZE) {
+        chunks.push(visiblePosts.slice(i, i + AI_BATCH_SIZE));
       }
 
       const chunkResults: AiScoreFeedResult[] = [];
@@ -319,12 +318,10 @@ export class FeedPostOverlay {
     // Use both `title` (a11y, screen readers, slow native tooltip) AND
     // `data-tooltip` (used by our CSS ::after pseudo-tooltip that appears
     // instantly on hover — see linkedin-styles.css).
-    const initialHeuristicTip = 'Heuristic relevance — local, based on your profile';
     const initialAiTip = this.aiUnavailable
       ? 'AI score unavailable — check OpenAI key in Settings'
       : 'AI relevance — uses OpenAI + your profile + goals';
     chip.innerHTML = `
-      <span class="${CHIP_CLASS}__heuristic" data-state="loading" data-tooltip="${esc(initialHeuristicTip)}" title="${esc(initialHeuristicTip)}">🎯 …</span>
       <span class="${CHIP_CLASS}__ai" data-state="${this.aiUnavailable ? 'na' : 'loading'}" data-tooltip="${esc(initialAiTip)}" title="${esc(initialAiTip)}">${this.aiUnavailable ? '🤖 —' : '🤖 …'}</span>
     `;
     element.appendChild(chip);
@@ -342,25 +339,6 @@ export class FeedPostOverlay {
       if (title) {
         ai.setAttribute('title', title);
         ai.setAttribute('data-tooltip', title);
-      }
-    }
-  }
-
-  private applyHeuristicScores(scored: ScoredPost[]): void {
-    for (const s of scored) {
-      const chip = this.findChip(s.id);
-      if (!chip) continue;
-      const tenScore = Math.round(s.relevance.score / 10);
-      const span = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__heuristic`);
-      if (span) {
-        span.setAttribute('data-state', 'ready');
-        span.setAttribute('data-band', s.relevance.category);
-        span.textContent = `🎯 ${tenScore}/10`;
-        const tip = `Heuristic ${s.relevance.score}/100 · ${s.relevance.category}${
-          s.relevance.reasons[0] ? ' · ' + s.relevance.reasons[0] : ''
-        }`;
-        span.setAttribute('title', tip);
-        span.setAttribute('data-tooltip', tip);
       }
     }
   }
@@ -564,7 +542,6 @@ export class FeedPostOverlay {
 
     let bestChip: HTMLElement | null = null;
     let bestScore = -1;
-    let bestHeuristic = -1;
 
     for (const chip of chips) {
       const postId = chip.getAttribute('data-post-id');
@@ -579,32 +556,18 @@ export class FeedPostOverlay {
       }
 
       const aiSpan = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__ai`);
-      const heuristicSpan = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__heuristic`);
 
       let aiScore = -1;
-      let heuristicScore = -1;
 
       if (aiSpan && aiSpan.getAttribute('data-state') === 'ready') {
         const match = aiSpan.textContent?.match(/(\d+)\/10/);
         if (match) aiScore = parseInt(match[1], 10);
       }
 
-      if (heuristicSpan && heuristicSpan.getAttribute('data-state') === 'ready') {
-        const match = heuristicSpan.textContent?.match(/(\d+)\/10/);
-        if (match) heuristicScore = parseInt(match[1], 10);
-      }
+      console.log(`[Focus Top Post] Chip ${postId} -> AI: ${aiScore}`);
 
-      console.log(
-        `[Focus Top Post] Chip ${postId} -> AI: ${aiScore}, Heuristic: ${heuristicScore}`
-      );
-
-      const currentScore = aiScore >= 0 ? aiScore : heuristicScore;
-      if (
-        currentScore > bestScore ||
-        (currentScore === bestScore && heuristicScore > bestHeuristic)
-      ) {
-        bestScore = currentScore;
-        bestHeuristic = heuristicScore;
+      if (aiScore > bestScore) {
+        bestScore = aiScore;
         bestChip = chip;
       }
     }
@@ -628,9 +591,7 @@ export class FeedPostOverlay {
     }
 
     const postId = bestChip.getAttribute('data-post-id');
-    console.log(
-      `[Focus Top Post] Best chip selected: ${postId} with score ${bestScore} (heuristic ${bestHeuristic})`
-    );
+    console.log(`[Focus Top Post] Best chip selected: ${postId} with AI score ${bestScore}`);
 
     if (!postId) return;
 
