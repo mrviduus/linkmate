@@ -206,6 +206,7 @@ async function handleHeroRefresh(): Promise<void> {
   renderHero({ kind: 'loading' });
   await handleCaptureProfile();
   await refreshCaptureHero();
+  await loadProfileAudit();
 }
 
 async function handleHeroCopyJson(): Promise<void> {
@@ -217,6 +218,266 @@ async function handleHeroCopyJson(): Promise<void> {
   } catch (err) {
     showHeroMessage(`Copy failed: ${String(err)}`);
   }
+}
+
+// ─── Profile audit (issue #28) ──────────────────────────────────────────────
+
+interface ProfileAuditDTO {
+  profileCapturedAt: string;
+  audit: {
+    checks: Array<{
+      id: string;
+      status: 'pass' | 'fail';
+      severity: 'high' | 'med';
+      label: string;
+      detail: string;
+    }>;
+    passed: number;
+    total: number;
+    score: number;
+    failed: string[];
+  };
+  recommendations: Array<{
+    checkId: string;
+    diagnosis: string;
+    suggestion: string;
+    rationale: string;
+  }> | null;
+  recommendationsAt: number;
+}
+
+const profileAuditSection = $('profileAudit');
+const profileAuditList = $<HTMLUListElement>('profileAuditList');
+const profileAuditCounter = $('profileAuditCounter');
+const profileAuditProgress = profileAuditSection?.querySelector<HTMLDivElement>(
+  '.profile-audit__progress',
+);
+const profileAuditProgressFill = $<HTMLDivElement>('profileAuditProgressFill');
+const profileAuditRewriteBtn = $<HTMLButtonElement>('profileAuditRewrite');
+const profileAuditRewriteLabel = $('profileAuditRewriteLabel');
+const profileAuditRerunBtn = $<HTMLButtonElement>('profileAuditRerun');
+const profileAuditStatus = $('profileAuditStatus');
+
+function showAuditStatus(text: string, kind: 'success' | 'error' | 'info'): void {
+  if (!profileAuditStatus) return;
+  profileAuditStatus.textContent = text;
+  profileAuditStatus.className = `status-message ${kind}`;
+  profileAuditStatus.style.display = '';
+  setTimeout(() => {
+    if (profileAuditStatus) profileAuditStatus.style.display = 'none';
+  }, 4000);
+}
+
+function renderAuditList(state: ProfileAuditDTO): void {
+  if (!profileAuditList) return;
+  profileAuditList.innerHTML = '';
+  type Rec = NonNullable<ProfileAuditDTO['recommendations']>[number];
+  const recsByCheckId = new Map<string, Rec>();
+  if (state.recommendations) {
+    for (const r of state.recommendations) recsByCheckId.set(r.checkId, r);
+  }
+  for (const c of state.audit.checks) {
+    const li = document.createElement('li');
+    li.className = 'profile-audit__check';
+
+    const row = document.createElement('div');
+    row.className = 'profile-audit__check-row';
+    const icon = document.createElement('span');
+    icon.className = `profile-audit__check-icon profile-audit__check-icon--${c.status === 'pass' ? 'pass' : 'fail'}`;
+    icon.textContent = c.status === 'pass' ? '✓' : '✗';
+    icon.setAttribute('aria-label', c.status === 'pass' ? 'passed' : 'needs attention');
+    const label = document.createElement('span');
+    label.className = 'profile-audit__check-label';
+    label.textContent = c.label;
+    const detail = document.createElement('span');
+    detail.className = 'profile-audit__check-detail';
+    detail.textContent = c.detail;
+    row.appendChild(icon);
+    row.appendChild(label);
+    row.appendChild(detail);
+    li.appendChild(row);
+
+    const rec = recsByCheckId.get(c.id);
+    if (c.status === 'fail' && rec) {
+      li.appendChild(renderSuggestion(rec));
+    }
+    profileAuditList.appendChild(li);
+  }
+
+  // Render advisory recommendations (photoBanner, openToWork) as extra rows.
+  if (state.recommendations) {
+    for (const r of state.recommendations) {
+      if (r.checkId !== 'photoBanner' && r.checkId !== 'openToWork') continue;
+      const li = document.createElement('li');
+      li.className = 'profile-audit__check';
+      const row = document.createElement('div');
+      row.className = 'profile-audit__check-row';
+      const icon = document.createElement('span');
+      icon.className = 'profile-audit__check-icon';
+      icon.textContent = 'ⓘ';
+      icon.setAttribute('aria-label', 'advisory');
+      const label = document.createElement('span');
+      label.className = 'profile-audit__check-label';
+      label.textContent = r.checkId === 'photoBanner' ? 'Photo & banner' : 'Open to Work';
+      row.appendChild(icon);
+      row.appendChild(label);
+      li.appendChild(row);
+      li.appendChild(renderSuggestion(r));
+      profileAuditList.appendChild(li);
+    }
+  }
+}
+
+function renderSuggestion(rec: {
+  diagnosis: string;
+  suggestion: string;
+  rationale: string;
+}): HTMLDivElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'profile-audit__suggestion';
+
+  if (rec.diagnosis) {
+    const d = document.createElement('div');
+    d.className = 'profile-audit__suggestion-diagnosis';
+    d.textContent = rec.diagnosis;
+    wrap.appendChild(d);
+  }
+
+  const text = document.createElement('div');
+  text.className = 'profile-audit__suggestion-text';
+  text.textContent = rec.suggestion;
+  wrap.appendChild(text);
+
+  if (rec.rationale) {
+    const r = document.createElement('div');
+    r.className = 'profile-audit__suggestion-rationale';
+    r.textContent = rec.rationale;
+    wrap.appendChild(r);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'profile-audit__suggestion-actions';
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn btn-sm btn-secondary profile-audit__copy-btn';
+  copyBtn.innerHTML = '<i class="fa fa-copy"></i> Copy';
+  copyBtn.setAttribute('aria-label', 'Copy suggested text');
+  copyBtn.addEventListener('click', () => {
+    void navigator.clipboard
+      .writeText(rec.suggestion)
+      .then(() => showAuditStatus('Copied to clipboard.', 'success'))
+      .catch((err) => showAuditStatus(`Copy failed: ${String(err)}`, 'error'));
+  });
+  actions.appendChild(copyBtn);
+  wrap.appendChild(actions);
+
+  return wrap;
+}
+
+function renderProfileAudit(state: ProfileAuditDTO | null): void {
+  if (!profileAuditSection) return;
+  if (!state) {
+    profileAuditSection.style.display = 'none';
+    return;
+  }
+  profileAuditSection.style.display = '';
+
+  const { passed, total, score } = state.audit;
+  if (profileAuditCounter) {
+    profileAuditCounter.textContent = `${passed} of ${total} essentials`;
+  }
+  if (profileAuditProgressFill) {
+    profileAuditProgressFill.style.width = `${score}%`;
+    profileAuditProgressFill.classList.remove(
+      'profile-audit__progress-fill--mid',
+      'profile-audit__progress-fill--low',
+    );
+    if (score < 50) profileAuditProgressFill.classList.add('profile-audit__progress-fill--low');
+    else if (score < 75)
+      profileAuditProgressFill.classList.add('profile-audit__progress-fill--mid');
+  }
+  if (profileAuditProgress) {
+    profileAuditProgress.setAttribute('aria-valuenow', String(score));
+  }
+
+  renderAuditList(state);
+
+  if (profileAuditRewriteBtn && profileAuditRewriteLabel) {
+    const failedCount = state.audit.failed.length;
+    if (state.recommendations) {
+      profileAuditRewriteLabel.textContent = 'Regenerate AI rewrites';
+    } else if (failedCount === 0) {
+      profileAuditRewriteLabel.textContent = 'Get advice anyway';
+    } else {
+      profileAuditRewriteLabel.textContent = `Get AI rewrites for ${failedCount} gap${failedCount === 1 ? '' : 's'}`;
+    }
+    profileAuditRewriteBtn.dataset.state = 'idle';
+    profileAuditRewriteBtn.disabled = false;
+  }
+}
+
+async function loadProfileAudit(): Promise<void> {
+  try {
+    const resp = await new Promise<{ ok: boolean; state?: ProfileAuditDTO | null }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'profile.audit.get' }, (r) => resolve(r ?? { ok: false }));
+    });
+    if (!resp.ok) {
+      renderProfileAudit(null);
+      return;
+    }
+    renderProfileAudit(resp.state ?? null);
+  } catch {
+    renderProfileAudit(null);
+  }
+}
+
+async function handleProfileAuditRewrite(): Promise<void> {
+  if (!profileAuditRewriteBtn || !profileAuditRewriteLabel) return;
+  profileAuditRewriteBtn.disabled = true;
+  profileAuditRewriteBtn.dataset.state = 'loading';
+  const prevLabel = profileAuditRewriteLabel.textContent;
+  profileAuditRewriteLabel.textContent = 'Generating rewrites…';
+  try {
+    const resp = await new Promise<{
+      ok: boolean;
+      state?: ProfileAuditDTO;
+      reason?: string;
+      error?: string;
+    }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'profile.audit.rewrite' }, (r) =>
+        resolve(r ?? { ok: false, reason: 'network' }),
+      );
+    });
+    if (!resp.ok) {
+      profileAuditRewriteBtn.disabled = false;
+      profileAuditRewriteBtn.dataset.state = 'idle';
+      profileAuditRewriteLabel.textContent = prevLabel ?? 'Get AI rewrites';
+      if (resp.reason === 'no_key') {
+        showAuditStatus(
+          'Add an OpenAI key in Settings to get AI rewrites.',
+          'info',
+        );
+      } else if (resp.reason === 'no_profile') {
+        showAuditStatus('Capture your profile first.', 'error');
+      } else if (resp.reason === 'parse') {
+        showAuditStatus('AI returned malformed JSON. Try again.', 'error');
+      } else {
+        showAuditStatus(`Failed: ${resp.error ?? 'unknown error'}`, 'error');
+      }
+      return;
+    }
+    if (resp.state) renderProfileAudit(resp.state);
+  } catch (err) {
+    profileAuditRewriteBtn.disabled = false;
+    profileAuditRewriteBtn.dataset.state = 'idle';
+    profileAuditRewriteLabel.textContent = prevLabel ?? 'Get AI rewrites';
+    showAuditStatus(`Failed: ${String(err)}`, 'error');
+  }
+}
+
+async function handleProfileAuditRerun(): Promise<void> {
+  await loadProfileAudit();
+  showAuditStatus('Audit refreshed.', 'success');
 }
 
 // ─── Profile Context ────────────────────────────────────────────────────────
@@ -1311,6 +1572,8 @@ function wire(): void {
   suggestPostBtn?.addEventListener('click', () => void openPostModal());
   postModalClose?.addEventListener('click', closePostModal);
   postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
+  profileAuditRewriteBtn?.addEventListener('click', () => void handleProfileAuditRewrite());
+  profileAuditRerunBtn?.addEventListener('click', () => void handleProfileAuditRerun());
 }
 
 /**
@@ -1339,6 +1602,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCadenceTargets(),
     loadGoalsOverride(),
     loadToday(),
+    loadProfileAudit(),
   ]);
   chrome.runtime.sendMessage({ action: 'popupReady' });
   // Fire-and-forget: don't block the popup paint on a 10–20s capture.

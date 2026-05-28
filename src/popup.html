@@ -69,6 +69,39 @@
           <div id="captureHeroMessage" class="capture-hero__message" style="display: none"></div>
         </section>
 
+        <!-- Profile audit: 6 deterministic checks + opt-in AI rewrites (issue #28) -->
+        <section id="profileAudit" class="profile-audit" style="display: none">
+          <header class="profile-audit__head">
+            <h3 class="profile-audit__title">
+              <i class="fa fa-clipboard-check"></i> Profile audit
+            </h3>
+            <button id="profileAuditRerun" class="btn btn-sm btn-secondary" type="button" title="Recompute from latest capture">
+              <i class="fa fa-rotate"></i> Re-run
+            </button>
+          </header>
+          <div class="profile-audit__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="profileAuditProgressFill" class="profile-audit__progress-fill"></div>
+          </div>
+          <div id="profileAuditCounter" class="profile-audit__counter">0 of 0 essentials</div>
+          <ul id="profileAuditList" class="profile-audit__list"></ul>
+          <button
+            id="profileAuditRewrite"
+            class="btn btn-primary profile-audit__cta"
+            type="button"
+          >
+            <i class="fa fa-wand-magic-sparkles"></i>
+            <span id="profileAuditRewriteLabel">Get AI rewrites</span>
+          </button>
+          <div id="profileAuditStatus" class="status-message" style="display: none"></div>
+          <div id="profileAuditAdvisory" class="profile-audit__advisory">
+            <div class="profile-audit__advisory-title">Always worth checking</div>
+            <ul>
+              <li>Profile photo + industry-relevant background banner</li>
+              <li>"Open to Work" set to Recruiters Only (public flag can lower leverage)</li>
+            </ul>
+          </div>
+        </section>
+
         <!-- SSI Tracker (moved up for visual completion indicator after capture) -->
         <div class="settings-section">
           <h3>
