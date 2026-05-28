@@ -97,13 +97,15 @@ export interface BuildProfileRewritePromptInput {
   profile: UserProfile;
   audit: AuditReport;
   goals: string | null;
+  /** Previous suggestion stems to steer the model away from on regenerate. */
+  avoidStems?: string[];
 }
 
 export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput): {
   system: string;
   user: string;
 } {
-  const { profile, audit, goals } = input;
+  const { profile, audit, goals, avoidStems } = input;
 
   const system = [
     'You are a senior LinkedIn profile copy editor for a specific user.',
@@ -123,7 +125,7 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
   ].join('\n');
 
   const goalsLine = oneLine(goals ?? '', GOALS_CAP);
-  const user = [
+  const userParts: string[] = [
     '=== Profile ===',
     formatProfileForRewrite(profile),
     '',
@@ -131,11 +133,13 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
     '',
     '=== Audit state ===',
     formatAuditState(audit),
-    '',
-    'Return the recommendations JSON now.',
-  ].join('\n');
-
-  return { system, user };
+  ];
+  if (avoidStems && avoidStems.length > 0) {
+    userParts.push('', '=== Previous suggestion openings (write FRESH angles, do not repeat these) ===');
+    for (const s of avoidStems) userParts.push(`- ${oneLine(s, 100)}`);
+  }
+  userParts.push('', 'Return the recommendations JSON now.');
+  return { system, user: userParts.join('\n') };
 }
 
 // ─── SSI strategy prompt ────────────────────────────────────────────────────
@@ -199,13 +203,14 @@ export interface BuildSsiStrategyPromptInput {
   profile: UserProfile;
   ssi: SsiSnapshot | null;
   goals: string | null;
+  avoidStems?: string[];
 }
 
 export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
   system: string;
   user: string;
 } {
-  const { profile, ssi, goals } = input;
+  const { profile, ssi, goals, avoidStems } = input;
 
   const system = [
     "You are a LinkedIn growth strategist. Read the user's SSI breakdown and what they actually post/comment about.",
@@ -224,7 +229,7 @@ export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
   ].join('\n');
 
   const goalsLine = oneLine(goals ?? '', GOALS_CAP);
-  const user = [
+  const userParts: string[] = [
     `Name: ${profile.name || '(unknown)'}`,
     `Headline: ${oneLine(profile.headline, HEADLINE_CAP) || '(empty)'}`,
     '',
@@ -238,9 +243,11 @@ export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
     formatOwnComments(profile),
     '',
     `=== Goals === ${goalsLine || '(not provided)'}`,
-    '',
-    'Return the recommendations JSON now.',
-  ].join('\n');
-
-  return { system, user };
+  ];
+  if (avoidStems && avoidStems.length > 0) {
+    userParts.push('', '=== Previous tactic openings (propose FRESH actions, do not repeat these) ===');
+    for (const s of avoidStems) userParts.push(`- ${oneLine(s, 100)}`);
+  }
+  userParts.push('', 'Return the recommendations JSON now.');
+  return { system, user: userParts.join('\n') };
 }

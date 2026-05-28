@@ -32,8 +32,10 @@ import {
 } from './storage-schema';
 import { aiScoreBatch, clearAiCache, AiParseError } from './ai-feed-analyzer';
 import { getUserProfile, profileContextFromUserProfile } from './user-profile-store';
-import { auditProfile } from './profile-audit';
+import { auditProfile, computeActivitySignals } from './profile-audit';
 import {
+  AVOID_STEM_HISTORY_CAP,
+  AVOID_STEM_LEN,
   generateProfileRecommendations,
   ProfileRecommenderParseError,
 } from './profile-recommender';
@@ -484,7 +486,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true;
   }
   if (request.action === 'profile.audit.rewrite') {
-    handleProfileAuditRewrite(sendResponse);
+    handleProfileAuditRewrite(Boolean(request.regenerate), sendResponse);
     return true;
   }
   if (request.action === 'settings.getGoalsOverride') {
@@ -930,10 +932,13 @@ async function handleProfileAuditGet(
       getSsiHistory().catch(() => []),
     ]);
     const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
+    const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
     const recommendations =
       stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendations : null;
     const recommendationsAt =
       stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendationsAt : 0;
+    const avoidStems =
+      stored && stored.profileCapturedAt === up.capturedAt ? stored.avoidStems ?? [] : [];
     sendResponse({
       ok: true,
       state: {
@@ -942,6 +947,8 @@ async function handleProfileAuditGet(
         recommendations,
         recommendationsAt,
         ssi,
+        avoidStems,
+        activitySignals,
       },
     });
   } catch (err) {
@@ -951,6 +958,7 @@ async function handleProfileAuditGet(
 }
 
 async function handleProfileAuditRewrite(
+  regenerate: boolean,
   sendResponse: (response: unknown) => void,
 ): Promise<void> {
   keepAlive.start();
@@ -968,11 +976,18 @@ async function handleProfileAuditRewrite(
       return;
     }
     const audit = auditProfile(up);
-    const [goals, ssiHistory] = await Promise.all([
+    const [goals, ssiHistory, storedAudit] = await Promise.all([
       getGoalsOverride(),
       getSsiHistory().catch(() => []),
+      getProfileAuditState().catch(() => null),
     ]);
     const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
+    // Only carry stems forward if the profile snapshot hasn't changed. A new
+    // capture should start with a blank slate so the LLM gets fresh framing.
+    const carriedStems =
+      regenerate && storedAudit && storedAudit.profileCapturedAt === up.capturedAt
+        ? storedAudit.avoidStems ?? []
+        : [];
     try {
       const recommendations = await generateProfileRecommendations({
         provider,
@@ -980,15 +995,28 @@ async function handleProfileAuditRewrite(
         audit,
         goals,
         ssi,
+        avoidStems: carriedStems,
       });
+      const newStems = recommendations
+        .map((r) => r.suggestion.slice(0, AVOID_STEM_LEN).trim())
+        .filter((s) => s.length > 0);
+      // Dedupe and cap. Most-recent entries kept (drop oldest if over cap).
+      const merged = dedupeKeepLast([...carriedStems, ...newStems]).slice(
+        -AVOID_STEM_HISTORY_CAP,
+      );
       const state = {
         profileCapturedAt: up.capturedAt,
         audit,
         recommendations,
         recommendationsAt: Date.now(),
+        avoidStems: merged,
       };
       await setProfileAuditState(state);
-      sendResponse({ ok: true, state });
+      // Include live-derived fields (ssi + activitySignals) in the wire
+      // response so the popup can update the header + signal rows without
+      // a second round-trip.
+      const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
+      sendResponse({ ok: true, state: { ...state, ssi, activitySignals } });
     } catch (err) {
       if (err instanceof ProfileRecommenderParseError) {
         console.warn('[linkmate] profile.audit.rewrite parse failure:', err.message);
@@ -1001,6 +1029,19 @@ async function handleProfileAuditRewrite(
   } finally {
     keepAlive.stop();
   }
+}
+
+/** Keep last occurrence of each duplicate stem; preserves insertion order otherwise. */
+function dedupeKeepLast(stems: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (let i = stems.length - 1; i >= 0; i--) {
+    const s = stems[i];
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.unshift(s);
+  }
+  return out;
 }
 
 // ─── Reply generation (standard + with comments) ────────────────────────────

@@ -4,7 +4,12 @@
  * MVP works on existing IDB UserProfile fields, no parser changes.
  */
 
-import { auditProfile, type AuditCheckId } from '../src/profile-audit';
+import {
+  auditProfile,
+  computeActivitySignals,
+  type ActivitySignalId,
+  type AuditCheckId,
+} from '../src/profile-audit';
 import type { UserProfile } from '../src/lib/idb';
 
 function profile(overrides: Partial<UserProfile> = {}): UserProfile {
@@ -190,5 +195,80 @@ describe('aggregate report', () => {
     );
     expect(r.score).toBe(0);
     expect(r.passed).toBe(0);
+  });
+});
+
+describe('computeActivitySignals', () => {
+  const NOW = Date.parse('2026-05-28T00:00:00.000Z');
+
+  function findSignal(signals: ReturnType<typeof computeActivitySignals>, id: ActivitySignalId) {
+    const s = signals.find((x) => x.id === id);
+    if (!s) throw new Error(`Signal ${id} missing`);
+    return s;
+  }
+
+  function isoDaysAgo(days: number): string {
+    return new Date(NOW - days * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  it('skips SSI signal when no snapshot', () => {
+    const out = computeActivitySignals(profile(), null, NOW);
+    expect(out.find((s) => s.id === 'ssi')).toBeUndefined();
+  });
+
+  it('flags SSI below threshold as low', () => {
+    const out = computeActivitySignals(profile(), 23, NOW);
+    const s = findSignal(out, 'ssi');
+    expect(s.status).toBe('low');
+    expect(s.detail).toContain('23/100');
+    expect(s.guidance).toBeTruthy();
+  });
+
+  it('marks SSI at threshold as ok', () => {
+    const out = computeActivitySignals(profile(), 50, NOW);
+    expect(findSignal(out, 'ssi').status).toBe('ok');
+  });
+
+  it('counts only own posts within 30d window', () => {
+    const p = profile({
+      recentPosts: [
+        { id: 'a', text: 'fresh', timestamp: isoDaysAgo(2), isRepost: false },
+        { id: 'b', text: 'old', timestamp: isoDaysAgo(40), isRepost: false },
+        { id: 'c', text: 'repost recent', timestamp: isoDaysAgo(5), isRepost: true },
+        { id: 'd', text: 'fresh2', timestamp: isoDaysAgo(15), isRepost: false },
+      ],
+    });
+    const s = findSignal(computeActivitySignals(p, null, NOW), 'posts30d');
+    expect(s.detail).toContain('2 ');
+    expect(s.status).toBe('low');
+  });
+
+  it('marks posts30d ok at threshold', () => {
+    const p = profile({
+      recentPosts: Array.from({ length: 4 }, (_, i) => ({
+        id: `p${i}`,
+        text: 't',
+        timestamp: isoDaysAgo(i + 1),
+        isRepost: false,
+      })),
+    });
+    expect(findSignal(computeActivitySignals(p, null, NOW), 'posts30d').status).toBe('ok');
+  });
+
+  it('counts comments within 30d window', () => {
+    const p = profile({
+      recentComments: [
+        { id: 'c1', text: 't', timestamp: isoDaysAgo(1), originalPostText: 'op', originalAuthor: 'a' },
+        { id: 'c2', text: 't', timestamp: isoDaysAgo(60), originalPostText: 'op', originalAuthor: 'a' },
+      ],
+    });
+    const s = findSignal(computeActivitySignals(p, null, NOW), 'comments30d');
+    expect(s.detail).toContain('1 ');
+    expect(s.status).toBe('low');
+  });
+
+  it('surfaces network500 as low until 500+ connections', () => {
+    expect(findSignal(computeActivitySignals(profile({ connectionsCount: 153 }), null, NOW), 'network500').status).toBe('low');
+    expect(findSignal(computeActivitySignals(profile({ connectionsCount: 500 }), null, NOW), 'network500').status).toBe('ok');
   });
 });

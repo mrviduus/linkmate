@@ -30,6 +30,14 @@ const SUGGESTION_MAX_LEN = 2200;
 const DIAGNOSIS_MAX_LEN = 240;
 const RATIONALE_MAX_LEN = 320;
 const MAX_RECOMMENDATIONS = 12;
+/** Stem length fed into "avoid these openings" on regenerate. Background
+ *  uses this same length when truncating suggestions into the history. */
+export const AVOID_STEM_LEN = 90;
+/** Max number of avoid stems to keep across regenerations; bounds prompt size. */
+export const AVOID_STEM_HISTORY_CAP = 30;
+/** Base temp gives some variety; regenerate bumps further so output diverges. */
+const BASE_TEMPERATURE = 0.7;
+const REGENERATE_TEMPERATURE = 0.9;
 
 const VALID_CHECK_IDS = new Set<ProfileRecommendation['checkId']>([
   'currentPosition',
@@ -59,6 +67,10 @@ export interface GenerateProfileRecommendationsInput {
   audit: AuditReport;
   goals: string | null;
   ssi: SsiSnapshot | null;
+  /** Suggestion stems accumulated across previous regenerations. Fed to the
+   *  LLM as an "avoid" list so each click produces fresh angles. Empty / omitted
+   *  on the first call. Caller is responsible for accumulation + capping. */
+  avoidStems?: string[];
 }
 
 /**
@@ -72,14 +84,17 @@ export interface GenerateProfileRecommendationsInput {
 export async function generateProfileRecommendations(
   input: GenerateProfileRecommendationsInput,
 ): Promise<ProfileRecommendation[]> {
-  const { provider, profile, audit, goals, ssi } = input;
+  const { provider, profile, audit, goals, ssi, avoidStems } = input;
 
-  const copyPrompt = buildProfileRewritePrompt({ profile, audit, goals });
-  const strategyPrompt = buildSsiStrategyPrompt({ profile, ssi, goals });
+  const isRegenerate = (avoidStems ?? []).length > 0;
+  const temperature = isRegenerate ? REGENERATE_TEMPERATURE : BASE_TEMPERATURE;
+
+  const copyPrompt = buildProfileRewritePrompt({ profile, audit, goals, avoidStems });
+  const strategyPrompt = buildSsiStrategyPrompt({ profile, ssi, goals, avoidStems });
 
   const [copyResult, strategyResult] = await Promise.allSettled([
-    runOne(provider, copyPrompt, COPY_MAX_TOKENS),
-    runOne(provider, strategyPrompt, STRATEGY_MAX_TOKENS),
+    runOne(provider, copyPrompt, COPY_MAX_TOKENS, temperature),
+    runOne(provider, strategyPrompt, STRATEGY_MAX_TOKENS, temperature),
   ]);
 
   const copy = unwrap(copyResult, 'copy');
@@ -107,12 +122,13 @@ async function runOne(
   provider: InferenceProvider,
   prompt: { system: string; user: string },
   maxTokens: number,
+  temperature: number,
 ): Promise<ProfileRecommendation[]> {
   const raw = await provider.generate({
     system: prompt.system,
     user: prompt.user,
     maxTokens,
-    temperature: 0.4,
+    temperature,
     topP: 0.9,
     timeoutMs: REWRITE_TIMEOUT_MS,
   });

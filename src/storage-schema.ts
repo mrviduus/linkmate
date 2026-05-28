@@ -545,7 +545,20 @@ export interface ProfileAuditState {
   recommendations: ProfileRecommendation[] | null;
   /** ms epoch when recommendations were generated; 0 if never. */
   recommendationsAt: number;
+  /** Suggestion stems accumulated across regenerations, fed back to the LLM
+   *  as an "avoid" list so each click produces fresh angles. Reset to []
+   *  whenever profileCapturedAt changes. Capped to keep the prompt bounded. */
+  avoidStems: string[];
 }
+
+// Activity signals are derived live (cheap) and not persisted in storage
+// alongside the audit state; background recomputes on every audit.get call.
+// Re-export types here only so popup/background share the wire shape.
+export type {
+  ActivitySignal,
+  ActivitySignalId,
+  ActivitySignalStatus,
+} from './profile-audit';
 
 export async function getProfileAuditState(): Promise<ProfileAuditState | null> {
   return readKey<ProfileAuditState>(STORAGE_KEYS.profileAudit);

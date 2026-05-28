@@ -138,3 +138,113 @@ function auditConnections(p: UserProfile): AuditCheck {
     detail: ok ? `${n >= 500 ? '500+' : n}` : `${n}/${CONNECTIONS_MIN}`,
   };
 }
+
+// ─── Activity signals (separate from profile-completeness audit) ───────────
+//
+// The 6 audit checks above gate basic profile completeness. These signals
+// surface ACTIVITY weakness — separate concept, doesn't count toward the
+// audit score. Surfacing them resolves the "6/6 essentials but SSI 23"
+// confusion: profile is complete, activity is not.
+
+export type ActivitySignalId = 'ssi' | 'posts30d' | 'comments30d' | 'network500';
+export type ActivitySignalStatus = 'ok' | 'low';
+
+export interface ActivitySignal {
+  id: ActivitySignalId;
+  status: ActivitySignalStatus;
+  label: string;
+  detail: string;
+  /** One-liner hint surfaced under the row when status is 'low'. */
+  guidance: string;
+}
+
+const SSI_OK_THRESHOLD = 50;
+const POSTS_30D_OK_THRESHOLD = 4;
+const COMMENTS_30D_OK_THRESHOLD = 8;
+const NETWORK_STRONG_THRESHOLD = 500;
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function computeActivitySignals(
+  profile: UserProfile,
+  ssiTotal: number | null,
+  now: number = Date.now(),
+): ActivitySignal[] {
+  const out: ActivitySignal[] = [];
+
+  if (ssiTotal !== null) {
+    const ok = ssiTotal >= SSI_OK_THRESHOLD;
+    out.push({
+      id: 'ssi',
+      status: ok ? 'ok' : 'low',
+      label: 'SSI score',
+      detail: `${ssiTotal}/100 (target ≥${SSI_OK_THRESHOLD})`,
+      guidance: ok
+        ? ''
+        : 'SSI below 50 caps LinkedIn feed reach. Post weekly + comment on industry leaders to lift it.',
+    });
+  }
+
+  const threshold = now - THIRTY_DAYS_MS;
+  const posts30d = countSinceTimestamp(
+    profile.recentPosts ?? [],
+    (p) => (p.isRepost ? null : p.timestamp),
+    threshold,
+  );
+  out.push({
+    id: 'posts30d',
+    status: posts30d >= POSTS_30D_OK_THRESHOLD ? 'ok' : 'low',
+    label: 'Posts in last 30d',
+    detail: `${posts30d} (target ≥${POSTS_30D_OK_THRESHOLD})`,
+    guidance:
+      posts30d >= POSTS_30D_OK_THRESHOLD
+        ? ''
+        : 'Aim for 1 original post per week. Consistency builds the brand pillar.',
+  });
+
+  const comments30d = countSinceTimestamp(
+    profile.recentComments ?? [],
+    (c) => c.timestamp,
+    threshold,
+  );
+  out.push({
+    id: 'comments30d',
+    status: comments30d >= COMMENTS_30D_OK_THRESHOLD ? 'ok' : 'low',
+    label: 'Comments in last 30d',
+    detail: `${comments30d} (target ≥${COMMENTS_30D_OK_THRESHOLD})`,
+    guidance:
+      comments30d >= COMMENTS_30D_OK_THRESHOLD
+        ? ''
+        : 'Comment ~2x/week on senior peers — biggest lever on engageWithInsights.',
+  });
+
+  // Connections >= 50 already gates audit.connections; here we additionally
+  // surface the stronger 500+ target that actually moves SSI's network pillar.
+  const n = profile.connectionsCount ?? 0;
+  out.push({
+    id: 'network500',
+    status: n >= NETWORK_STRONG_THRESHOLD ? 'ok' : 'low',
+    label: 'Network depth',
+    detail: n >= NETWORK_STRONG_THRESHOLD ? '500+' : `${n} (target ≥${NETWORK_STRONG_THRESHOLD})`,
+    guidance:
+      n >= NETWORK_STRONG_THRESHOLD
+        ? ''
+        : 'Grow to 500+ connections — unlocks "500+" social proof and stronger SSI network rank.',
+  });
+
+  return out;
+}
+
+function countSinceTimestamp<T>(
+  items: T[],
+  getTs: (item: T) => string | null | undefined,
+  thresholdMs: number,
+): number {
+  let n = 0;
+  for (const it of items) {
+    const ts = getTs(it);
+    if (!ts) continue;
+    const t = Date.parse(ts);
+    if (Number.isFinite(t) && t >= thresholdMs) n++;
+  }
+  return n;
+}

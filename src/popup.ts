@@ -18,7 +18,7 @@ import {
 import type { DeepScrapeProgress } from './storage-schema';
 import { getUserProfile } from './user-profile-store';
 import type { UserProfile } from './lib/idb';
-import type { ProfileContext, SsiSnapshot } from './storage-schema';
+import type { ActivitySignal, ProfileContext, SsiSnapshot } from './storage-schema';
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
@@ -249,10 +249,13 @@ interface ProfileAuditDTO {
   }> | null;
   recommendationsAt: number;
   ssi: SsiSnapshot | null;
+  avoidStems?: string[];
+  activitySignals?: ActivitySignal[];
 }
 
 const profileAuditSection = $('profileAudit');
 const profileAuditList = $<HTMLUListElement>('profileAuditList');
+const profileAuditSignals = $<HTMLDivElement>('profileAuditSignals');
 const profileAuditCounter = $('profileAuditCounter');
 const profileAuditProgress = profileAuditSection?.querySelector<HTMLDivElement>(
   '.profile-audit__progress',
@@ -407,6 +410,7 @@ function renderProfileAudit(state: ProfileAuditDTO | null): void {
   }
 
   renderAuditList(state);
+  renderActivitySignals(state.activitySignals ?? []);
 
   if (profileAuditRewriteBtn && profileAuditRewriteLabel) {
     const failedCount = state.audit.failed.length;
@@ -437,13 +441,61 @@ async function loadProfileAudit(): Promise<void> {
   }
 }
 
+function renderActivitySignals(signals: ActivitySignal[]): void {
+  if (!profileAuditSignals) return;
+  profileAuditSignals.innerHTML = '';
+  if (signals.length === 0) {
+    profileAuditSignals.style.display = 'none';
+    return;
+  }
+  profileAuditSignals.style.display = '';
+  const title = document.createElement('div');
+  title.className = 'profile-audit__signals-title';
+  title.textContent = 'Activity signals';
+  profileAuditSignals.appendChild(title);
+  const list = document.createElement('ul');
+  list.className = 'profile-audit__signals-list';
+  for (const s of signals) {
+    const li = document.createElement('li');
+    li.className = `profile-audit__signal profile-audit__signal--${s.status}`;
+    const row = document.createElement('div');
+    row.className = 'profile-audit__signal-row';
+    const icon = document.createElement('span');
+    icon.className = 'profile-audit__signal-icon';
+    icon.textContent = s.status === 'ok' ? '✓' : '!';
+    icon.setAttribute('aria-label', s.status === 'ok' ? 'ok' : 'low');
+    const label = document.createElement('span');
+    label.className = 'profile-audit__signal-label';
+    label.textContent = s.label;
+    const detail = document.createElement('span');
+    detail.className = 'profile-audit__signal-detail';
+    detail.textContent = s.detail;
+    row.appendChild(icon);
+    row.appendChild(label);
+    row.appendChild(detail);
+    li.appendChild(row);
+    if (s.status === 'low' && s.guidance) {
+      const g = document.createElement('div');
+      g.className = 'profile-audit__signal-guidance';
+      g.textContent = s.guidance;
+      li.appendChild(g);
+    }
+    list.appendChild(li);
+  }
+  profileAuditSignals.appendChild(list);
+}
+
 async function handleProfileAuditRewrite(): Promise<void> {
   if (!profileAuditRewriteBtn || !profileAuditRewriteLabel) return;
   if (profileAuditRewriteBtn.disabled) return;
+  // If the label currently reads "Regenerate…", tell background to carry
+  // forward the previously stored avoid-stems so the LLM produces a
+  // genuinely different framing.
+  const isRegenerate = (profileAuditRewriteLabel.textContent ?? '').toLowerCase().includes('regenerate');
   profileAuditRewriteBtn.disabled = true;
   profileAuditRewriteBtn.dataset.state = 'loading';
   const prevLabel = profileAuditRewriteLabel.textContent;
-  profileAuditRewriteLabel.textContent = 'Generating rewrites…';
+  profileAuditRewriteLabel.textContent = isRegenerate ? 'Regenerating…' : 'Generating rewrites…';
   try {
     const resp = await new Promise<{
       ok: boolean;
@@ -451,8 +503,9 @@ async function handleProfileAuditRewrite(): Promise<void> {
       reason?: string;
       error?: string;
     }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'profile.audit.rewrite' }, (r) =>
-        resolve(r ?? { ok: false, reason: 'network' }),
+      chrome.runtime.sendMessage(
+        { action: 'profile.audit.rewrite', regenerate: isRegenerate },
+        (r) => resolve(r ?? { ok: false, reason: 'network' }),
       );
     });
     if (!resp.ok) {
