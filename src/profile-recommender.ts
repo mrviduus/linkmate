@@ -21,6 +21,7 @@ const REWRITE_TIMEOUT_MS = 45_000;
 const SUGGESTION_MAX_LEN = 2200;
 const DIAGNOSIS_MAX_LEN = 240;
 const RATIONALE_MAX_LEN = 320;
+const MAX_RECOMMENDATIONS = 10;
 
 const VALID_CHECK_IDS = new Set<ProfileRecommendation['checkId']>([
   'currentPosition',
@@ -104,6 +105,7 @@ export function parseProfileRecommendations(raw: string): ProfileRecommendation[
         rationale,
       });
       seen.add(id);
+      if (out.length >= MAX_RECOMMENDATIONS) break;
     }
     return out.length > 0 ? out : null;
   } catch {

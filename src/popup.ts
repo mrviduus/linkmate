@@ -433,6 +433,7 @@ async function loadProfileAudit(): Promise<void> {
 
 async function handleProfileAuditRewrite(): Promise<void> {
   if (!profileAuditRewriteBtn || !profileAuditRewriteLabel) return;
+  if (profileAuditRewriteBtn.disabled) return;
   profileAuditRewriteBtn.disabled = true;
   profileAuditRewriteBtn.dataset.state = 'loading';
   const prevLabel = profileAuditRewriteLabel.textContent;

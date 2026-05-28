@@ -38,7 +38,7 @@ export function detectProfileLanguage(profile: UserProfile): ProfileLanguage {
   const sample = `${profile.about ?? ''} ${profile.headline ?? ''}`;
   const stripped = sample.replace(/\s/g, '');
   if (stripped.length === 0) return 'en';
-  const cyrillic = (stripped.match(/[Ѐ-ӿ]/g) ?? []).length;
+  const cyrillic = (stripped.match(/[\u0400-\u04ff]/g) ?? []).length;
   if (cyrillic / stripped.length < 0.3) return 'en';
   if (/[ієїґ]/i.test(sample)) return 'uk';
   return 'ru';
