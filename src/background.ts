@@ -990,11 +990,15 @@ async function handleProfileAuditRewrite(
         ssi,
         avoidStems: carriedStems,
       });
-      const newStems = recommendations
-        .map((r) => r.suggestion.slice(0, AVOID_STEM_LEN).trim())
-        .filter((s) => s.length > 0);
-      // Dedupe and cap. Most-recent entries kept (drop oldest if over cap).
-      const merged = dedupeKeepLast([...carriedStems, ...newStems]).slice(
+      const newEntries = recommendations
+        .map((r) => ({
+          checkId: r.checkId,
+          stem: r.suggestion.slice(0, AVOID_STEM_LEN).trim(),
+        }))
+        .filter((e) => e.stem.length > 0);
+      // Dedupe by stem (same wording is useless to send twice). Most recent
+      // wins. Cap to AVOID_STEM_HISTORY_CAP to keep prompt size bounded.
+      const merged = dedupeEntriesKeepLast([...carriedStems, ...newEntries]).slice(
         -AVOID_STEM_HISTORY_CAP,
       );
       const state = {
@@ -1025,14 +1029,14 @@ async function handleProfileAuditRewrite(
 }
 
 /** Keep last occurrence of each duplicate stem; preserves insertion order otherwise. */
-function dedupeKeepLast(stems: string[]): string[] {
+function dedupeEntriesKeepLast<T extends { stem: string }>(entries: T[]): T[] {
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (let i = stems.length - 1; i >= 0; i--) {
-    const s = stems[i];
-    if (seen.has(s)) continue;
-    seen.add(s);
-    out.unshift(s);
+  const out: T[] = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (seen.has(e.stem)) continue;
+    seen.add(e.stem);
+    out.unshift(e);
   }
   return out;
 }

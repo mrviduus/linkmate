@@ -171,6 +171,42 @@ describe('buildSsiStrategyPrompt', () => {
   });
 });
 
+describe('avoidStems grouping (concept rotation)', () => {
+  it('renders prior suggestions grouped by checkId in copy editor prompt', () => {
+    const p = profile();
+    const { user } = buildProfileRewritePrompt({
+      profile: p,
+      audit: auditProfile(p),
+      goals: null,
+      avoidStems: [
+        { checkId: 'photoBanner', stem: 'Banner with model architecture diagram' },
+        { checkId: 'photoBanner', stem: 'Banner with RAG pipeline visualization' },
+        { checkId: 'about', stem: 'AI engineer with 10 years shipping production systems' },
+      ],
+    });
+    expect(user).toContain('Previously suggested by checkId');
+    expect(user).toContain('[photoBanner]');
+    expect(user).toContain('[about]');
+    expect(user).toContain('model architecture diagram');
+    expect(user).toContain('RAG pipeline');
+    expect(user).toContain('propose a DIFFERENT concept');
+  });
+  it('renders avoid block in strategist prompt too', () => {
+    const p = profile();
+    const { user } = buildSsiStrategyPrompt({
+      profile: p,
+      ssi: ssi(),
+      goals: null,
+      avoidStems: [
+        { checkId: 'ssi', stem: 'Comment on 2 RAG-eval posts per week' },
+      ],
+    });
+    expect(user).toContain('[ssi]');
+    expect(user).toContain('Comment on 2 RAG-eval posts');
+    expect(user).toContain('DIFFERENT concept');
+  });
+});
+
 describe('parseProfileRecommendations', () => {
   it('parses a well-formed payload', () => {
     const out = parseProfileRecommendations(copyResponse);

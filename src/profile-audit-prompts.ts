@@ -14,7 +14,7 @@
 
 import type { UserProfile } from './lib/idb';
 import type { AuditReport } from './profile-audit';
-import type { SsiSnapshot } from './storage-schema';
+import type { AvoidEntry, SsiSnapshot } from './storage-schema';
 
 // ── Caps (trimmed from initial version — only the highest-signal slices) ──
 const ABOUT_CAP = 700;
@@ -128,7 +128,7 @@ export interface BuildProfileRewritePromptInput {
   audit: AuditReport;
   goals: string | null;
   /** Previous suggestion stems to steer the model away from on regenerate. */
-  avoidStems?: string[];
+  avoidStems?: AvoidEntry[];
 }
 
 export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput): {
@@ -196,20 +196,42 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
     formatAuditState(audit),
   ];
   if (avoidStems && avoidStems.length > 0) {
-    userParts.push('', '=== Previous suggestion openings (write FRESH angles — not just rephrased) ===');
-    for (const s of avoidStems) userParts.push(`- ${oneLine(s, 100)}`);
-    userParts.push(
-      '',
-      'For photoBanner specifically: each entry above represents a visual concept already',
-      'proposed. Choose a DIFFERENT concept this time (e.g. if architecture diagrams were',
-      'suggested before, propose a code-action shot, signature project hero, or metric chart).',
-    );
+    userParts.push('', renderAvoidBlock(avoidStems));
   }
-  // Suppress the regenerate-only guidance flag in non-regen calls to keep
-  // the prompt lean.
   void isRegenerate;
   userParts.push('', 'Return the recommendations JSON now.');
   return { system, user: userParts.join('\n') };
+}
+
+/**
+ * Group prior suggestions by checkId so the LLM sees previously-explored
+ * angles per item type, not a flat list it can rephrase around. The
+ * "for each checkId in this list, propose a DIFFERENT concept" directive
+ * is what actually drives diversity — flat avoid lists let the model
+ * rephrase the same concept.
+ */
+function renderAvoidBlock(entries: AvoidEntry[]): string {
+  const byId = new Map<string, string[]>();
+  for (const e of entries) {
+    const stem = oneLine(e.stem, 200);
+    if (!stem) continue;
+    if (!byId.has(e.checkId)) byId.set(e.checkId, []);
+    byId.get(e.checkId)!.push(stem);
+  }
+  const lines: string[] = [
+    '=== Previously suggested by checkId — propose a DIFFERENT concept (not a rephrasing) ===',
+  ];
+  for (const [id, stems] of byId) {
+    lines.push(`[${id}]`);
+    for (const s of stems) lines.push(`  - ${s}`);
+  }
+  lines.push(
+    '',
+    'For every checkId above, the new suggestion MUST take a different angle than every',
+    'entry listed under that id — different concept, different framing, different example.',
+    'Synonym swaps and word reorderings do not count as different.',
+  );
+  return lines.join('\n');
 }
 
 // ─── SSI strategy prompt ────────────────────────────────────────────────────
@@ -273,7 +295,7 @@ export interface BuildSsiStrategyPromptInput {
   profile: UserProfile;
   ssi: SsiSnapshot | null;
   goals: string | null;
-  avoidStems?: string[];
+  avoidStems?: AvoidEntry[];
 }
 
 export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
@@ -352,8 +374,7 @@ export function buildSsiStrategyPrompt(input: BuildSsiStrategyPromptInput): {
     `=== Goals === ${goalsLine || '(not provided)'}`,
   ];
   if (avoidStems && avoidStems.length > 0) {
-    userParts.push('', '=== Previous tactic openings (propose FRESH actions, do not repeat these) ===');
-    for (const s of avoidStems) userParts.push(`- ${oneLine(s, 100)}`);
+    userParts.push('', renderAvoidBlock(avoidStems));
   }
   userParts.push('', 'Return the recommendations JSON now.');
   return { system, user: userParts.join('\n') };

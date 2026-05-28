@@ -551,10 +551,16 @@ export interface ProfileAuditState {
   recommendations: ProfileRecommendation[] | null;
   /** ms epoch when recommendations were generated; 0 if never. */
   recommendationsAt: number;
-  /** Suggestion stems accumulated across regenerations, fed back to the LLM
-   *  as an "avoid" list so each click produces fresh angles. Reset to []
+  /** Suggestion stems grouped by checkId, accumulated across regenerations.
+   *  Fed back to the LLM as an "avoid" list grouped by checkId so each click
+   *  produces fresh concepts (not just rephrased openings). Reset to []
    *  whenever profileCapturedAt changes. Capped to keep the prompt bounded. */
-  avoidStems: string[];
+  avoidStems: AvoidEntry[];
+}
+
+export interface AvoidEntry {
+  checkId: ProfileRecommendationCheckId;
+  stem: string;
 }
 
 // Activity signals are derived live (cheap) and not persisted in storage

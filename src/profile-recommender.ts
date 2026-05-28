@@ -21,7 +21,7 @@ import {
   buildSsiStrategyPrompt,
 } from './profile-audit-prompts';
 import type { InferenceProvider } from './providers/inference-provider';
-import type { ProfileRecommendation, SsiSnapshot } from './storage-schema';
+import type { AvoidEntry, ProfileRecommendation, SsiSnapshot } from './storage-schema';
 
 const COPY_MAX_TOKENS = 900;
 const STRATEGY_MAX_TOKENS = 700;
@@ -31,10 +31,12 @@ const DIAGNOSIS_MAX_LEN = 240;
 const RATIONALE_MAX_LEN = 320;
 const MAX_RECOMMENDATIONS = 12;
 /** Stem length fed into "avoid these openings" on regenerate. Background
- *  uses this same length when truncating suggestions into the history. */
-export const AVOID_STEM_LEN = 90;
-/** Max number of avoid stems to keep across regenerations; bounds prompt size. */
-export const AVOID_STEM_HISTORY_CAP = 30;
+ *  uses this same length when truncating suggestions into the history.
+ *  Bumped from 90 → 200 so the LLM sees the actual CONCEPT, not just an
+ *  opening that's easy to rephrase. */
+export const AVOID_STEM_LEN = 200;
+/** Max number of avoid entries to keep across regenerations; bounds prompt size. */
+export const AVOID_STEM_HISTORY_CAP = 24;
 /** Base temp gives some variety; regenerate bumps further so output diverges. */
 const BASE_TEMPERATURE = 0.7;
 const REGENERATE_TEMPERATURE = 0.9;
@@ -67,10 +69,11 @@ export interface GenerateProfileRecommendationsInput {
   audit: AuditReport;
   goals: string | null;
   ssi: SsiSnapshot | null;
-  /** Suggestion stems accumulated across previous regenerations. Fed to the
-   *  LLM as an "avoid" list so each click produces fresh angles. Empty / omitted
-   *  on the first call. Caller is responsible for accumulation + capping. */
-  avoidStems?: string[];
+  /** Previous {checkId, stem} entries accumulated across regenerations.
+   *  Fed to the LLM grouped by checkId so each click produces a fresh CONCEPT
+   *  per item type (not just a rephrasing). Empty / omitted on first call.
+   *  Caller is responsible for accumulation + capping. */
+  avoidStems?: AvoidEntry[];
 }
 
 /**
