@@ -235,3 +235,5 @@ Pre-built zip per tag at <https://github.com/mrviduus/linkmate/releases>. Downlo
 ## License
 
 ISC.
+
+[Website / Demo](https://mrviduus.github.io/linkmate/)
