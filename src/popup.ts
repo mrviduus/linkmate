@@ -9,6 +9,7 @@ import {
 } from './ssi-tracker';
 import {
   getCaptureFullProfile,
+  getProfile,
   getSsiLastError,
   setCaptureFullProfile,
 } from './storage-schema';
@@ -275,58 +276,12 @@ async function refreshProfileDisplay(): Promise<void> {
   await refreshCaptureHero();
 }
 
-/**
- * Read a `targetTab` query param from the popup URL. When the background
- * service worker opens us in a detached chrome.windows.create() popup, it
- * passes the LinkedIn tab id so we don't end up grabbing this popup's own
- * window as the "active currentWindow" tab.
- */
-function getTargetTabId(): number | null {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get('targetTab');
-    if (id && /^\d+$/.test(id)) return Number(id);
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-async function getLinkedInTabId(): Promise<number | null> {
-  const explicit = getTargetTabId();
-  if (explicit !== null) return explicit;
-  // Side panel UI runs alongside the browser content; `currentWindow` is the
-  // window the panel is attached to, so this still finds the LinkedIn tab.
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  return tab?.id ?? null;
-}
-
-/**
- * If the LinkedIn tab isn't already on a profile, navigate it to /in/me/.
- * Returns true once the tab is on a profile URL.
- */
-async function ensureOnOwnProfile(): Promise<boolean> {
-  const PROFILE_URL_RE = /^https?:\/\/(www\.)?linkedin\.com\/in\/[^/?#]+\/?(\?[^#]*)?(#.*)?$/;
-  const tabId = await getLinkedInTabId();
-  if (tabId === null) return false;
-  const tab = await chrome.tabs.get(tabId);
-  if (PROFILE_URL_RE.test(tab.url ?? '')) return true;
-  await chrome.tabs.update(tabId, { url: 'https://www.linkedin.com/in/me/' });
-  await new Promise<void>((resolve) => {
-    const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
-      if (id === tabId && info.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, 15000);
-  });
-  return true;
-}
+// NOTE: `getLinkedInTabId` + `ensureOnOwnProfile` were removed when profile
+// capture moved to a hidden background tab — see ProfileContextService.capture
+// in src/profile-context.ts. The hidden-tab flow never disturbs the user's
+// current LinkedIn tab, so the popup no longer needs to resolve a target tab.
+// The `?targetTab=` URL param is still honoured inside profile-context.ts via
+// its own getExplicitTargetTabId helper.
 
 const PENDING_CAPTURE_KEY = 'linkmate.pendingCapture.v1';
 
@@ -363,9 +318,27 @@ async function handleCaptureProfile(): Promise<void> {
     captureProfileBtn.disabled = true;
     captureProfileBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
   }
+  const setBtnLabel = (label: string) => {
+    if (captureProfileBtn) {
+      captureProfileBtn.innerHTML = `<i class="fa fa-circle-notch fa-spin"></i> ${label}`;
+    }
+  };
+  const STEP_LABELS: Record<string, string> = {
+    'cache-check': 'Checking cache…',
+    'opening-tab': 'Opening your profile…',
+    'waiting-profile-load': 'Loading profile…',
+    scraping: 'Scraping profile…',
+    parsing: 'Parsing fields…',
+    summarizing: 'Summarizing…',
+    done: 'Done',
+  };
   try {
-    await ensureOnOwnProfile();
-    const result = await profileService.capture();
+    const result = await profileService.capture({
+      onProgress: (step) => {
+        const label = STEP_LABELS[step];
+        if (label) setBtnLabel(label);
+      },
+    });
     if (result.ok) {
       if (result.cached) {
         showProfileMessage('Profile is fresh (<24h). Using cached snapshot.', 'info');
@@ -1208,6 +1181,77 @@ async function handleCadenceSave(): Promise<void> {
   }
 }
 
+// ─── Goals override (issue #18) ────────────────────────────────────────────
+
+const goalsOverrideInput = $<HTMLTextAreaElement>('goalsOverride');
+const goalsOverrideCount = $<HTMLElement>('goalsOverrideCount');
+const goalsOverrideHint = $<HTMLElement>('goalsOverridePlaceholderHint');
+const goalsOverrideSaveBtn = $<HTMLButtonElement>('goalsOverrideSave');
+const goalsOverrideStatus = $('goalsOverrideStatus');
+const GOALS_OVERRIDE_MAX_LEN_POPUP = 600;
+
+function showGoalsOverrideStatus(text: string, kind: 'success' | 'error'): void {
+  if (!goalsOverrideStatus) return;
+  goalsOverrideStatus.textContent = text;
+  goalsOverrideStatus.className = `status-message ${kind}`;
+  goalsOverrideStatus.style.display = '';
+  setTimeout(() => {
+    if (goalsOverrideStatus) goalsOverrideStatus.style.display = 'none';
+  }, 4000);
+}
+
+function updateGoalsCount(): void {
+  if (!goalsOverrideInput || !goalsOverrideCount) return;
+  goalsOverrideCount.textContent = String(goalsOverrideInput.value.length);
+}
+
+async function loadGoalsOverride(): Promise<void> {
+  const resp = await new Promise<{ ok: boolean; value?: string | null }>((resolve) => {
+    chrome.runtime.sendMessage({ action: 'settings.getGoalsOverride' }, (r) =>
+      resolve(r ?? { ok: false }),
+    );
+  });
+  if (goalsOverrideInput) {
+    goalsOverrideInput.value = resp.value ?? '';
+    updateGoalsCount();
+  }
+  // Show the user's positioning summary as a hint of what goals default to.
+  try {
+    const profile = await getProfile();
+    if (goalsOverrideHint && profile?.positioningSummary) {
+      goalsOverrideHint.textContent = ` Default: "${profile.positioningSummary.slice(0, 140)}"`;
+    }
+  } catch {
+    /* hint is best-effort */
+  }
+}
+
+async function handleGoalsOverrideSave(): Promise<void> {
+  if (!goalsOverrideInput || !goalsOverrideSaveBtn) return;
+  const value = goalsOverrideInput.value.slice(0, GOALS_OVERRIDE_MAX_LEN_POPUP);
+  goalsOverrideSaveBtn.disabled = true;
+  const prev = goalsOverrideSaveBtn.innerHTML;
+  goalsOverrideSaveBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Saving…';
+  try {
+    const resp = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'settings.setGoalsOverride', value }, (r) =>
+        resolve(r ?? { ok: false, error: 'No response' }),
+      );
+    });
+    if (resp.ok) {
+      showGoalsOverrideStatus(
+        value.length === 0 ? 'Cleared — using positioning summary.' : 'Saved.',
+        'success',
+      );
+    } else {
+      showGoalsOverrideStatus(`Save failed: ${resp.error ?? 'unknown'}`, 'error');
+    }
+  } finally {
+    goalsOverrideSaveBtn.disabled = false;
+    goalsOverrideSaveBtn.innerHTML = prev;
+  }
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 
 function wire(): void {
@@ -1225,6 +1269,8 @@ function wire(): void {
   savePromptsBtn?.addEventListener('click', () => void handleSavePrompts());
   resetPromptsBtn?.addEventListener('click', () => void handleResetPrompts());
   cadenceSaveBtn?.addEventListener('click', () => void handleCadenceSave());
+  goalsOverrideInput?.addEventListener('input', updateGoalsCount);
+  goalsOverrideSaveBtn?.addEventListener('click', () => void handleGoalsOverrideSave());
   retroDismiss?.addEventListener('click', () => void handleRetroDismiss());
   cardsRefresh?.addEventListener('click', () => void handleCardsRefresh());
   suggestPostBtn?.addEventListener('click', () => void openPostModal());
@@ -1256,6 +1302,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadAIParameters(),
     loadPrompts(),
     loadCadenceTargets(),
+    loadGoalsOverride(),
     loadToday(),
   ]);
   chrome.runtime.sendMessage({ action: 'popupReady' });

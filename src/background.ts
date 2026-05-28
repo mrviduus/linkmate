@@ -27,7 +27,35 @@ import {
   setCadenceTargets,
   getCadenceStreak,
   getOnboardingCompleted,
+  getGoalsOverride,
+  setGoalsOverride,
 } from './storage-schema';
+import { aiScoreBatch, clearAiCache, AiParseError } from './ai-feed-analyzer';
+import { getUserProfile, profileContextFromUserProfile } from './user-profile-store';
+import type { ProfileContext } from './storage-schema';
+
+/**
+ * Read the chrome.storage.local ProfileContext, falling back to deriving one
+ * from the IDB UserProfile when ProfileContext is missing but a fresh full
+ * capture exists. Lets the engagement queue work without requiring an OpenAI
+ * key (positioning summary is the only thing the OpenAI step would add, and
+ * the AI feed scorer doesn't need it — it grounds in UserProfile directly).
+ *
+ * Returns `{ profile, userProfile }` so callers that ALSO want the rich IDB
+ * snapshot (e.g. AI scoring's formatUserBackground) skip a duplicate read.
+ */
+async function getProfileOrDerive(): Promise<{
+  profile: ProfileContext | null;
+  userProfile: Awaited<ReturnType<typeof getUserProfile>>;
+}> {
+  const [stored, up] = await Promise.all([
+    getProfile(),
+    getUserProfile().catch(() => null),
+  ]);
+  if (stored) return { profile: stored, userProfile: up };
+  if (up) return { profile: profileContextFromUserProfile(up), userProfile: up };
+  return { profile: null, userProfile: null };
+}
 import type {
   ParsedPost,
   ScoredPost,
@@ -438,6 +466,25 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
     return true;
   }
+  if (request.action === 'queue.aiScoreFeed') {
+    handleQueueAiScoreFeed(request.posts as ParsedPost[], sendResponse);
+    return true;
+  }
+  if (request.action === 'settings.getGoalsOverride') {
+    getGoalsOverride()
+      .then((value) => sendResponse({ ok: true, value }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'settings.setGoalsOverride') {
+    setGoalsOverride(String(request.value ?? ''))
+      .then(() => {
+        clearAiCache();
+        sendResponse({ ok: true });
+      })
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
 
   // Provider config handlers.
   if (request.action === 'provider.get') {
@@ -699,11 +746,11 @@ async function handleQueueScoreFeed(
   sendResponse: (response: unknown) => void,
 ): Promise<void> {
   try {
-    const profile = await getProfile();
+    const { profile } = await getProfileOrDerive();
     if (!profile) {
       sendResponse({
         ok: false,
-        error: 'No profile captured. Open popup → Capture Profile first.',
+        error: 'No profile yet. Click Capture Profile in the side panel to start.',
       });
       return;
     }
@@ -781,6 +828,9 @@ async function handleProfileCapture(
       temperature: 0.4,
       topP: 0.9,
     });
+    // Profile re-captured → AI feed scoring cache is stale relative to the
+    // new `capturedAt` and may also be relative to new skills/themes. Drop it.
+    clearAiCache();
     sendResponse({
       ok: true,
       positioningSummary,
@@ -790,6 +840,57 @@ async function handleProfileCapture(
   } catch (err) {
     console.error('profile.capture failed:', err);
     sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    keepAlive.stop();
+  }
+}
+
+// ─── Issue #18 — AI feed scoring (per-post chips) ─────────────────────────
+
+const SCORE_BATCH_TOP_N = 10;
+
+async function handleQueueAiScoreFeed(
+  posts: ParsedPost[],
+  sendResponse: (response: unknown) => void,
+): Promise<void> {
+  const top = (posts ?? []).slice(0, SCORE_BATCH_TOP_N);
+  if (top.length === 0) {
+    sendResponse({ ok: true, results: [] });
+    return;
+  }
+  keepAlive.start();
+  try {
+    const { profile, userProfile } = await getProfileOrDerive();
+    if (!profile) {
+      sendResponse({ ok: false, reason: 'no_profile' });
+      return;
+    }
+    let provider;
+    try {
+      provider = await getActiveProvider();
+    } catch {
+      sendResponse({ ok: false, reason: 'no_key' });
+      return;
+    }
+    const goalsOverride = await getGoalsOverride();
+    try {
+      const results = await aiScoreBatch({
+        provider,
+        profile,
+        goalsOverride,
+        posts: top,
+        userProfile,
+      });
+      sendResponse({ ok: true, results });
+    } catch (err) {
+      if (err instanceof AiParseError) {
+        console.warn('[linkmate] queue.aiScoreFeed parse failure:', err.message);
+        sendResponse({ ok: false, reason: 'parse' });
+      } else {
+        console.warn('[linkmate] queue.aiScoreFeed failed:', err);
+        sendResponse({ ok: false, reason: 'network', error: String(err) });
+      }
+    }
   } finally {
     keepAlive.stop();
   }

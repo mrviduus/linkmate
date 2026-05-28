@@ -1,10 +1,13 @@
 // LinkedIn Content Script for LinkMate Extension
 // Handles post detection, reply generation, and UI injection
 
-import { EngagementQueue } from './engagement-queue';
+import { FeedPostOverlay } from './feed-post-overlay';
 import { scanPostForOutcome } from './outcome-scanner';
-import type { ScoreFeedResult } from './engagement-queue';
-import { parseFeedDom } from './feed-parser';
+import type {
+  AiScoreFeedResult,
+  AiScoredPostDTO,
+  ScoreFeedResult,
+} from './feed-post-overlay';
 import type { ParsedPost, ScoredPost } from './storage-schema';
 
 console.log('LinkMate LinkedIn content script loaded');
@@ -28,7 +31,7 @@ class LinkedInLinkMate {
   private posts: Map<string, LinkedInPost> = new Map();
   private observer: MutationObserver | null = null;
   private isProcessing = false;
-  private engagementQueue: EngagementQueue | null = null;
+  private feedPostOverlay: FeedPostOverlay | null = null;
   private currentPath: string = '';
   private routePollIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -49,11 +52,16 @@ class LinkedInLinkMate {
     );
   }
 
-  // T123 — mount EngagementQueue on /feed/ pages.
+  /**
+   * Mount the per-post inline relevance overlay on /feed/. Each visible post
+   * gets a chip showing heuristic + AI score. Replaces the prior EngagementQueue
+   * sidebar (issue #18 follow-up cleanup). Drafts still happen via the in-post
+   * ✨ Reply button — handled separately, doesn't depend on this overlay.
+   */
   private mountEngagementQueueIfOnFeed(): void {
     const onFeed = location.pathname.startsWith('/feed');
-    if (onFeed && !this.engagementQueue) {
-      this.engagementQueue = new EngagementQueue({
+    if (onFeed && !this.feedPostOverlay) {
+      this.feedPostOverlay = new FeedPostOverlay({
         scoreFeed: async (posts: ParsedPost[]): Promise<ScoreFeedResult> => {
           const resp = await this.sendQueueMessage<{
             ok?: boolean;
@@ -61,46 +69,35 @@ class LinkedInLinkMate {
             error?: string;
           }>({ action: 'queue.scoreFeed', posts });
           if (!resp || resp.ok === false) {
-            return {
-              ok: false,
-              warning:
-                resp?.error ??
-                'Could not score the feed. Capture your profile in the popup, then refresh.',
-            };
+            return { ok: false, warning: resp?.error ?? 'No profile yet.' };
           }
           return { ok: true, scored: resp.scored ?? [] };
         },
-        draftComment: (req) =>
-          this.sendQueueMessage<{ draft?: string }>({
-            action: 'queue.draftComment',
-            post: req.post,
-            tone: req.tone,
-            length: req.length,
-          }).then((r) => r?.draft ?? '[Draft unavailable]'),
-        markEngaged: async (postId: string, postText?: string) => {
-          await this.sendQueueMessage({ action: 'queue.markEngaged', postId });
-          // Also append to action log so cadence tracker sees it; pass post body
-          // so the tagger can attribute topics.
-          chrome.runtime.sendMessage({
-            action: 'action.log.append',
-            input: { type: 'comment', postId, submitted: true, sourceText: postText },
-          });
-        },
-        dismiss: async (postId: string) => {
-          await this.sendQueueMessage({ action: 'queue.dismiss', postId });
+        aiScoreFeed: async (posts: ParsedPost[]): Promise<AiScoreFeedResult> => {
+          const resp = await this.sendQueueMessage<{
+            ok?: boolean;
+            results?: AiScoredPostDTO[];
+            reason?: 'no_key' | 'no_profile' | 'parse' | 'network';
+            error?: string;
+          }>({ action: 'queue.aiScoreFeed', posts });
+          if (!resp) {
+            console.warn('[LinkMate] queue.aiScoreFeed (overlay): no response from SW (channel closed)');
+            return { ok: false, reason: 'network' };
+          }
+          if (resp.ok === false) {
+            console.warn(
+              `[LinkMate] queue.aiScoreFeed (overlay) failed — reason=${resp.reason ?? 'unknown'}`,
+              resp.error ?? '(no error string)',
+            );
+            return { ok: false, reason: resp.reason ?? 'network', error: resp.error };
+          }
+          return { ok: true, results: resp.results ?? [] };
         },
       });
-      this.engagementQueue.mount(document.body);
-
-      // Initial refresh after a short delay so the feed has loaded posts.
-      setTimeout(() => {
-        if (!this.engagementQueue) return;
-        const posts = parseFeedDom(document);
-        void this.engagementQueue.refresh(posts);
-      }, 2500);
-    } else if (!onFeed && this.engagementQueue) {
-      this.engagementQueue.unmount();
-      this.engagementQueue = null;
+      this.feedPostOverlay.mount();
+    } else if (!onFeed && this.feedPostOverlay) {
+      this.feedPostOverlay.unmount();
+      this.feedPostOverlay = null;
     }
   }
 

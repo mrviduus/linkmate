@@ -487,3 +487,118 @@
     }
   }
 }
+
+/* ─── Issue #18 follow-up — per-post inline relevance chip ─────────────── */
+
+.linkmate-post-chip {
+  position: absolute;
+  /* top: 56px sits the chip just below LinkedIn's post header so it doesn't
+     overlap their "Open control menu" + Hide buttons in the top-right. */
+  top: 56px;
+  right: 12px;
+  z-index: 50;
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  pointer-events: auto;
+  line-height: 1;
+}
+
+.linkmate-post-chip__heuristic,
+.linkmate-post-chip__ai {
+  position: relative;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* Instant CSS hover tooltip — replaces the slow/unreliable native `title`.
+   Reads from `data-tooltip` attribute (also set as `title` for a11y). */
+.linkmate-post-chip__heuristic[data-tooltip]:hover::after,
+.linkmate-post-chip__ai[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: #1d1d1f;
+  color: #ffffff;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  pointer-events: none;
+  /* Override LinkedIn font that creeps in via inheritance */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.linkmate-post-chip__heuristic[data-tooltip]:hover::before,
+.linkmate-post-chip__ai[data-tooltip]:hover::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  right: 8px;
+  border: 5px solid transparent;
+  border-top-color: #1d1d1f;
+  z-index: 101;
+  pointer-events: none;
+}
+
+.linkmate-post-chip__heuristic {
+  background: rgba(40, 167, 69, 0.12);
+  color: #28a745;
+}
+.linkmate-post-chip__heuristic[data-band="consider"] {
+  background: rgba(255, 193, 7, 0.18);
+  color: #b08400;
+}
+.linkmate-post-chip__heuristic[data-band="skip"] {
+  background: rgba(108, 117, 125, 0.18);
+  color: #6a737d;
+}
+.linkmate-post-chip__heuristic[data-state="loading"] {
+  background: rgba(108, 117, 125, 0.12);
+  color: #6a737d;
+}
+
+.linkmate-post-chip__ai {
+  background: rgba(10, 102, 194, 0.12);
+  color: #0a66c2;
+}
+.linkmate-post-chip__ai[data-state="loading"] {
+  background: rgba(108, 117, 125, 0.12);
+  color: #6a737d;
+  animation: linkmate-post-chip-pulse 1.2s ease-in-out infinite;
+}
+.linkmate-post-chip__ai[data-state="na"] {
+  background: rgba(108, 117, 125, 0.12);
+  color: #6a737d;
+  font-weight: 500;
+}
+
+@keyframes linkmate-post-chip-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .linkmate-post-chip {
+    background: rgba(40, 42, 44, 0.96);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+}
