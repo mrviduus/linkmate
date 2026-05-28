@@ -510,7 +510,6 @@
   line-height: 1;
 }
 
-.linkmate-post-chip__heuristic,
 .linkmate-post-chip__ai {
   position: relative;
   font-weight: 700;
@@ -523,7 +522,6 @@
 
 /* Instant CSS hover tooltip — replaces the slow/unreliable native `title`.
    Reads from `data-tooltip` attribute (also set as `title` for a11y). */
-.linkmate-post-chip__heuristic[data-tooltip]:hover::after,
 .linkmate-post-chip__ai[data-tooltip]:hover::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -546,7 +544,6 @@
   /* Override LinkedIn font that creeps in via inheritance */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-.linkmate-post-chip__heuristic[data-tooltip]:hover::before,
 .linkmate-post-chip__ai[data-tooltip]:hover::before {
   content: "";
   position: absolute;
@@ -556,23 +553,6 @@
   border-top-color: #1d1d1f;
   z-index: 101;
   pointer-events: none;
-}
-
-.linkmate-post-chip__heuristic {
-  background: rgba(40, 167, 69, 0.12);
-  color: #28a745;
-}
-.linkmate-post-chip__heuristic[data-band="consider"] {
-  background: rgba(255, 193, 7, 0.18);
-  color: #b08400;
-}
-.linkmate-post-chip__heuristic[data-band="skip"] {
-  background: rgba(108, 117, 125, 0.18);
-  color: #6a737d;
-}
-.linkmate-post-chip__heuristic[data-state="loading"] {
-  background: rgba(108, 117, 125, 0.12);
-  color: #6a737d;
 }
 
 .linkmate-post-chip__ai {

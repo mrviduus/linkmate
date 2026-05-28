@@ -3,8 +3,8 @@
 
 import { FeedPostOverlay } from './feed-post-overlay';
 import { scanPostForOutcome } from './outcome-scanner';
-import type { AiScoreFeedResult, AiScoredPostDTO, ScoreFeedResult } from './feed-post-overlay';
-import type { ParsedPost, ScoredPost } from './storage-schema';
+import type { AiScoreFeedResult, AiScoredPostDTO } from './feed-post-overlay';
+import type { ParsedPost } from './storage-schema';
 
 console.log('LinkMate LinkedIn content script loaded');
 
@@ -50,25 +50,13 @@ class LinkedInLinkMate {
 
   /**
    * Mount the per-post inline relevance overlay on /feed/. Each visible post
-   * gets a chip showing heuristic + AI score. Replaces the prior EngagementQueue
-   * sidebar (issue #18 follow-up cleanup). Drafts still happen via the in-post
-   * ✨ Reply button — handled separately, doesn't depend on this overlay.
+   * gets a chip showing the AI score. Drafts still happen via the in-post
+   * Reply button — handled separately, and doesn't depend on this overlay.
    */
   private mountEngagementQueueIfOnFeed(): void {
     const onFeed = location.pathname.startsWith('/feed');
     if (onFeed && !this.feedPostOverlay) {
       this.feedPostOverlay = new FeedPostOverlay({
-        scoreFeed: async (posts: ParsedPost[]): Promise<ScoreFeedResult> => {
-          const resp = await this.sendQueueMessage<{
-            ok?: boolean;
-            scored?: ScoredPost[];
-            error?: string;
-          }>({ action: 'queue.scoreFeed', posts });
-          if (!resp || resp.ok === false) {
-            return { ok: false, warning: resp?.error ?? 'No profile yet.' };
-          }
-          return { ok: true, scored: resp.scored ?? [] };
-        },
         aiScoreFeed: async (posts: ParsedPost[]): Promise<AiScoreFeedResult> => {
           const resp = await this.sendQueueMessage<{
             ok?: boolean;
