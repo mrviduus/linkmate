@@ -26,6 +26,7 @@ import {
   clearUserProfile,
   getUserProfile,
   isFresh,
+  mergeUserProfile,
   profileContextFromUserProfile,
   saveUserProfile,
   USER_PROFILE_TTL_MS,
@@ -128,5 +129,75 @@ describe('profileContextFromUserProfile (issue #18 follow-up)', () => {
     const up = fixture({ about: undefined });
     expect(() => profileContextFromUserProfile(up)).not.toThrow();
     expect(profileContextFromUserProfile(up).about).toBe('');
+  });
+});
+
+describe('mergeUserProfile', () => {
+  const post = (id: string, text = `post-${id}`, likes = 0) => ({
+    id,
+    text,
+    timestamp: '1d',
+    engagement: { likes, comments: 0, reposts: 0 },
+    isRepost: false,
+  });
+  const comment = (id: string, text = `c-${id}`) => ({
+    id,
+    text,
+    timestamp: '1d',
+    originalPostText: 'parent',
+    originalAuthor: 'Author',
+  });
+
+  it('returns fresh untouched when no existing snapshot', () => {
+    const fresh = fixture({ recentPosts: [post('A')] });
+    const merged = mergeUserProfile(null, fresh);
+    expect(merged).toBe(fresh);
+  });
+
+  it('fresh entry wins on duplicate URN (fresher engagement)', () => {
+    const existing = fixture({ recentPosts: [post('A', 'old', 5)] });
+    const fresh = fixture({ recentPosts: [post('A', 'new', 99)] });
+    const merged = mergeUserProfile(existing, fresh);
+    expect(merged.recentPosts).toHaveLength(1);
+    expect(merged.recentPosts[0].text).toBe('new');
+    expect(merged.recentPosts[0].engagement?.likes).toBe(99);
+  });
+
+  it('preserves old entries not present in fresh scrape', () => {
+    const existing = fixture({ recentPosts: [post('A'), post('B'), post('C')] });
+    const fresh = fixture({ recentPosts: [post('A')] });
+    const merged = mergeUserProfile(existing, fresh);
+    const ids = merged.recentPosts.map((p) => p.id);
+    expect(ids).toEqual(['A', 'B', 'C']);
+  });
+
+  it('fresh items appear before leftover old items', () => {
+    const existing = fixture({ recentPosts: [post('X'), post('Y')] });
+    const fresh = fixture({ recentPosts: [post('Z'), post('X')] });
+    const merged = mergeUserProfile(existing, fresh);
+    expect(merged.recentPosts.map((p) => p.id)).toEqual(['Z', 'X', 'Y']);
+  });
+
+  it('merges recentComments by URN the same way', () => {
+    const existing = fixture({ recentComments: [comment('1'), comment('2')] });
+    const fresh = fixture({ recentComments: [comment('2', 'updated'), comment('3')] });
+    const merged = mergeUserProfile(existing, fresh);
+    expect(merged.recentComments.map((c) => c.id)).toEqual(['2', '3', '1']);
+    expect(merged.recentComments[0].text).toBe('updated');
+  });
+
+  it('non-array fields take from fresh', () => {
+    const existing = fixture({ name: 'Old Name', headline: 'Old' });
+    const fresh = fixture({ name: 'New Name', headline: 'New' });
+    const merged = mergeUserProfile(existing, fresh);
+    expect(merged.name).toBe('New Name');
+    expect(merged.headline).toBe('New');
+  });
+
+  it('drops entries with empty id', () => {
+    const existing = fixture({ recentPosts: [post('')] });
+    const fresh = fixture({ recentPosts: [post(''), post('A')] });
+    const merged = mergeUserProfile(existing, fresh);
+    expect(merged.recentPosts.map((p) => p.id)).toEqual(['A']);
   });
 });

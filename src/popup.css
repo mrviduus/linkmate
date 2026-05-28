@@ -324,6 +324,25 @@ body {
   user-select: none;
 }
 
+.deep-scrape-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  font-size: 12px;
+  color: #1e3a8a;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 /* ── Capture Hero ────────────────────────────────────────────────────────── */
 
 .capture-hero {

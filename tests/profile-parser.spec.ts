@@ -9,11 +9,16 @@
  * like the real thing.
  */
 
-import { parseProfileDom } from '../src/profile-parser';
+import { parseProfileDom, parseRecentComments } from '../src/profile-parser';
 
 function parse(html: string) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   return parseProfileDom(doc);
+}
+
+function parseComments(html: string, selfHandle: string) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return parseRecentComments(doc, selfHandle);
 }
 
 describe('profile-parser (v0.5.6 real-DOM)', () => {
@@ -206,6 +211,167 @@ describe('profile-parser (v0.5.6 real-DOM)', () => {
       expect(f.fullName).toBe(f.fullName.trim());
       expect(f.headline).toBe(f.headline.trim());
       expect(f.fullName).toBe('Test Name');
+    });
+  });
+
+  // ─── parseRecentComments — anchor strategy (real DOM, 2026) ───────────────
+  //
+  // Fixtures reproduce the structure snapped via MCP on
+  // /in/vasyl-vdovychenko/recent-activity/comments/ : outer activity card,
+  // parent post content, `article.comments-comment-entity[data-id=...]`
+  // children with author <a href="/in/{handle}"> and <span dir="ltr">.
+  describe('parseRecentComments — anchored on article.comments-comment-entity', () => {
+    const card = (opts: {
+      cardUrn: string;
+      postAuthor: { handle: string; name: string };
+      postText: string;
+      comments: Array<{ id: string; handle: string; text: string; reply?: boolean }>;
+    }) => `
+      <div data-urn="${opts.cardUrn}">
+        <a href="/in/${opts.postAuthor.handle}/">${opts.postAuthor.name}</a>
+        <p dir="ltr">${opts.postText}</p>
+        ${opts.comments
+          .map(
+            (c) => `
+          <article class="comments-comment-entity ${c.reply ? 'comments-comment-entity--reply' : ''}"
+                   data-id="${c.id}">
+            <a href="/in/${c.handle}/">User</a>
+            <span dir="ltr">${c.text}</span>
+            <span>2w</span>
+          </article>
+        `,
+          )
+          .join('')}
+      </div>
+    `;
+
+    it('extracts self comment with comment-URN as id', () => {
+      const html = card({
+        cardUrn: 'urn:li:activity:7464106554733019136',
+        postAuthor: { handle: 'aarthi-ntrjn', name: 'Aarthi N' },
+        postText: 'Introducing Argus: command center for CLI sessions...',
+        comments: [
+          {
+            id: 'urn:li:comment:(activity:7461529543384776705,7462169686772727808)',
+            handle: 'vasyl-vdovychenko',
+            text: 'Half my workday lately is tab-Z\'ing between terminals',
+          },
+        ],
+      });
+      const out = parseComments(html, 'vasyl-vdovychenko');
+      expect(out).toHaveLength(1);
+      expect(out[0].id).toBe('urn:li:comment:(activity:7461529543384776705,7462169686772727808)');
+      expect(out[0].text).toContain('tab-Z');
+      expect(out[0].originalPostText).toContain('Argus');
+      expect(out[0].originalAuthor).toBe('Aarthi N');
+    });
+
+    it('keeps multiple self comments on same parent post (different comment URNs)', () => {
+      const html = card({
+        cardUrn: 'urn:li:activity:7464106554733019136',
+        postAuthor: { handle: 'aarthi-ntrjn', name: 'Aarthi N' },
+        postText: 'Introducing Argus',
+        comments: [
+          {
+            id: 'urn:li:comment:(activity:74615,74621)',
+            handle: 'vasyl-vdovychenko',
+            text: 'First comment',
+          },
+          {
+            id: 'urn:li:comment:(activity:74615,74641)',
+            handle: 'vasyl-vdovychenko',
+            text: 'Reply follow-up',
+            reply: true,
+          },
+        ],
+      });
+      const out = parseComments(html, 'vasyl-vdovychenko');
+      expect(out).toHaveLength(2);
+      expect(out.map((c) => c.text)).toEqual(['First comment', 'Reply follow-up']);
+      expect(out.map((c) => c.id)).toEqual([
+        'urn:li:comment:(activity:74615,74621)',
+        'urn:li:comment:(activity:74615,74641)',
+      ]);
+    });
+
+    it('skips comments authored by others (not selfHandle)', () => {
+      const html = card({
+        cardUrn: 'urn:li:activity:1',
+        postAuthor: { handle: 'aarthi-ntrjn', name: 'Aarthi N' },
+        postText: 'A post',
+        comments: [
+          { id: 'urn:li:comment:(activity:1,A)', handle: 'someone-else', text: 'theirs' },
+          { id: 'urn:li:comment:(activity:1,B)', handle: 'vasyl-vdovychenko', text: 'mine' },
+        ],
+      });
+      const out = parseComments(html, 'vasyl-vdovychenko');
+      expect(out).toHaveLength(1);
+      expect(out[0].text).toBe('mine');
+    });
+
+    it('originalAuthor is the post author, not a commenter', () => {
+      // If commenter handle is found FIRST in DOM order, the old parser would
+      // pick them as originalAuthor. New parser looks outside comment articles.
+      const html = `
+        <div data-urn="urn:li:activity:1">
+          <a href="/in/post-author/">Post Author Name</a>
+          <p dir="ltr">Parent post text long enough to be picked</p>
+          <article class="comments-comment-entity" data-id="urn:li:comment:(activity:1,A)">
+            <a href="/in/some-commenter/">Some Commenter</a>
+            <span dir="ltr">their reply</span>
+          </article>
+          <article class="comments-comment-entity" data-id="urn:li:comment:(activity:1,B)">
+            <a href="/in/vasyl-vdovychenko/">Me</a>
+            <span dir="ltr">my reply</span>
+          </article>
+        </div>
+      `;
+      const out = parseComments(html, 'vasyl-vdovychenko');
+      expect(out).toHaveLength(1);
+      expect(out[0].originalAuthor).toBe('Post Author Name');
+    });
+
+    it('drops cards without comment articles', () => {
+      const html = `<div data-urn="urn:li:activity:1"><p dir="ltr">just a post</p></div>`;
+      const out = parseComments(html, 'vasyl-vdovychenko');
+      expect(out).toHaveLength(0);
+    });
+
+    it('matches articles by data-id alone (anchor fallback if class is renamed)', () => {
+      // LinkedIn rotates CSS class names; the URN-prefix data-id is stickier.
+      // The parser must still find the comment when only data-id matches.
+      const html = `
+        <div data-urn="urn:li:activity:1">
+          <a href="/in/author/">Author</a>
+          <p dir="ltr">parent post body</p>
+          <article class="some-future-class-name" data-id="urn:li:comment:(activity:1,Z)">
+            <a href="/in/vasyl-vdovychenko/">Me</a>
+            <span dir="ltr">future-proof comment</span>
+          </article>
+        </div>
+      `;
+      const out = parseComments(html, 'vasyl-vdovychenko');
+      expect(out).toHaveLength(1);
+      expect(out[0].text).toBe('future-proof comment');
+    });
+
+    it('extracts bare timestamp from <time> inside the comment article', () => {
+      // Real DOM: <time class="comments-comment-meta__data">1w</time>
+      // No bullet — pickRelativeTime alone would return ''.
+      const html = `
+        <div data-urn="urn:li:activity:1">
+          <a href="/in/author/">Author</a>
+          <p dir="ltr">a parent post</p>
+          <article class="comments-comment-entity" data-id="urn:li:comment:(activity:1,A)">
+            <a href="/in/vasyl-vdovychenko/">Me</a>
+            <span dir="ltr">a comment</span>
+            <time class="comments-comment-meta__data">1w</time>
+          </article>
+        </div>
+      `;
+      const out = parseComments(html, 'vasyl-vdovychenko');
+      expect(out).toHaveLength(1);
+      expect(out[0].timestamp).toBe('1w');
     });
   });
 });
