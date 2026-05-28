@@ -34,6 +34,7 @@ export const STORAGE_KEYS = {
   deepScrapeProgress: 'linkmate.deepScrape.progress.v1',
   onboardingCompleted: 'linkmate.settings.onboardingCompleted.v1',
   goalsOverride: 'linkmate.profile.goalsOverride.v1',
+  profileAudit: 'linkmate.profile.audit.v1',
   schemaVersion: 'linkmate.schema.version',
 } as const;
 
@@ -486,4 +487,60 @@ export async function setGoalsOverride(value: string): Promise<void> {
     return;
   }
   await writeKey(STORAGE_KEYS.goalsOverride, trimmed);
+}
+
+// ─── Profile audit + AI rewrites (issue #28) ────────────────────────────────
+
+export type ProfileAuditCheckId =
+  | 'currentPosition'
+  | 'education'
+  | 'skills'
+  | 'about'
+  | 'location'
+  | 'connections';
+
+export interface ProfileAuditCheck {
+  id: ProfileAuditCheckId;
+  status: 'pass' | 'fail';
+  severity: 'high' | 'med';
+  label: string;
+  detail: string;
+}
+
+export interface ProfileAuditSummary {
+  checks: ProfileAuditCheck[];
+  passed: number;
+  total: number;
+  score: number;
+  failed: ProfileAuditCheckId[];
+}
+
+/** checkId is `ProfileAuditCheckId` for gap-driven items, or 'photoBanner' / 'openToWork' for advisory. */
+export interface ProfileRecommendation {
+  checkId: ProfileAuditCheckId | 'photoBanner' | 'openToWork';
+  diagnosis: string;
+  suggestion: string;
+  rationale: string;
+}
+
+export interface ProfileAuditState {
+  /** ISO timestamp of the IDB UserProfile this audit was computed against. */
+  profileCapturedAt: string;
+  audit: ProfileAuditSummary;
+  /** AI recommendations, null until the user clicks "Get AI rewrites". */
+  recommendations: ProfileRecommendation[] | null;
+  /** ms epoch when recommendations were generated; 0 if never. */
+  recommendationsAt: number;
+}
+
+export async function getProfileAuditState(): Promise<ProfileAuditState | null> {
+  return readKey<ProfileAuditState>(STORAGE_KEYS.profileAudit);
+}
+
+export async function setProfileAuditState(state: ProfileAuditState): Promise<void> {
+  await writeKey(STORAGE_KEYS.profileAudit, state);
+}
+
+export async function clearProfileAuditState(): Promise<void> {
+  await chrome.storage.local.remove(STORAGE_KEYS.profileAudit);
 }
