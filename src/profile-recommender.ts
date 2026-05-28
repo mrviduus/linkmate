@@ -12,7 +12,7 @@
 
 import type { UserProfile } from './lib/idb';
 import type { AuditReport } from './profile-audit';
-import { buildProfileRewritePrompt, detectProfileLanguage } from './profile-audit-prompts';
+import { buildProfileRewritePrompt } from './profile-audit-prompts';
 import type { InferenceProvider } from './providers/inference-provider';
 import type { ProfileRecommendation } from './storage-schema';
 
@@ -52,8 +52,7 @@ export async function generateProfileRecommendations(
   input: GenerateProfileRecommendationsInput
 ): Promise<ProfileRecommendation[]> {
   const { provider, profile, audit, goals } = input;
-  const language = detectProfileLanguage(profile);
-  const { system, user } = buildProfileRewritePrompt({ profile, audit, goals, language });
+  const { system, user } = buildProfileRewritePrompt({ profile, audit, goals });
   const raw = await provider.generate({
     system,
     user,

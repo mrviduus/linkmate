@@ -3,10 +3,7 @@
  */
 
 import { auditProfile } from '../src/profile-audit';
-import {
-  buildProfileRewritePrompt,
-  detectProfileLanguage,
-} from '../src/profile-audit-prompts';
+import { buildProfileRewritePrompt } from '../src/profile-audit-prompts';
 import {
   generateProfileRecommendations,
   parseProfileRecommendations,
@@ -52,30 +49,6 @@ function fakeProvider(response: string): InferenceProvider & { calls: number; la
   };
 }
 
-describe('detectProfileLanguage', () => {
-  it('returns en for empty profile', () => {
-    expect(detectProfileLanguage(profile({ about: '', headline: '' }))).toBe('en');
-  });
-  it('returns en for Latin-only text', () => {
-    expect(detectProfileLanguage(profile({ about: 'Senior engineer with 10 years.' }))).toBe('en');
-  });
-  it('returns en when Cyrillic ratio is below 30%', () => {
-    expect(
-      detectProfileLanguage(profile({ about: 'Senior engineer with React and Node — інженер.', headline: 'Senior engineer' }))
-    ).toBe('en');
-  });
-  it('returns uk when Ukrainian-only letters present', () => {
-    expect(
-      detectProfileLanguage(profile({ about: 'Інженер з досвідом у фінтех. Працюю з даними.', headline: 'Старший інженер' }))
-    ).toBe('uk');
-  });
-  it('returns ru when Cyrillic but no Ukrainian-only letters', () => {
-    expect(
-      detectProfileLanguage(profile({ about: 'Старший инженер с большим опытом разработки.', headline: 'Старший инженер' }))
-    ).toBe('ru');
-  });
-});
-
 describe('buildProfileRewritePrompt', () => {
   it('emits all key sections in the user prompt', () => {
     const p = profile();
@@ -84,12 +57,11 @@ describe('buildProfileRewritePrompt', () => {
       profile: p,
       audit,
       goals: 'Land a senior backend role at a fintech',
-      language: 'en',
     });
     expect(system).toContain('strict JSON');
     expect(system).toContain('photoBanner');
     expect(system).toContain('openToWork');
-    expect(system).toContain('English');
+    expect(system).toContain('Respond in English');
     expect(user).toContain('Vasyl');
     expect(user).toContain('Senior engineer');
     expect(user).toContain('Kyiv');
@@ -101,14 +73,13 @@ describe('buildProfileRewritePrompt', () => {
       profile: p,
       audit: auditProfile(p),
       goals: null,
-      language: 'en',
     });
     expect(user).toContain('not provided');
   });
   it('marks audit failures with severity + label', () => {
     const p = profile({ about: '', skills: ['a'], education: [] });
     const audit = auditProfile(p);
-    const { user } = buildProfileRewritePrompt({ profile: p, audit, goals: null, language: 'en' });
+    const { user } = buildProfileRewritePrompt({ profile: p, audit, goals: null });
     expect(user).toContain('about (high)');
     expect(user).toContain('skills (high)');
     expect(user).toContain('education (high)');
@@ -116,18 +87,8 @@ describe('buildProfileRewritePrompt', () => {
   it('mentions advisory-only mode when there are no gaps', () => {
     const p = profile();
     const audit = auditProfile(p);
-    const { user } = buildProfileRewritePrompt({ profile: p, audit, goals: null, language: 'en' });
+    const { user } = buildProfileRewritePrompt({ profile: p, audit, goals: null });
     expect(user).toContain('advisory items for photoBanner and openToWork');
-  });
-  it('switches language directive based on `language` arg', () => {
-    const p = profile();
-    const a = auditProfile(p);
-    expect(buildProfileRewritePrompt({ profile: p, audit: a, goals: null, language: 'uk' }).system).toContain(
-      'Ukrainian'
-    );
-    expect(buildProfileRewritePrompt({ profile: p, audit: a, goals: null, language: 'ru' }).system).toContain(
-      'Russian'
-    );
   });
 });
 

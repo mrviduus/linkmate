@@ -20,30 +20,6 @@ const EXPERIENCE_CAP = 3;
 const EXPERIENCE_DESC_CAP = 180;
 const EDUCATION_CAP = 2;
 
-const LANG_NAMES: Record<ProfileLanguage, string> = {
-  en: 'English',
-  uk: 'Ukrainian',
-  ru: 'Russian',
-};
-
-export type ProfileLanguage = 'en' | 'uk' | 'ru';
-
-/**
- * Heuristic language detection on `about + headline`. Cyrillic ratio > 0.3
- * → uk/ru, else en. Distinguishes uk vs ru by Ukrainian-only letters
- * (`ієїґ`). Deliberately simple — wrong call only swaps which prompt
- * language the LLM responds in.
- */
-export function detectProfileLanguage(profile: UserProfile): ProfileLanguage {
-  const sample = `${profile.about ?? ''} ${profile.headline ?? ''}`;
-  const stripped = sample.replace(/\s/g, '');
-  if (stripped.length === 0) return 'en';
-  const cyrillic = (stripped.match(/[\u0400-\u04ff]/g) ?? []).length;
-  if (cyrillic / stripped.length < 0.3) return 'en';
-  if (/[ієїґ]/i.test(sample)) return 'uk';
-  return 'ru';
-}
-
 function oneLine(s: string | undefined | null, cap: number): string {
   if (!s) return '';
   return s.replace(/\s+/g, ' ').trim().slice(0, cap);
@@ -107,15 +83,13 @@ export interface BuildProfileRewritePromptInput {
   profile: UserProfile;
   audit: AuditReport;
   goals: string | null;
-  language: ProfileLanguage;
 }
 
 export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput): {
   system: string;
   user: string;
 } {
-  const { profile, audit, goals, language } = input;
-  const langName = LANG_NAMES[language];
+  const { profile, audit, goals } = input;
 
   const system = [
     'You are a LinkedIn profile coach for a specific user.',
@@ -130,7 +104,7 @@ export function buildProfileRewritePrompt(input: BuildProfileRewritePromptInput)
     '  - checkId "openToWork": if the user is job-searching, suggest switching',
     '    public "Open to Work" frame to Recruiters Only — public flag can lower',
     '    leverage with recruiters.',
-    `Respond in ${langName} (match the language of the user's existing about/headline).`,
+    'Respond in English.',
     'No marketing buzzwords. No em-dash padding. Do not restate the rule.',
     'Output strict JSON only — no prose, no markdown fences:',
     '{"recommendations":[{"checkId":"<id>","diagnosis":"<text>","suggestion":"<text>","rationale":"<text>"}, ...]}',
