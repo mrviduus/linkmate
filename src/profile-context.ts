@@ -35,12 +35,44 @@ import {
   parseRecentComments,
 } from './profile-parser';
 import type { RawProfileFields } from './profile-parser';
-import { getCaptureFullProfile, getProfile, getProviderConfig, setProfile } from './storage-schema';
+import {
+  getCaptureFullProfile,
+  getDeepScrape,
+  getProfile,
+  getProviderConfig,
+  setDeepScrapeCancel,
+  setDeepScrapeProgress,
+  setProfile,
+  STORAGE_KEYS,
+} from './storage-schema';
 import type { ProfileContext } from './storage-schema';
-import { getUserProfile, isFresh, saveUserProfile } from './user-profile-store';
+import { getUserProfile, isFresh, mergeUserProfile, saveUserProfile } from './user-profile-store';
 import type { UserProfile } from './lib/idb';
 
 const PROFILE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+// Sentinels that inject scripts prefix to / return as the HTML payload.
+// Inject can't import closures (chrome.scripting.executeScript serialises the
+// function body), so we ship constants through the `args` channel. Single
+// bundle here is the source of truth — both injects receive it as cfg.
+const CANCEL_MARKER = '__LINKMATE_CANCELLED__:';
+// Session expired → /authwall, /login, /uas/login.
+const AUTHWALL_MARKER = '__LINKMATE_AUTHWALL__';
+// LinkedIn 302's into /checkpoint/{challenge,lg/login-submit,rm/...} when it
+// suspects bot activity. Different UX than authwall ("complete the challenge,
+// then retry"). Detected by both URL and in-page DOM signals (CAPTCHA iframe,
+// challenge <form>) inside each inject.
+const CHECKPOINT_MARKER = '__LINKMATE_CHECKPOINT__';
+
+const INJECT_RUNTIME = {
+  progressKey: STORAGE_KEYS.deepScrapeProgress,
+  cancelKey: STORAGE_KEYS.deepScrapeCancel,
+  cancelMarker: CANCEL_MARKER,
+  authwallMarker: AUTHWALL_MARKER,
+  checkpointMarker: CHECKPOINT_MARKER,
+} as const;
+
+type InjectRuntime = typeof INJECT_RUNTIME;
 
 // Canonical profile URLs — /in/{handle} with no extra path segments.
 // Trailing slash optional. www. optional. Query string / hash tolerated
@@ -53,7 +85,15 @@ export type CaptureFailureReason =
   | 'not-on-profile'
   | 'not-signed-in'
   | 'script-failed'
-  | 'summary-failed';
+  | 'summary-failed'
+  | 'checkpoint';
+
+class CheckpointError extends Error {
+  constructor() {
+    super('LinkedIn checkpoint');
+    this.name = 'CheckpointError';
+  }
+}
 
 export type CaptureResult =
   | {
@@ -297,16 +337,62 @@ export class ProfileContextService {
     // So we scroll the page programmatically, wait for SDUI to fetch the async
     // sections, then grab the HTML. ~3.5s total wait inside keepAlive.
     progress('scraping');
+    // Read deepScrape ahead of time so the inject script can publish progress
+    // for the main-profile phase too (closes the "no progress for first 3.5s"
+    // gap). Cancel/progress writes are gated to deep mode inside the inject.
+    const deepScrapeEnabled = await getDeepScrape();
+    if (deepScrapeEnabled) {
+      // Clear any stale cancel from a previous run before this capture's
+      // first inject can poll it.
+      await setDeepScrapeCancel(false);
+      await setDeepScrapeProgress(null);
+    }
     let html: string | null = null;
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId },
-        func: async () => {
+        args: [{ ...INJECT_RUNTIME, deep: deepScrapeEnabled }],
+        func: async (cfg: InjectRuntime & { deep: boolean }) => {
+          // Checkpoint detector — same logic as activity inject. URL guard at
+          // step 2 already blocks /checkpoint/ entry, but LinkedIn can inject
+          // a challenge modal during the scroll loop without changing URL.
+          // Keep selectors in sync with the activity inject below.
+          const hasCheckpoint = () =>
+            /\/checkpoint\b/i.test(window.location.pathname) ||
+            !!document.querySelector(
+              'form[action*="/checkpoint/"], #captcha-internal-iframe, [id^="captcha-"], iframe[src*="arkoselabs"]',
+            );
+          if (hasCheckpoint()) return cfg.checkpointMarker;
           const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
           const originalScroll = window.scrollY;
           const main = document.querySelector('main');
           const scope = main ?? document;
           const heightLog: number[] = [];
+          const writeProgress = cfg.deep
+            ? async (iter: number, items: number, height: number) => {
+                try {
+                  await chrome.storage.local.set({
+                    [cfg.progressKey]: { phase: 'profile', iter, items, height, ts: Date.now() },
+                  });
+                } catch {
+                  /* ignore */
+                }
+              }
+            : async (_iter: number, _items: number, _height: number) => {};
+          const isCancelled = cfg.deep
+            ? async (): Promise<boolean> => {
+                try {
+                  const row = (await chrome.storage.local.get(cfg.cancelKey)) as Record<
+                    string,
+                    unknown
+                  >;
+                  return !!row[cfg.cancelKey];
+                } catch {
+                  return false;
+                }
+              }
+            : async (): Promise<boolean> => false;
+          let cancelledHere = false;
 
           // Phase 1 — brute scroll until ALL expected sections appear in DOM
           // OR scrollHeight has been stable for 3 iterations. Bails as soon as
@@ -324,6 +410,7 @@ export class ProfileContextService {
           };
           let lastHeight = 0;
           let stableCount = 0;
+          let checkpointMidScroll = false;
           for (let i = 0; i < 20; i++) {
             const h = Math.max(
               document.documentElement.scrollHeight,
@@ -335,6 +422,15 @@ export class ProfileContextService {
             if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
             document.documentElement.scrollTop = h;
             await wait(700);
+            await writeProgress(i + 1, 0, h);
+            if (hasCheckpoint()) {
+              checkpointMidScroll = true;
+              break;
+            }
+            if (await isCancelled()) {
+              cancelledHere = true;
+              break;
+            }
             if (i >= 4 && hasAllTargets()) break;
             if (h === lastHeight) {
               stableCount++;
@@ -344,25 +440,41 @@ export class ProfileContextService {
             }
             lastHeight = h;
           }
+          if (checkpointMidScroll) return cfg.checkpointMarker;
 
           // Phase 2 — only scrollIntoView the target sections (not every h2).
           // Wait 500ms each; LinkedIn 2026 uses <div componentkey> + <p>, not
           // <li>, so the old "if items==0 wait more" heuristic was wrong.
           const headings = Array.from(scope.querySelectorAll('h2, h3')) as HTMLElement[];
-          for (const h of headings) {
-            if (!TARGETS.test((h.textContent ?? '').trim())) continue;
-            try {
-              h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
-              await wait(500);
-            } catch {
-              /* ignore */
+          if (!cancelledHere) {
+            for (const h of headings) {
+              if (!TARGETS.test((h.textContent ?? '').trim())) continue;
+              try {
+                h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+                await wait(500);
+              } catch {
+                /* ignore */
+              }
+              if (hasCheckpoint()) {
+                checkpointMidScroll = true;
+                break;
+              }
+              if (await isCancelled()) {
+                cancelledHere = true;
+                break;
+              }
             }
+            if (checkpointMidScroll) return cfg.checkpointMarker;
+            await wait(400);
           }
-          await wait(400);
 
           window.scrollTo({ top: originalScroll, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
           await wait(300);
+          // Final race-closer: 700ms of waits since the last hasCheckpoint().
+          // Recheck right before outerHTML so a late-injected challenge can't
+          // slip past us into the parsed-DOM stage.
+          if (hasCheckpoint()) return cfg.checkpointMarker;
 
           // Diagnostic dump alongside HTML so popup can console.log it.
           const targets = ['experience', 'education', 'skills', 'licenses', 'languages', 'projects', 'certifications'];
@@ -382,10 +494,10 @@ export class ProfileContextService {
               return { t, found: !!h, items: card?.querySelectorAll('li').length ?? 0 };
             }),
           };
-          return (
+          const body =
             document.documentElement.outerHTML +
-            `\n<!-- LINKMATE_DIAG:${JSON.stringify(diag)} -->`
-          );
+            `\n<!-- LINKMATE_DIAG:${JSON.stringify(diag)} -->`;
+          return cancelledHere ? cfg.cancelMarker + body : body;
         },
       });
       html = (results?.[0]?.result as string | undefined) ?? null;
@@ -395,6 +507,25 @@ export class ProfileContextService {
         reason: 'script-failed',
         message: `Could not read profile DOM: ${String(err)}`,
       };
+    }
+    // Main-profile inject can return either the HTML, CANCEL_MARKER+HTML, or
+    // bare CHECKPOINT_MARKER (no HTML — challenge page has nothing useful).
+    if (html === CHECKPOINT_MARKER) {
+      if (deepScrapeEnabled) {
+        await setDeepScrapeProgress(null);
+        await setDeepScrapeCancel(false);
+      }
+      return {
+        ok: false,
+        reason: 'checkpoint',
+        message:
+          'LinkedIn asked for verification (checkpoint). Open the tab, complete the challenge, then click Capture again.',
+      };
+    }
+    let mainPhaseCancelled = false;
+    if (html?.startsWith(CANCEL_MARKER)) {
+      mainPhaseCancelled = true;
+      html = html.slice(CANCEL_MARKER.length);
     }
     if (!html) {
       return {
@@ -442,13 +573,36 @@ export class ProfileContextService {
     // independent of any AI. If OpenAI key isn't configured or the API errors
     // out later, we still have the structured profile saved.
     let userProfile: UserProfile | undefined;
-    if (fullProfileEnabled && activeTab?.id !== undefined) {
+    if (fullProfileEnabled && activeTab?.id !== undefined && !mainPhaseCancelled) {
       try {
-        userProfile = await captureFullUserProfile(url, parsedDoc, activeTab.id);
+        const fresh = await captureFullUserProfile(url, parsedDoc, activeTab.id, deepScrapeEnabled);
+        // URN-merge with previous snapshot — accumulates history across runs
+        // so old activity isn't lost when LinkedIn paginates it out of view.
+        const previous = await getUserProfile().catch(() => null);
+        userProfile = mergeUserProfile(previous, fresh);
         await saveUserProfile(userProfile);
       } catch (err) {
+        if (err instanceof CheckpointError) {
+          if (deepScrapeEnabled) {
+            await setDeepScrapeProgress(null);
+            await setDeepScrapeCancel(false);
+          }
+          return {
+            ok: false,
+            reason: 'checkpoint',
+            message:
+              'LinkedIn asked for verification (checkpoint). Open the tab, complete the challenge, then click Capture again.',
+          };
+        }
         console.warn('[LinkMate] Full profile capture failed:', err);
       }
+    }
+    // Always clear the progress badge on the way out — even on the cancelled
+    // path that skips activity scrape. captureFullUserProfile's finally{} does
+    // it for the normal path, but mainPhaseCancelled bypasses that block.
+    if (deepScrapeEnabled) {
+      await setDeepScrapeProgress(null);
+      await setDeepScrapeCancel(false);
     }
 
     // Step 6 — OpenAI positioning summary + chrome.storage ProfileContext.
@@ -536,7 +690,24 @@ function extractHandle(url: string): string | null {
  * Background tabs are banned by spec; we re-use the user's active tab and
  * restore the original URL at the end.
  */
-async function scrapeInActiveTab(tabId: number, url: string): Promise<string | null> {
+async function scrapeInActiveTab(
+  tabId: number,
+  url: string,
+  opts: { deep?: boolean; phase?: 'posts' | 'comments' } = {}
+): Promise<string | null> {
+  // Announce the new phase BEFORE the tab navigates — otherwise the popup
+  // keeps showing the previous phase's stale "iter N items M" for the 1-2s
+  // of navigation + SDUI hydration. Reset to iter=0 / items=0 so the badge
+  // reads "Scraping posts — 0 items, iter 0" immediately.
+  if (opts.deep) {
+    await setDeepScrapeProgress({
+      phase: opts.phase ?? 'posts',
+      iter: 0,
+      items: 0,
+      height: 0,
+      ts: Date.now(),
+    });
+  }
   await chrome.tabs.update(tabId, { url });
 
   // Wait for the navigation to fully complete. Two failure modes guarded:
@@ -571,20 +742,85 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: async () => {
-        // Authwall guard: LinkedIn 302's expired sessions to /authwall or
-        // /uas/login. We must NOT silently scrape the logged-out shell as
-        // if it were the activity HTML.
-        if (/\/(authwall|login|uas\/login|checkpoint)\b/i.test(window.location.pathname)) {
-          return '__LINKMATE_AUTHWALL__';
+      args: [
+        { ...INJECT_RUNTIME, deep: !!opts.deep, phase: opts.phase ?? 'posts' },
+      ],
+      func: async (
+        cfg: InjectRuntime & { deep: boolean; phase: 'posts' | 'comments' }
+      ) => {
+        // Checkpoint: LinkedIn detected suspicious activity (often triggered
+        // by aggressive scroll in deep mode) and is asking the user to verify.
+        // Two delivery modes:
+        //   - full-page redirect → window.location.pathname starts /checkpoint/
+        //   - in-page challenge → URL stays put but a checkpoint <form> or
+        //     Arkose CAPTCHA iframe appears in the DOM.
+        // We check BOTH on entry and again after every scroll iteration.
+        //
+        // Selectors below are best-guess. When LinkedIn changes the challenge
+        // UI: open DevTools on a real challenge page, copy outerHTML of the
+        // challenge container, grep for stable id/class/data-* attributes, add
+        // them here. Avoid text-based detection — false-positives in feed.
+        const hasCheckpoint = () =>
+          /\/checkpoint\b/i.test(window.location.pathname) ||
+          !!document.querySelector(
+            'form[action*="/checkpoint/"], #captcha-internal-iframe, [id^="captcha-"], iframe[src*="arkoselabs"]',
+          );
+        if (hasCheckpoint()) {
+          return cfg.checkpointMarker;
+        }
+        // Authwall: session expired. We must NOT silently scrape the
+        // logged-out shell as if it were the activity HTML.
+        if (/\/(authwall|login|uas\/login)\b/i.test(window.location.pathname)) {
+          return cfg.authwallMarker;
         }
         const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        // Deep-mode jitter: ±200ms randomisation makes the scroll cadence look
+        // less robotic. LinkedIn's anti-bot heuristics flag uniform 900ms
+        // beats; jittered waits stay safe. ~15% wall-clock cost.
+        const jitter = cfg.deep ? () => Math.floor(Math.random() * 400) - 200 : () => 0;
         const main = document.querySelector('main');
-        await wait(900);
-        // Scroll until enough activity items show up OR scrollHeight stable.
+        await wait(900 + jitter());
+
+        // Inject script runs in isolated world and CAN call chrome.storage —
+        // popup writes the cancel flag, we poll it; we write progress, popup
+        // observes it via storage.onChanged. Gated to deep mode only — quick
+        // mode finishes in ~6s, the UI flash isn't useful and adds noise.
+        const writeProgress = cfg.deep
+          ? async (iter: number, items: number, height: number) => {
+              try {
+                await chrome.storage.local.set({
+                  [cfg.progressKey]: { phase: cfg.phase, iter, items, height, ts: Date.now() },
+                });
+              } catch {
+                /* storage write failures shouldn't kill scrape */
+              }
+            }
+          : async (_iter: number, _items: number, _height: number) => {};
+        const isCancelled = cfg.deep
+          ? async (): Promise<boolean> => {
+              try {
+                const row = (await chrome.storage.local.get(cfg.cancelKey)) as Record<string, unknown>;
+                return !!row[cfg.cancelKey];
+              } catch {
+                return false;
+              }
+            }
+          : async (): Promise<boolean> => false;
+
+        // Deep mode: scroll until scrollHeight is stable N iterations in a row
+        // or we hit a safety cap (LinkedIn lazy-loads indefinitely; this is the
+        // "no more new content" signal). Quick mode: stop at ~10 items.
+        const MAX_ITERS = cfg.deep ? 200 : 8;
+        const ITEM_TARGET = cfg.deep ? Infinity : 10;
+        const STABLE_TARGET = cfg.deep ? 4 : 2;
+        const STABLE_MIN_ITER = cfg.deep ? 0 : 3;
+
         let lastHeight = 0;
         let stable = 0;
-        for (let i = 0; i < 8; i++) {
+        let lastItemCount = 0;
+        let cancelled = false;
+        let checkpointMidScroll = false;
+        for (let i = 0; i < MAX_ITERS; i++) {
           const h = Math.max(
             document.documentElement.scrollHeight,
             document.body.scrollHeight,
@@ -593,23 +829,45 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
           window.scrollTo({ top: h, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
           document.documentElement.scrollTop = h;
-          await wait(700);
+          await wait((cfg.deep ? 900 : 700) + jitter());
+          // Recheck checkpoint each iteration — LinkedIn can inject a
+          // challenge modal mid-scroll without changing the URL.
+          if (hasCheckpoint()) {
+            checkpointMidScroll = true;
+            break;
+          }
           const itemCount = (main ?? document).querySelectorAll(
             '[data-urn^="urn:li:activity"]',
           ).length;
-          if (itemCount >= 10) break;
-          if (h === lastHeight) {
+          await writeProgress(i + 1, itemCount, h);
+          if (await isCancelled()) {
+            cancelled = true;
+            break;
+          }
+          if (itemCount >= ITEM_TARGET) break;
+          // Deep mode: stable means BOTH height AND item count unchanged.
+          const heightStable = h === lastHeight;
+          const itemsStable = itemCount === lastItemCount;
+          if (cfg.deep ? heightStable && itemsStable : heightStable) {
             stable++;
-            if (stable >= 2 && i >= 3) break;
+            if (stable >= STABLE_TARGET && i >= STABLE_MIN_ITER) break;
           } else {
             stable = 0;
           }
           lastHeight = h;
+          lastItemCount = itemCount;
         }
+        if (checkpointMidScroll) return cfg.checkpointMarker;
         window.scrollTo({ top: 0, behavior: 'instant' });
         if (main && 'scrollTo' in main) main.scrollTo({ top: 0, behavior: 'instant' });
         await wait(200);
-        return document.documentElement.outerHTML;
+        // Final race-closer: between the loop's last hasCheckpoint() and the
+        // outerHTML grab there's a 200ms+ window. One more check here keeps
+        // a late-injected challenge modal from being silently scraped.
+        if (hasCheckpoint()) return cfg.checkpointMarker;
+        // Return partial HTML even on cancel — caller still merges with cache.
+        const html = document.documentElement.outerHTML;
+        return cancelled ? cfg.cancelMarker + html : html;
       },
     });
     return (results?.[0]?.result as string | undefined) ?? null;
@@ -620,6 +878,19 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
 }
 
 /**
+ * Inject script prefixes the HTML with CANCEL_MARKER when the user hit Cancel
+ * mid-scroll. Strip the marker so downstream HTML parsing isn't confused;
+ * partial HTML still flows through merge.
+ */
+function stripCancelPrefix(html: string | null): string | null {
+  if (html === null) return null;
+  if (html.startsWith(CANCEL_MARKER)) {
+    return html.slice(CANCEL_MARKER.length);
+  }
+  return html;
+}
+
+/**
  * Build a UserProfile from the already-loaded main-profile DOM, then enrich
  * with recent posts/comments by navigating the user's active tab through
  * the recent-activity subpages and finally restoring the original profile URL.
@@ -627,33 +898,53 @@ async function scrapeInActiveTab(tabId: number, url: string): Promise<string | n
 async function captureFullUserProfile(
   url: string,
   parsedDoc: Document,
-  tabId: number
+  tabId: number,
+  deep: boolean
 ): Promise<UserProfile> {
   const handle = extractHandle(url);
   const canonical = handle ? `https://www.linkedin.com/in/${handle}/` : url;
   const profile = parseUserProfile(parsedDoc, canonical);
 
+  // Deep mode: keep everything we can scrape. The scrape loop is the real
+  // bottleneck; parser caps were just defensive defaults.
+  const parseOpts = deep ? { limit: Infinity } : {};
+
   if (handle) {
     const postsUrl = `https://www.linkedin.com/in/${handle}/recent-activity/all/`;
     const commentsUrl = `https://www.linkedin.com/in/${handle}/recent-activity/comments/`;
+    // Note: caller (capture()) already cleared progress/cancel for this run.
+    // Re-clearing here would clobber a cancel set during the profile phase
+    // and flicker the progress badge between phase transitions.
     try {
-      const postsHtml = await scrapeInActiveTab(tabId, postsUrl);
-      if (postsHtml === '__LINKMATE_AUTHWALL__') {
+      const postsHtml = stripCancelPrefix(
+        await scrapeInActiveTab(tabId, postsUrl, { deep, phase: 'posts' })
+      );
+      if (postsHtml === CHECKPOINT_MARKER) {
+        throw new CheckpointError();
+      }
+      if (postsHtml === AUTHWALL_MARKER) {
         throw new Error('LinkedIn session expired (authwall). Sign in and try again.');
       }
       if (postsHtml) {
         const d = new DOMParser().parseFromString(postsHtml, 'text/html');
-        profile.recentPosts = parseRecentPosts(d);
+        profile.recentPosts = parseRecentPosts(d, parseOpts);
       }
-      const commentsHtml = await scrapeInActiveTab(tabId, commentsUrl);
-      if (commentsHtml === '__LINKMATE_AUTHWALL__') {
+      const commentsHtml = stripCancelPrefix(
+        await scrapeInActiveTab(tabId, commentsUrl, { deep, phase: 'comments' })
+      );
+      if (commentsHtml === CHECKPOINT_MARKER) {
+        throw new CheckpointError();
+      }
+      if (commentsHtml === AUTHWALL_MARKER) {
         throw new Error('LinkedIn session expired (authwall). Sign in and try again.');
       }
       if (commentsHtml) {
         const d = new DOMParser().parseFromString(commentsHtml, 'text/html');
-        profile.recentComments = parseRecentComments(d, handle);
+        profile.recentComments = parseRecentComments(d, handle, parseOpts);
       }
     } finally {
+      await setDeepScrapeProgress(null);
+      await setDeepScrapeCancel(false);
       // Return tab to original profile URL only if it's still on one of OUR
       // scrape destinations. If the user navigated elsewhere during the
       // capture, respect their navigation and don't hijack them back.

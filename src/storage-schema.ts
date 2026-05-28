@@ -30,6 +30,9 @@ export const STORAGE_KEYS = {
   retroLastShown: 'linkmate.retro.lastShown.v1',
   postDraftsState: 'linkmate.recommender.postDrafts.v1',
   captureFullProfile: 'linkmate.settings.captureFullProfile.v1',
+  deepScrape: 'linkmate.settings.deepScrape.v1',
+  deepScrapeCancel: 'linkmate.deepScrape.cancel.v1',
+  deepScrapeProgress: 'linkmate.deepScrape.progress.v1',
   onboardingCompleted: 'linkmate.settings.onboardingCompleted.v1',
   goalsOverride: 'linkmate.profile.goalsOverride.v1',
   schemaVersion: 'linkmate.schema.version',
@@ -415,6 +418,57 @@ export async function getCaptureFullProfile(): Promise<boolean> {
 
 export async function setCaptureFullProfile(value: boolean): Promise<void> {
   await writeKey(STORAGE_KEYS.captureFullProfile, value);
+}
+
+// ─── Settings: deep-scrape toggle (experiment) ──────────────────────────────
+//
+// When ON, captureFullProfile scrolls recent-activity pages until scrollHeight
+// stabilises (instead of stopping at ~10 items) and removes the post/comment
+// caps in the parser. First run is slow + visible to user; gives data
+// scientists full history for fine-tuning / RAG. Default OFF.
+
+export async function getDeepScrape(): Promise<boolean> {
+  return (await readKey<boolean>(STORAGE_KEYS.deepScrape)) ?? false;
+}
+
+export async function setDeepScrape(value: boolean): Promise<void> {
+  await writeKey(STORAGE_KEYS.deepScrape, value);
+}
+
+// ─── Deep scrape live progress + cancel signal ──────────────────────────────
+//
+// Inject script (running on the LinkedIn tab) and popup (running in the side
+// panel) coordinate via chrome.storage.local — neither side has a direct
+// channel to the other. Inject polls `cancel` between iterations; popup
+// observes `progress` via chrome.storage.onChanged.
+
+export type DeepScrapeProgress = {
+  phase: 'profile' | 'posts' | 'comments';
+  iter: number;
+  items: number;
+  height: number;
+  /** Wall-clock when this update was written, used to detect stale UI. */
+  ts: number;
+};
+
+export async function getDeepScrapeProgress(): Promise<DeepScrapeProgress | null> {
+  return readKey<DeepScrapeProgress>(STORAGE_KEYS.deepScrapeProgress);
+}
+
+export async function setDeepScrapeProgress(p: DeepScrapeProgress | null): Promise<void> {
+  if (p === null) {
+    await chrome.storage.local.remove(STORAGE_KEYS.deepScrapeProgress);
+    return;
+  }
+  await writeKey(STORAGE_KEYS.deepScrapeProgress, p);
+}
+
+export async function getDeepScrapeCancel(): Promise<boolean> {
+  return (await readKey<boolean>(STORAGE_KEYS.deepScrapeCancel)) ?? false;
+}
+
+export async function setDeepScrapeCancel(value: boolean): Promise<void> {
+  await writeKey(STORAGE_KEYS.deepScrapeCancel, value);
 }
 
 // ─── Onboarding — completed-once flag (issue #16 Option-A welcome flow) ────

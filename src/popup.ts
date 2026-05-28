@@ -9,10 +9,15 @@ import {
 } from './ssi-tracker';
 import {
   getCaptureFullProfile,
+  getDeepScrape,
   getProfile,
   getSsiLastError,
   setCaptureFullProfile,
+  setDeepScrape,
+  setDeepScrapeCancel,
+  STORAGE_KEYS,
 } from './storage-schema';
+import type { DeepScrapeProgress } from './storage-schema';
 import { getUserProfile } from './user-profile-store';
 import type { UserProfile } from './lib/idb';
 import type { ProfileContext, SsiSnapshot } from './storage-schema';
@@ -229,6 +234,10 @@ const profileSkillsCount = $('profileSkillsCount');
 const profileStaleChip = $('profileStaleChip');
 const profileMessage = $('profileMessage');
 const captureFullProfileToggle = $<HTMLInputElement>('captureFullProfile');
+const deepScrapeToggle = $<HTMLInputElement>('deepScrape');
+const deepScrapeProgressEl = $<HTMLDivElement>('deepScrapeProgress');
+const deepScrapeProgressText = $<HTMLSpanElement>('deepScrapeProgressText');
+const deepScrapeCancelBtn = $<HTMLButtonElement>('deepScrapeCancelBtn');
 const profileService = new ProfileContextService();
 
 function formatRelativeTime(timestamp: number): string {
@@ -405,6 +414,43 @@ async function loadCaptureFullProfileToggle(): Promise<void> {
 async function handleCaptureFullProfileToggle(): Promise<void> {
   if (!captureFullProfileToggle) return;
   await setCaptureFullProfile(captureFullProfileToggle.checked);
+}
+
+async function loadDeepScrapeToggle(): Promise<void> {
+  if (!deepScrapeToggle) return;
+  deepScrapeToggle.checked = await getDeepScrape();
+}
+
+async function handleDeepScrapeToggle(): Promise<void> {
+  if (!deepScrapeToggle) return;
+  await setDeepScrape(deepScrapeToggle.checked);
+}
+
+function renderDeepScrapeProgress(p: DeepScrapeProgress | null): void {
+  if (!deepScrapeProgressEl) return;
+  if (!p) {
+    deepScrapeProgressEl.style.display = 'none';
+    return;
+  }
+  deepScrapeProgressEl.style.display = 'flex';
+  if (deepScrapeProgressText) {
+    const phaseLabel = p.phase === 'posts' ? 'posts' : p.phase === 'comments' ? 'comments' : 'profile';
+    deepScrapeProgressText.textContent = `Scraping ${phaseLabel} — ${p.items} items, iter ${p.iter}`;
+  }
+}
+
+async function handleDeepScrapeCancel(): Promise<void> {
+  await setDeepScrapeCancel(true);
+  if (deepScrapeProgressText) deepScrapeProgressText.textContent = 'Cancelling…';
+}
+
+function wireDeepScrapeProgressListener(): void {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (!(STORAGE_KEYS.deepScrapeProgress in changes)) return;
+    const next = changes[STORAGE_KEYS.deepScrapeProgress].newValue as DeepScrapeProgress | undefined;
+    renderDeepScrapeProgress(next ?? null);
+  });
 }
 
 // ─── SSI Tracker ────────────────────────────────────────────────────────────
@@ -1258,6 +1304,9 @@ function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
   captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
+  deepScrapeToggle?.addEventListener('change', () => void handleDeepScrapeToggle());
+  deepScrapeCancelBtn?.addEventListener('click', () => void handleDeepScrapeCancel());
+  wireDeepScrapeProgressListener();
   heroRefreshBtn?.addEventListener('click', () => void handleHeroRefresh());
   heroCopyBtn?.addEventListener('click', () => void handleHeroCopyJson());
   ssiRefreshBtn?.addEventListener('click', () => void handleSsiRefresh());
@@ -1298,6 +1347,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadProviderConfig(),
     refreshProfileDisplay(),
     loadCaptureFullProfileToggle(),
+    loadDeepScrapeToggle(),
     loadSsiData(),
     loadAIParameters(),
     loadPrompts(),

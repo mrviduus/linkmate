@@ -558,7 +558,66 @@ function pickRelativeTime(card: Element): string {
   return '';
 }
 
-export function parseRecentPosts(doc: Document | DocumentFragment): UserProfile['recentPosts'] {
+// Comment cards render the timestamp as bare `<time>1w</time>` inside
+// `time.comments-comment-meta__data`, no bullet separator. pickRelativeTime
+// requires the bullet, so we look for the <time> element first.
+function pickCommentTime(art: Element): string {
+  const timeEl = art.querySelector('time.comments-comment-meta__data, time');
+  if (timeEl) {
+    const m = readText(timeEl).match(/(\d+\s*(?:mo|h|m|d|w|s|y))/i);
+    if (m) return m[1];
+  }
+  return pickRelativeTime(art);
+}
+
+// Two anchors for a comment article — class is the rendered style, data-id is
+// the LinkedIn internal URN. We match EITHER: if LinkedIn renames the class
+// later (likely — they version their CSS frequently) the URN format is
+// stickier (it's their public data model).
+const COMMENT_ARTICLE_SELECTOR =
+  'article[data-id^="urn:li:comment"], article.comments-comment-entity';
+
+function extractInHandle(link: HTMLAnchorElement): string {
+  return (link.pathname.match(/^\/in\/([^/?#]+)/) ?? [])[1] ?? '';
+}
+
+// Longest [dir="ltr"] descendant — the LinkedIn convention is that the
+// substantive text (post body, comment text) is the longest one. Optional
+// `skipClosest` filters out descendants inside a matching ancestor — used to
+// pick parent-post text while ignoring comment articles within the same card.
+function pickLongestDirLtr(scope: Element, skipClosest?: string): string {
+  const els = Array.from(scope.querySelectorAll('[dir="ltr"]'));
+  const filtered = skipClosest ? els.filter((el) => !el.closest(skipClosest)) : els;
+  return (
+    filtered
+      .map((el) => readText(el))
+      .filter((t) => t.length > 0)
+      .sort((a, b) => b.length - a.length)[0] ?? ''
+  );
+}
+
+// Original post author = first /in/* link in the card that lives OUTSIDE any
+// comment article (commenter avatars are inside their <article>, post author
+// is in the card chrome) and isn't the user themselves.
+function findPostAuthor(card: Element, selfHandle: string): string {
+  const links = (
+    Array.from(card.querySelectorAll('a[href*="/in/"]')) as HTMLAnchorElement[]
+  ).filter((a) => !a.closest(COMMENT_ARTICLE_SELECTOR));
+  for (const a of links) {
+    const handle = extractInHandle(a);
+    if (!handle) continue;
+    if (selfHandle && handle.toLowerCase() === selfHandle.toLowerCase()) continue;
+    const name = readText(a) || a.getAttribute('aria-label');
+    if (name) return name;
+  }
+  return '';
+}
+
+export function parseRecentPosts(
+  doc: Document | DocumentFragment,
+  opts: { limit?: number } = {}
+): UserProfile['recentPosts'] {
+  const limit = opts.limit ?? MAX_RECENT_POSTS;
   const out: UserProfile['recentPosts'] = [];
   const updates = doc.querySelectorAll(
     '[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
@@ -574,74 +633,93 @@ export function parseRecentPosts(doc: Document | DocumentFragment): UserProfile[
       /\breposted\b/i.test(readText(el).slice(0, 200));
     const engagement = parseEngagement(el);
     out.push({ id, text, timestamp, engagement, isRepost });
-    if (out.length >= MAX_RECENT_POSTS) break;
+    if (out.length >= limit) break;
   }
   if (out.length === 0) warnMiss('recentPosts');
   return out;
 }
 
 /**
- * Parse the user's recent comments. Each card on the recent-activity/comments
- * page bundles the parent post plus the user's reply (and sometimes other
- * authors' comments). Strategy:
- *   - parent post body = LONGEST unique `[dir="ltr"]` (this is the post they
- *     commented on)
- *   - user's comment   = LAST unique `[dir="ltr"]` after author lines —
- *     in the DOM, the user's own reply is rendered chronologically last
- *   - original author  = first /in/* link that isn't the profile's own handle
+ * Parse the user's recent comments — anchored on `article.comments-comment-entity`.
+ *
+ * Real DOM (LinkedIn 2026, snapped via MCP on /recent-activity/comments/):
+ *   <div data-urn="urn:li:activity:{feed-item}"> ← outer card
+ *     ...parent post content...
+ *     <article class="comments-comment-entity ..."
+ *              data-id="urn:li:comment:(activity:{post},{comment})">
+ *       <a href="/in/{author-handle}">…</a>
+ *       <span dir="ltr">…actual comment text…</span>
+ *     </article>
+ *     <article class="comments-comment-entity comments-comment-entity--reply"
+ *              data-id="urn:li:comment:(activity:{post},{reply})">…</article>
+ *   </div>
+ *
+ * Strategy:
+ *   - id = comment article's data-id (`urn:li:comment:(...)`). NOT the outer
+ *     card's URN — multiple comments on the same post share the outer URN and
+ *     would collapse under the old parser, losing data.
+ *   - text = longest `[dir="ltr"]` inside the comment article.
+ *   - originalPostText = longest `[dir="ltr"]` in the card but OUTSIDE every
+ *     comment article (i.e. belongs to the parent post body).
+ *   - originalAuthor = first /in/* link in the card that's outside every
+ *     comment article AND not the self handle.
+ *   - selfHandle filter: keep only comments whose own author handle equals
+ *     selfHandle. Other authors' comments on the same post often appear in the
+ *     same card under "X others responded" — we skip those.
  *
  * Caller passes `selfHandle` extracted from the canonical profileUrl
  * (e.g. "vasyl-vdovychenko"). Empty string disables self-filtering.
  */
 export function parseRecentComments(
   doc: Document | DocumentFragment,
-  selfHandle = ''
+  selfHandle = '',
+  opts: { limit?: number } = {}
 ): UserProfile['recentComments'] {
+  const limit = opts.limit ?? MAX_RECENT_COMMENTS;
   const out: UserProfile['recentComments'] = [];
   const cards = doc.querySelectorAll(
     '[data-urn^="urn:li:activity"], [data-id^="urn:li:activity"]'
   );
+  const seenIds = new Set<string>();
+
   for (const card of Array.from(cards)) {
-    const id = extractUrn(card);
-    if (out.find((c) => c.id === id)) continue;
+    const commentArticles = Array.from(card.querySelectorAll(COMMENT_ARTICLE_SELECTOR));
+    if (commentArticles.length === 0) continue;
 
-    const dirLtrs = Array.from(card.querySelectorAll('[dir="ltr"]'))
-      .map((el) => readText(el))
-      .filter((t) => t.length > 0);
-    const unique = Array.from(new Set(dirLtrs));
-    if (unique.length < 2) continue;
+    const originalPostText = pickLongestDirLtr(card, COMMENT_ARTICLE_SELECTOR);
+    if (!originalPostText) continue;
 
-    // Parent post = longest text. User's comment = a different text from the
-    // end of DOM order (last one in `unique`).
-    const sortedByLen = [...unique].sort((a, b) => b.length - a.length);
-    const originalPostText = sortedByLen[0];
-    const text = [...unique].reverse().find((t) => t !== originalPostText) ?? '';
-    if (!originalPostText || !text || text === originalPostText) continue;
-
-    // Original author: first /in/* link whose handle is NOT the self handle.
-    const links = Array.from(card.querySelectorAll('a[href*="/in/"]')) as HTMLAnchorElement[];
-    let originalAuthor = '';
-    for (const a of links) {
-      const handle = (a.pathname.match(/^\/in\/([^/?#]+)/) ?? [])[1];
-      if (!handle) continue;
-      if (selfHandle && handle.toLowerCase() === selfHandle.toLowerCase()) continue;
-      const name = readText(a) || a.getAttribute('aria-label');
-      if (name) {
-        originalAuthor = name;
-        break;
-      }
-    }
-
+    const originalAuthor = findPostAuthor(card, selfHandle);
     if (!originalAuthor) {
       warnMiss('recentComments.originalAuthor');
       continue;
     }
 
-    const timestamp = pickRelativeTime(card);
+    for (const art of commentArticles) {
+      const authorLink = art.querySelector('a[href*="/in/"]') as HTMLAnchorElement | null;
+      const authorHandle = authorLink ? extractInHandle(authorLink) : '';
+      if (!authorHandle) continue;
+      if (selfHandle && authorHandle.toLowerCase() !== selfHandle.toLowerCase()) continue;
 
-    out.push({ id, text, timestamp, originalPostText, originalAuthor });
-    if (out.length >= MAX_RECENT_COMMENTS) break;
+      const id = art.getAttribute('data-id') ?? art.getAttribute('data-urn') ?? '';
+      if (!id || seenIds.has(id)) continue;
+
+      const text = pickLongestDirLtr(art);
+      if (!text) continue;
+
+      seenIds.add(id);
+      out.push({
+        id,
+        text,
+        timestamp: pickCommentTime(art),
+        originalPostText,
+        originalAuthor,
+      });
+      if (out.length >= limit) break;
+    }
+    if (out.length >= limit) break;
   }
+
   if (out.length === 0) warnMiss('recentComments');
   return out;
 }

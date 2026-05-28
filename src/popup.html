@@ -300,6 +300,16 @@
             <span>Capture full LinkedIn profile and activity</span>
           </label>
 
+          <label class="profile-toggle-row" for="deepScrape">
+            <input type="checkbox" id="deepScrape" />
+            <span>Deep scrape — collect ALL posts &amp; comments (slow, visible)</span>
+          </label>
+
+          <div id="deepScrapeProgress" class="deep-scrape-progress" style="display: none">
+            <span id="deepScrapeProgressText">Scraping…</span>
+            <button id="deepScrapeCancelBtn" type="button" class="btn btn-secondary btn-sm">Cancel</button>
+          </div>
+
           <div id="profileMessage" class="status-message" style="display: none"></div>
         </details>
 
