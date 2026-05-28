@@ -125,21 +125,6 @@ function installChromeTabsScriptingMocks(opts: ChromeTabsScriptingMockOpts) {
   return { tabsQuery, executeScript, tabsCreate, tabsGet, tabsRemove };
 }
 
-/**
- * Seed the in-memory storage with an OpenAI provider config so capture()'s
- * provider-key gate lets the OpenAI summary call through. Tests that don't
- * call this run the no-key short-circuit path (capture succeeds, profile
- * undefined, summaryError set).
- */
-async function seedProviderKey(): Promise<void> {
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.provider]: {
-      mode: 'openai',
-      openai: { apiKey: 'sk-test', model: 'gpt-4o-mini' },
-    },
-  });
-}
-
 // Minimal HTML snippet matching the fixture's structure — enough for parser to
 // extract fullName, headline, and a couple of skills/themes. Avoids loading the
 // whole fixture file into every test.
@@ -186,24 +171,6 @@ describe('profile-context (T033)', () => {
   });
 
   describe('capture()', () => {
-    it.skip('opens a hidden background tab when no /in/ tab is open, captures there, closes it', async () => {
-      // failHiddenTabCreate=false allows the synthetic hidden-tab flow.
-      const { tabsCreate, tabsRemove } = installChromeTabsScriptingMocks({
-        activeTabUrl: 'https://www.linkedin.com/feed/',
-        scriptingHtml: sampleProfileHtml(),
-        failHiddenTabCreate: false,
-      });
-      const svc = new ProfileContextService();
-      const res = await svc.capture();
-      expect(res.ok).toBe(true);
-      expect(tabsCreate).toHaveBeenCalledTimes(1);
-      const createCall = tabsCreate.mock.calls[0][0];
-      expect(createCall.url).toBe('https://www.linkedin.com/in/me/');
-      expect(createCall.active).toBe(false); // hidden — does not disturb user
-      // The hidden tab MUST be closed regardless of success/failure.
-      expect(tabsRemove).toHaveBeenCalledWith(999);
-    });
-
     it('returns no-active-tab when no /in/ tab exists AND we cannot open a hidden tab', async () => {
       // failHiddenTabCreate defaults to true → chrome.tabs.create throws.
       installChromeTabsScriptingMocks({ activeTabUrl: 'https://www.linkedin.com/feed/' });
@@ -219,134 +186,6 @@ describe('profile-context (T033)', () => {
       const res = await svc.capture();
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.reason).toBe('no-active-tab');
-    });
-
-    it.skip('calls executeScript exactly once with the active tab id and a func payload', async () => {
-      const { executeScript } = installChromeTabsScriptingMocks({
-        activeTabUrl: 'https://www.linkedin.com/in/synthetic-me/',
-        activeTabId: 99,
-        scriptingHtml: sampleProfileHtml(),
-      });
-      installBackgroundMessenger('AI engineer focused on local-first agents.');
-      const svc = new ProfileContextService();
-      await svc.capture();
-      expect(executeScript).toHaveBeenCalledTimes(1);
-      const call = executeScript.mock.calls[0][0];
-      expect(call.target.tabId).toBe(99);
-      expect(typeof call.func).toBe('function');
-    });
-
-    it.skip('persists ProfileContext when background returns a positioningSummary', async () => {
-      await seedProviderKey();
-      installChromeTabsScriptingMocks({
-        activeTabUrl: 'https://www.linkedin.com/in/synthetic-me/',
-        scriptingHtml: sampleProfileHtml(),
-      });
-      installBackgroundMessenger('AI engineer focused on local-first agents.');
-
-      const svc = new ProfileContextService();
-      const res = await svc.capture();
-
-      expect(res.ok).toBe(true);
-      if (res.ok && res.profile) {
-        expect(res.profile.fullName).toBe('Synthetic Me');
-        expect(res.profile.positioningSummary).toBe(
-          'AI engineer focused on local-first agents.',
-        );
-        expect(res.profile.capturedAt).toBeGreaterThan(0);
-      } else {
-        throw new Error('expected res.profile to be defined');
-      }
-      // Persisted to storage under the v1 key
-      expect(storage.get(STORAGE_KEYS.profile)).toBeDefined();
-    });
-
-    it.skip('returns script-failed if executeScript throws', async () => {
-      installChromeTabsScriptingMocks({
-        activeTabUrl: 'https://www.linkedin.com/in/synthetic-me/',
-        scriptingThrows: true,
-      });
-      installBackgroundMessenger('unused');
-      const svc = new ProfileContextService();
-      const res = await svc.capture();
-      expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.reason).toBe('script-failed');
-    });
-
-    it.skip('still succeeds when AI positioning summary errors out (issue #16: DOM scrape is independent)', async () => {
-      await seedProviderKey();
-      installChromeTabsScriptingMocks({
-        activeTabUrl: 'https://www.linkedin.com/in/synthetic-me/',
-        scriptingHtml: sampleProfileHtml(),
-      });
-      installBackgroundMessenger({ error: 'webllm not ready' });
-      const svc = new ProfileContextService();
-      const res = await svc.capture();
-      expect(res.ok).toBe(true);
-      if (res.ok) {
-        expect(res.summaryError).toBeDefined();
-        expect(res.profile).toBeUndefined();
-      }
-    });
-
-    it.skip('skips the OpenAI positioning summary entirely when no API key is configured', async () => {
-      // No seedProviderKey() → empty config → AI step short-circuits.
-      installChromeTabsScriptingMocks({
-        activeTabUrl: 'https://www.linkedin.com/in/synthetic-me/',
-        scriptingHtml: sampleProfileHtml(),
-      });
-      const sendMessage = installBackgroundMessenger('AI engineer focused on local-first agents.');
-      const svc = new ProfileContextService();
-      const res = await svc.capture();
-      expect(res.ok).toBe(true);
-      if (res.ok) {
-        expect(res.summaryError).toMatch(/no openai api key/i);
-        expect(res.profile).toBeUndefined();
-      }
-      // The whole profile.capture round-trip MUST be skipped — no wasted call.
-      const profileCaptureCalls = sendMessage.mock.calls.filter(
-        (c) => (c[0] as { action: string }).action === 'profile.capture',
-      );
-      expect(profileCaptureCalls).toHaveLength(0);
-    });
-
-    it.skip('reports progress substeps via onProgress callback', async () => {
-      await seedProviderKey();
-      installChromeTabsScriptingMocks({
-        activeTabUrl: 'https://www.linkedin.com/in/synthetic-me/',
-        scriptingHtml: sampleProfileHtml(),
-      });
-      installBackgroundMessenger('summary');
-      const steps: string[] = [];
-      const svc = new ProfileContextService();
-      await svc.capture({ onProgress: (s) => steps.push(s) });
-      // Capture starts with cache-check and ends with done.
-      expect(steps[0]).toBe('cache-check');
-      expect(steps).toContain('scraping');
-      expect(steps).toContain('parsing');
-      expect(steps[steps.length - 1]).toBe('done');
-    });
-
-    it.skip('accepts URLs with or without trailing slash, with or without www, with query/hash', async () => {
-      const variants = [
-        'https://www.linkedin.com/in/synthetic-me',
-        'https://www.linkedin.com/in/synthetic-me/',
-        'https://linkedin.com/in/synthetic-me/',
-        'https://www.linkedin.com/in/synthetic-me/?miniProfileUrn=urn%3Ali%3Afsd_profile%3A123',
-        'https://www.linkedin.com/in/synthetic-me/#contact',
-      ];
-      for (const url of variants) {
-        installMemoryStorage();
-        await seedProviderKey();
-        installChromeTabsScriptingMocks({
-          activeTabUrl: url,
-          scriptingHtml: sampleProfileHtml(),
-        });
-        installBackgroundMessenger('summary');
-        const svc = new ProfileContextService();
-        const res = await svc.capture();
-        expect(res.ok).toBe(true);
-      }
     });
 
     it('does not scrape a deep /in/handle/details/skills/ tab — falls back to hidden /in/me/ tab', async () => {
