@@ -320,7 +320,7 @@ function parseLanguages(root: Element | Document | DocumentFragment): string[] {
  * Profile's Skills card lists pairs of `<p>`: skill name, role context
  * ("Senior Software Engineer at Pinnacle"). Take even indices for skill names.
  */
-function parseSkillsList(root: Element | Document | DocumentFragment): string[] {
+export function parseSkillsList(root: Element | Document | DocumentFragment): string[] {
   const section = findSection(root, /^skills(\s*\(\d+\))?$/i);
   if (!section) return [];
   const ps = paragraphTexts(section);
