@@ -1,6 +1,10 @@
+<<<<<<< HEAD
+# LinkMate
+=======
 <!-- ═══════════════════════════════════════════════════════════════
      HERO — animated gradient wave banner
 ════════════════════════════════════════════════════════════════ -->
+>>>>>>> c986c88 (docs: update README and add architecture/audit flow diagrams)
 
 <a href="https://mrviduus.github.io/linkmate/" target="_blank">
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0A66C2,50:4338ca,100:7c3aed&height=220&section=header&text=LinkMate&fontSize=58&fontColor=ffffff&animation=fadeIn&fontAlignY=42&desc=Stop%20working%20for%20LinkedIn.%20Make%20LinkedIn%20work%20for%20you.&descSize=17&descAlignY=64&descColor=bfdbfe" width="100%" alt="LinkMate — Click to view Live Demo"/>
@@ -300,8 +304,13 @@ Open the LinkMate popup via the extensions toolbar, go to **Settings**, paste yo
   License &amp; Disclaimers
 </h2>
 
+<<<<<<< HEAD
+ISC.
+
+[Website / Demo](https://mrviduus.github.io/linkmate/)
+=======
 - **License:** ISC
 - **LinkedIn ToS:** Draft generation is exclusively pre-fill. LinkMate never auto-submits, auto-clicks, or schedules actions on your behalf — keeping your account fully compliant.
-- **Website / Demo:** [mrviduus.github.io/linkmate](https://mrviduus.github.io/linkmate/)
 
 ---
+>>>>>>> c986c88 (docs: update README and add architecture/audit flow diagrams)
