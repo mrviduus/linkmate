@@ -21,6 +21,54 @@
       </header>
 
       <div id="settings-content" class="settings-main">
+        <!-- OpenAI key + model -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-key"></i>
+            OpenAI
+          </h3>
+          <p class="settings-description">
+            LinkMate uses OpenAI for all AI generation. Bring your own key — stored locally in this
+            browser only, never synced.
+          </p>
+
+          <div class="provider-openai-config">
+            <label class="provider-field">
+              <span>API Key</span>
+              <input
+                type="password"
+                id="providerOpenAIKey"
+                placeholder="sk-..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <small class="provider-field__hint">
+                Get one at platform.openai.com/api-keys
+              </small>
+            </label>
+
+            <label class="provider-field">
+              <span>Model</span>
+              <select id="providerOpenAIModel">
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                <option value="gpt-4o">gpt-4o (best quality)</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="o4-mini">o4-mini (reasoning)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="provider-actions">
+            <button id="providerSave" class="btn btn-primary">
+              <i class="fa fa-save"></i>
+              Save
+            </button>
+          </div>
+
+          <div id="providerStatus" class="status-message" style="display: none"></div>
+        </div>
+
         <!-- Capture Hero: status + stats. First thing the user sees. -->
         <section id="captureHero" class="capture-hero capture-hero--empty">
           <div class="capture-hero__head">
@@ -176,54 +224,6 @@
           </div>
 
           <div id="ssiMessage" class="status-message" style="display: none"></div>
-        </div>
-
-        <!-- OpenAI key + model -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-key"></i>
-            OpenAI
-          </h3>
-          <p class="settings-description">
-            LinkMate uses OpenAI for all AI generation. Bring your own key — stored locally in this
-            browser only, never synced.
-          </p>
-
-          <div class="provider-openai-config">
-            <label class="provider-field">
-              <span>API Key</span>
-              <input
-                type="password"
-                id="providerOpenAIKey"
-                placeholder="sk-..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <small class="provider-field__hint">
-                Get one at platform.openai.com/api-keys
-              </small>
-            </label>
-
-            <label class="provider-field">
-              <span>Model</span>
-              <select id="providerOpenAIModel">
-                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
-                <option value="gpt-4o">gpt-4o (best quality)</option>
-                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                <option value="gpt-4.1">gpt-4.1</option>
-                <option value="o4-mini">o4-mini (reasoning)</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="provider-actions">
-            <button id="providerSave" class="btn btn-primary">
-              <i class="fa fa-save"></i>
-              Save
-            </button>
-          </div>
-
-          <div id="providerStatus" class="status-message" style="display: none"></div>
         </div>
 
         <!-- Goals override (issue #18) — drives AI feed scoring + Analyze Feed -->
