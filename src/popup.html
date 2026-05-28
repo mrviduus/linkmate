@@ -18,6 +18,59 @@
       </header>
 
       <div id="settings-content" class="settings-main">
+        <!-- AI Provider key + model — first action user must take -->
+        <div class="settings-section">
+          <h3>
+            <i class="fa fa-key"></i>
+            AI Provider
+          </h3>
+          <p class="settings-description">
+            LinkMate uses AI for all generation. Bring your own key — stored locally in this browser only, never synced.
+          </p>
+
+          <div class="provider-openai-config">
+            <label class="provider-field">
+              <span>Provider</span>
+              <select id="providerMode">
+                <option value="openai">OpenAI</option>
+                <option value="groq">Groq</option>
+              </select>
+            </label>
+
+            <label class="provider-field">
+              <span>API Key</span>
+              <input
+                type="password"
+                id="providerOpenAIKey"
+                placeholder="sk-..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <small class="provider-field__hint" id="providerKeyHint"> Get one at platform.openai.com/api-keys </small>
+            </label>
+
+            <label class="provider-field">
+              <span>Model</span>
+              <select id="providerOpenAIModel">
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                <option value="gpt-4o">gpt-4o (best quality)</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="o4-mini">o4-mini (reasoning)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="provider-actions">
+            <button id="providerSave" class="btn btn-primary">
+              <i class="fa fa-save"></i>
+              Save
+            </button>
+          </div>
+
+          <div id="providerStatus" class="status-message" style="display: none"></div>
+        </div>
+
         <!-- Capture Hero: status + stats. First thing the user sees. -->
         <section id="captureHero" class="capture-hero capture-hero--empty">
           <div class="capture-hero__head">
@@ -61,6 +114,73 @@
           </div>
           <div id="captureHeroMessage" class="capture-hero__message" style="display: none"></div>
         </section>
+
+        <!-- Profile Improvement Plan: 6 essentials + 4 activity signals + AI rewrites -->
+        <details id="profileAudit" class="profile-audit" open style="display: none">
+          <summary class="profile-audit__head">
+            <h3 class="profile-audit__title">
+              <i class="fa fa-wand-magic-sparkles"></i> Profile Improvement Plan
+            </h3>
+            <span class="profile-audit__head-spacer"></span>
+            <button id="profileAuditRerun" class="profile-audit__rerun" type="button" title="Recompute from latest capture">
+              <i class="fa fa-rotate"></i> Re-run
+            </button>
+            <i class="fa fa-chevron-down profile-audit__chevron" aria-hidden="true"></i>
+          </summary>
+
+          <div class="profile-audit__strength">
+            <div class="profile-audit__score-ring" role="img" aria-label="Profile strength score">
+              <svg viewBox="0 0 100 100" class="profile-audit__score-svg" aria-hidden="true">
+                <circle class="profile-audit__score-track" cx="50" cy="50" r="42" />
+                <circle id="profileAuditScoreFg" class="profile-audit__score-fg" cx="50" cy="50" r="42" />
+              </svg>
+              <span id="profileAuditScoreText" class="profile-audit__score-num">0</span>
+            </div>
+            <div class="profile-audit__strength-copy">
+              <div id="profileAuditStrengthTitle" class="profile-audit__strength-title">Profile Strength</div>
+              <div id="profileAuditStrengthSub" class="profile-audit__strength-sub">
+                Your profile is being analyzed…
+              </div>
+            </div>
+          </div>
+
+          <div id="profileAuditFilters" class="profile-audit__filters" role="tablist">
+            <button class="profile-audit__filter is-active" data-filter="all" type="button" role="tab" aria-selected="true">
+              <i class="fa fa-list"></i> All <span class="profile-audit__filter-count" data-count-for="all">0</span>
+            </button>
+            <button class="profile-audit__filter" data-filter="branding" type="button" role="tab" aria-selected="false">
+              <i class="fa fa-bolt"></i> Branding <span class="profile-audit__filter-count" data-count-for="branding">0</span>
+            </button>
+            <button class="profile-audit__filter" data-filter="professional" type="button" role="tab" aria-selected="false">
+              <i class="fa fa-briefcase"></i> Professional <span class="profile-audit__filter-count" data-count-for="professional">0</span>
+            </button>
+            <button class="profile-audit__filter" data-filter="network" type="button" role="tab" aria-selected="false">
+              <i class="fa fa-users"></i> Network <span class="profile-audit__filter-count" data-count-for="network">0</span>
+            </button>
+          </div>
+
+          <ul id="profileAuditList" class="profile-audit__list" role="tabpanel"></ul>
+
+          <button
+            id="profileAuditRewrite"
+            class="btn btn-primary profile-audit__cta"
+            type="button"
+          >
+            <i class="fa fa-wand-magic-sparkles"></i>
+            <span id="profileAuditRewriteLabel">Get AI rewrites</span>
+          </button>
+          <div id="profileAuditStatus" class="status-message" style="display: none"></div>
+          <details id="profileAuditAdvisory" class="profile-audit__advisory">
+            <summary class="profile-audit__advisory-title">
+              Always worth checking
+              <i class="fa fa-chevron-down profile-audit__chevron profile-audit__chevron--sm" aria-hidden="true"></i>
+            </summary>
+            <ul>
+              <li>Profile photo + industry-relevant background banner</li>
+              <li>"Open to Work" set to Recruiters Only (public flag can lower leverage)</li>
+            </ul>
+          </details>
+        </details>
 
         <!-- SSI Tracker (moved up for visual completion indicator after capture) -->
         <div class="settings-section">
@@ -126,59 +246,6 @@
           </div>
 
           <div id="ssiMessage" class="status-message" style="display: none"></div>
-        </div>
-
-        <!-- AI Provider key + model -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-key"></i>
-            AI Provider
-          </h3>
-          <p class="settings-description">
-            LinkMate uses AI for all generation. Bring your own key — stored locally in this browser only, never synced.
-          </p>
-
-          <div class="provider-openai-config">
-            <label class="provider-field">
-              <span>Provider</span>
-              <select id="providerMode">
-                <option value="openai">OpenAI</option>
-                <option value="groq">Groq</option>
-              </select>
-            </label>
-
-            <label class="provider-field">
-              <span>API Key</span>
-              <input
-                type="password"
-                id="providerOpenAIKey"
-                placeholder="sk-..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <small class="provider-field__hint" id="providerKeyHint"> Get one at platform.openai.com/api-keys </small>
-            </label>
-
-            <label class="provider-field">
-              <span>Model</span>
-              <select id="providerOpenAIModel">
-                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
-                <option value="gpt-4o">gpt-4o (best quality)</option>
-                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                <option value="gpt-4.1">gpt-4.1</option>
-                <option value="o4-mini">o4-mini (reasoning)</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="provider-actions">
-            <button id="providerSave" class="btn btn-primary">
-              <i class="fa fa-save"></i>
-              Save
-            </button>
-          </div>
-
-          <div id="providerStatus" class="status-message" style="display: none"></div>
         </div>
 
         <!-- Goals override (issue #18) — drives AI feed scoring + Analyze Feed -->

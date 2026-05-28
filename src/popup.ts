@@ -18,7 +18,7 @@ import {
 import type { DeepScrapeProgress } from './storage-schema';
 import { getUserProfile } from './user-profile-store';
 import type { UserProfile } from './lib/idb';
-import type { ProfileContext, SsiSnapshot } from './storage-schema';
+import type { ActivitySignal, ProfileContext, SsiSnapshot } from './storage-schema';
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
@@ -182,7 +182,11 @@ async function handleProviderSave(): Promise<void> {
       );
     });
     if (resp.ok) {
-      showProviderMessage(`Saved. Using ${model}.`, 'success');
+      showProviderMessage(`Saved. Using ${model}. Click "Get AI rewrites" in Profile audit now.`, 'success');
+      // Make sure the audit section re-renders into the idle state and
+      // (if visible) flashes a hint so the user knows where to retry.
+      await loadProfileAudit();
+      showAuditStatus('OpenAI key saved — click Get AI rewrites for suggestions.', 'info');
     } else {
       showProviderMessage(`Save failed: ${resp.error ?? 'unknown'}`, 'error');
     }
@@ -299,6 +303,7 @@ async function handleHeroRefresh(): Promise<void> {
   renderHero({ kind: 'loading' });
   await handleCaptureProfile();
   await refreshCaptureHero();
+  await loadProfileAudit();
 }
 
 async function handleHeroCopyJson(): Promise<void> {
@@ -310,6 +315,493 @@ async function handleHeroCopyJson(): Promise<void> {
   } catch (err) {
     showHeroMessage(`Copy failed: ${String(err)}`);
   }
+}
+
+// ─── Profile audit (issue #28) ──────────────────────────────────────────────
+
+interface ProfileAuditDTO {
+  profileCapturedAt: string;
+  audit: {
+    checks: Array<{
+      id: string;
+      status: 'pass' | 'fail';
+      severity: 'high' | 'med';
+      label: string;
+      detail: string;
+    }>;
+    passed: number;
+    total: number;
+    score: number;
+    failed: string[];
+  };
+  recommendations: Array<{
+    checkId: string;
+    diagnosis: string;
+    suggestion: string;
+    rationale: string;
+  }> | null;
+  recommendationsAt: number;
+  ssi: SsiSnapshot | null;
+  avoidStems?: string[];
+  activitySignals?: ActivitySignal[];
+}
+
+type AuditCategory = 'branding' | 'professional' | 'network';
+
+interface AuditRow {
+  id: string;
+  category: AuditCategory;
+  status: 'pass' | 'fail' | 'low';
+  label: string;
+  desc: string;
+  guidance?: string;
+}
+
+const profileAuditSection = $('profileAudit');
+const profileAuditList = $<HTMLUListElement>('profileAuditList');
+const profileAuditStrengthWrap = profileAuditSection?.querySelector<HTMLDivElement>(
+  '.profile-audit__strength',
+);
+const profileAuditScoreFg = document.getElementById('profileAuditScoreFg') as SVGCircleElement | null;
+const profileAuditScoreText = $('profileAuditScoreText');
+const profileAuditStrengthTitle = $('profileAuditStrengthTitle');
+const profileAuditStrengthSub = $('profileAuditStrengthSub');
+const profileAuditFilters = $<HTMLDivElement>('profileAuditFilters');
+const profileAuditRewriteBtn = $<HTMLButtonElement>('profileAuditRewrite');
+const profileAuditRewriteLabel = $('profileAuditRewriteLabel');
+const profileAuditRerunBtn = $<HTMLButtonElement>('profileAuditRerun');
+const profileAuditStatus = $('profileAuditStatus');
+
+let currentAuditFilter: 'all' | AuditCategory = 'all';
+
+const AUDIT_CATEGORIES: Record<string, AuditCategory> = {
+  // 6 essentials
+  currentPosition: 'professional',
+  education: 'professional',
+  skills: 'network',
+  about: 'branding',
+  location: 'branding',
+  connections: 'network',
+  // activity signals
+  ssi: 'network',
+  posts30d: 'branding',
+  comments30d: 'branding',
+  network500: 'network',
+};
+
+const CHECK_DESC: Record<string, { pass: (detail: string) => string; fail: (detail: string) => string }> = {
+  currentPosition: {
+    pass: (d) => `Your current role is listed: ${d}.`,
+    fail: () => 'Add your current job title and company.',
+  },
+  education: {
+    pass: (d) => `Your educational background is up to date: ${d}.`,
+    fail: () => 'Add at least one school to your profile.',
+  },
+  skills: {
+    pass: (d) => `You have ${d.replace(/[^0-9]/g, '')} skills listed on your profile.`,
+    fail: () => 'Add at least 5 skills to your profile.',
+  },
+  about: {
+    pass: () => 'Your About section is filled in and detailed.',
+    fail: () => 'Write a richer About section (at least 50 characters).',
+  },
+  location: {
+    pass: (d) => `Your location is set to ${d}.`,
+    fail: () => 'Set your location so recruiters can find you.',
+  },
+  connections: {
+    pass: (d) => `You have ${d} connections.`,
+    fail: () => 'Grow your network to at least 50 connections.',
+  },
+};
+
+function showAuditStatus(text: string, kind: 'success' | 'error' | 'info'): void {
+  if (!profileAuditStatus) return;
+  profileAuditStatus.textContent = text;
+  profileAuditStatus.className = `status-message ${kind}`;
+  profileAuditStatus.style.display = '';
+  setTimeout(() => {
+    if (profileAuditStatus) profileAuditStatus.style.display = 'none';
+  }, 4000);
+}
+
+function buildAuditRows(state: ProfileAuditDTO): AuditRow[] {
+  const rows: AuditRow[] = [];
+  for (const c of state.audit.checks) {
+    const cat = AUDIT_CATEGORIES[c.id] ?? 'professional';
+    const descFn = CHECK_DESC[c.id];
+    const desc = descFn ? (c.status === 'pass' ? descFn.pass(c.detail) : descFn.fail(c.detail)) : c.detail;
+    rows.push({ id: c.id, category: cat, status: c.status, label: c.label, desc });
+  }
+  for (const sig of state.activitySignals ?? []) {
+    rows.push({
+      id: sig.id,
+      category: AUDIT_CATEGORIES[sig.id] ?? 'network',
+      status: sig.status === 'ok' ? 'pass' : 'low',
+      label: sig.label,
+      desc: `${sig.detail}`,
+      guidance: sig.status === 'low' ? sig.guidance : undefined,
+    });
+  }
+  return rows;
+}
+
+function renderAuditList(state: ProfileAuditDTO): void {
+  if (!profileAuditList) return;
+  profileAuditList.innerHTML = '';
+  const rows = buildAuditRows(state);
+
+  type Rec = NonNullable<ProfileAuditDTO['recommendations']>[number];
+  const recsByCheckId = new Map<string, Rec>();
+  if (state.recommendations) {
+    for (const r of state.recommendations) recsByCheckId.set(r.checkId, r);
+  }
+
+  for (const row of rows) {
+    const li = document.createElement('li');
+    li.className = 'profile-audit__check';
+    li.dataset.category = row.category;
+    if (currentAuditFilter !== 'all' && currentAuditFilter !== row.category) {
+      li.hidden = true;
+    }
+
+    const mainRow = document.createElement('div');
+    mainRow.className = 'profile-audit__check-row';
+
+    const main = document.createElement('div');
+    main.className = 'profile-audit__check-main';
+    const icon = document.createElement('span');
+    const iconKind = row.status === 'pass' ? 'pass' : row.status === 'low' ? 'low' : 'fail';
+    icon.className = `profile-audit__check-icon profile-audit__check-icon--${iconKind}`;
+    icon.innerHTML = `<i class="fa-solid ${row.status === 'pass' ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i>`;
+    icon.setAttribute('aria-label', row.status === 'pass' ? 'good' : 'needs attention');
+    main.appendChild(icon);
+    const text = document.createElement('div');
+    text.className = 'profile-audit__check-text';
+    const label = document.createElement('span');
+    label.className = 'profile-audit__check-label';
+    label.textContent = row.label;
+    const desc = document.createElement('div');
+    desc.className = 'profile-audit__check-desc';
+    desc.textContent = row.desc;
+    text.appendChild(label);
+    text.appendChild(desc);
+    main.appendChild(text);
+    mainRow.appendChild(main);
+
+    const tags = document.createElement('div');
+    tags.className = 'profile-audit__check-tags';
+    const catTag = document.createElement('span');
+    catTag.className = `profile-audit__tag profile-audit__tag--${row.category}`;
+    catTag.textContent = row.category.toUpperCase();
+    const statusTag = document.createElement('span');
+    const statusKind = row.status === 'pass' ? 'good' : row.status === 'low' ? 'low' : 'needswork';
+    statusTag.className = `profile-audit__tag profile-audit__tag--${statusKind}`;
+    statusTag.textContent =
+      row.status === 'pass' ? 'GOOD' : row.status === 'low' ? 'LOW' : 'NEEDS WORK';
+    tags.appendChild(catTag);
+    tags.appendChild(statusTag);
+    mainRow.appendChild(tags);
+
+    li.appendChild(mainRow);
+
+    if (row.guidance) {
+      const g = document.createElement('div');
+      g.className = 'profile-audit__guidance';
+      g.textContent = row.guidance;
+      li.appendChild(g);
+    }
+
+    const rec = recsByCheckId.get(row.id);
+    if ((row.status === 'fail' || row.status === 'low') && rec) {
+      li.appendChild(renderSuggestion(rec));
+    }
+    profileAuditList.appendChild(li);
+  }
+
+  // Advisory recommendations (photoBanner, openToWork) rendered as extra rows
+  // — categorised as Branding.
+  if (state.recommendations) {
+    for (const r of state.recommendations) {
+      if (r.checkId !== 'photoBanner' && r.checkId !== 'openToWork') continue;
+      const cat: AuditCategory = 'branding';
+      const li = document.createElement('li');
+      li.className = 'profile-audit__check';
+      li.dataset.category = cat;
+      if (currentAuditFilter !== 'all' && currentAuditFilter !== cat) li.hidden = true;
+      const mainRow = document.createElement('div');
+      mainRow.className = 'profile-audit__check-row';
+      const main = document.createElement('div');
+      main.className = 'profile-audit__check-main';
+      const icon = document.createElement('span');
+      icon.className = 'profile-audit__check-icon profile-audit__check-icon--low';
+      icon.innerHTML = '<i class="fa-solid fa-circle-info"></i>';
+      icon.setAttribute('aria-label', 'advisory');
+      main.appendChild(icon);
+      const text = document.createElement('div');
+      text.className = 'profile-audit__check-text';
+      const label = document.createElement('span');
+      label.className = 'profile-audit__check-label';
+      label.textContent = r.checkId === 'photoBanner' ? 'Photo & banner' : 'Open to Work';
+      const desc = document.createElement('div');
+      desc.className = 'profile-audit__check-desc';
+      desc.textContent = r.diagnosis || 'Worth a closer look';
+      text.appendChild(label);
+      text.appendChild(desc);
+      main.appendChild(text);
+      mainRow.appendChild(main);
+      const tags = document.createElement('div');
+      tags.className = 'profile-audit__check-tags';
+      const catTag = document.createElement('span');
+      catTag.className = `profile-audit__tag profile-audit__tag--${cat}`;
+      catTag.textContent = cat.toUpperCase();
+      const statusTag = document.createElement('span');
+      statusTag.className = 'profile-audit__tag profile-audit__tag--low';
+      statusTag.textContent = 'TIP';
+      tags.appendChild(catTag);
+      tags.appendChild(statusTag);
+      mainRow.appendChild(tags);
+      li.appendChild(mainRow);
+      li.appendChild(renderSuggestion(r));
+      profileAuditList.appendChild(li);
+    }
+  }
+}
+
+function updateFilterCounts(state: ProfileAuditDTO): void {
+  if (!profileAuditFilters) return;
+  const rows = buildAuditRows(state);
+  // Add advisory items to counts when present.
+  const advisoryCount = (state.recommendations ?? []).filter(
+    (r) => r.checkId === 'photoBanner' || r.checkId === 'openToWork',
+  ).length;
+  const counts = { all: 0, branding: 0, professional: 0, network: 0 } as Record<string, number>;
+  for (const r of rows) {
+    counts.all += 1;
+    counts[r.category] += 1;
+  }
+  counts.all += advisoryCount;
+  counts.branding += advisoryCount;
+  profileAuditFilters.querySelectorAll<HTMLSpanElement>('[data-count-for]').forEach((el) => {
+    const key = el.dataset.countFor ?? 'all';
+    el.textContent = String(counts[key] ?? 0);
+  });
+}
+
+function setAuditFilter(filter: 'all' | AuditCategory): void {
+  currentAuditFilter = filter;
+  profileAuditFilters?.querySelectorAll<HTMLButtonElement>('.profile-audit__filter').forEach((btn) => {
+    const active = btn.dataset.filter === filter;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  profileAuditList?.querySelectorAll<HTMLLIElement>('.profile-audit__check').forEach((li) => {
+    li.hidden = filter !== 'all' && li.dataset.category !== filter;
+  });
+}
+
+function renderSuggestion(rec: {
+  diagnosis: string;
+  suggestion: string;
+  rationale: string;
+}): HTMLDetailsElement {
+  const details = document.createElement('details');
+  details.className = 'profile-audit__suggestion';
+
+  const summary = document.createElement('summary');
+  summary.className = 'profile-audit__suggestion-summary';
+  summary.innerHTML =
+    '<i class="fa fa-wand-magic-sparkles"></i><span>View AI suggestion</span><i class="fa fa-chevron-down profile-audit__chevron profile-audit__chevron--sm" aria-hidden="true"></i>';
+  details.appendChild(summary);
+
+  if (rec.diagnosis) {
+    const d = document.createElement('div');
+    d.className = 'profile-audit__suggestion-diagnosis';
+    d.textContent = rec.diagnosis;
+    details.appendChild(d);
+  }
+
+  const text = document.createElement('div');
+  text.className = 'profile-audit__suggestion-text';
+  text.textContent = rec.suggestion;
+  details.appendChild(text);
+
+  if (rec.rationale) {
+    const r = document.createElement('div');
+    r.className = 'profile-audit__suggestion-rationale';
+    r.textContent = rec.rationale;
+    details.appendChild(r);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'profile-audit__suggestion-actions';
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn btn-sm btn-secondary profile-audit__copy-btn';
+  copyBtn.innerHTML = '<i class="fa fa-copy"></i> Copy';
+  copyBtn.setAttribute('aria-label', 'Copy suggested text');
+  copyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void navigator.clipboard
+      .writeText(rec.suggestion)
+      .then(() => showAuditStatus('Copied to clipboard.', 'success'))
+      .catch((err) => showAuditStatus(`Copy failed: ${String(err)}`, 'error'));
+  });
+  actions.appendChild(copyBtn);
+  details.appendChild(actions);
+
+  return details;
+}
+
+/** Compute a single profile-strength % combining the 6 essentials with
+ *  activity signals — what the score circle displays. Essentials count
+ *  double-weight because they are mandatory profile completeness. */
+function computeStrengthScore(state: ProfileAuditDTO): { pct: number; passed: number; total: number } {
+  const passEssentials = state.audit.passed;
+  const totalEssentials = state.audit.total;
+  const sigs = state.activitySignals ?? [];
+  const passSigs = sigs.filter((s) => s.status === 'ok').length;
+  const totalSigs = sigs.length;
+  // 2× weight to essentials.
+  const num = passEssentials * 2 + passSigs;
+  const denom = totalEssentials * 2 + totalSigs || 1;
+  const pct = Math.round((num / denom) * 100);
+  return { pct, passed: passEssentials + passSigs, total: totalEssentials + totalSigs };
+}
+
+function strengthBand(pct: number): { mod: '' | 'mid' | 'low'; title: string; sub: (p: number) => string } {
+  if (pct >= 80) return {
+    mod: '',
+    title: 'All-Star Profile Strength!',
+    sub: (p) => `Your profile is ${p}% optimized. Keep the momentum — small polish opportunities below.`,
+  };
+  if (pct >= 50) return {
+    mod: 'mid',
+    title: 'Strong Profile · room to sharpen',
+    sub: (p) => `Your profile is ${p}% optimized. Fix the items flagged below to break into the top tier.`,
+  };
+  return {
+    mod: 'low',
+    title: 'Profile Needs Work',
+    sub: (p) => `Your profile is ${p}% optimized. Start with the high-severity items below to climb fast.`,
+  };
+}
+
+function renderProfileAudit(state: ProfileAuditDTO | null): void {
+  if (!profileAuditSection) return;
+  if (!state) {
+    profileAuditSection.style.display = 'none';
+    return;
+  }
+  profileAuditSection.style.display = '';
+
+  const { pct } = computeStrengthScore(state);
+  const band = strengthBand(pct);
+  if (profileAuditStrengthWrap) {
+    profileAuditStrengthWrap.classList.remove(
+      'profile-audit__strength--mid',
+      'profile-audit__strength--low',
+    );
+    if (band.mod) profileAuditStrengthWrap.classList.add(`profile-audit__strength--${band.mod}`);
+  }
+  if (profileAuditScoreFg) {
+    const circumference = 2 * Math.PI * 42;
+    profileAuditScoreFg.style.strokeDasharray = String(circumference);
+    profileAuditScoreFg.style.strokeDashoffset = String(circumference * (1 - pct / 100));
+  }
+  if (profileAuditScoreText) profileAuditScoreText.textContent = String(pct);
+  if (profileAuditStrengthTitle) profileAuditStrengthTitle.textContent = band.title;
+  if (profileAuditStrengthSub) {
+    const ssiSuffix = state.ssi ? ` SSI ${state.ssi.total}/100.` : '';
+    profileAuditStrengthSub.textContent = band.sub(pct) + ssiSuffix;
+  }
+
+  updateFilterCounts(state);
+  renderAuditList(state);
+
+  if (profileAuditRewriteBtn && profileAuditRewriteLabel) {
+    const failedCount = state.audit.failed.length;
+    if (state.recommendations) {
+      profileAuditRewriteLabel.textContent = 'Regenerate AI rewrites';
+    } else if (failedCount === 0) {
+      profileAuditRewriteLabel.textContent = 'Get advice anyway';
+    } else {
+      profileAuditRewriteLabel.textContent = `Get AI rewrites for ${failedCount} gap${failedCount === 1 ? '' : 's'}`;
+    }
+    profileAuditRewriteBtn.dataset.state = 'idle';
+    profileAuditRewriteBtn.disabled = false;
+  }
+}
+
+async function loadProfileAudit(): Promise<void> {
+  try {
+    const resp = await new Promise<{ ok: boolean; state?: ProfileAuditDTO | null }>((resolve) => {
+      chrome.runtime.sendMessage({ action: 'profile.audit.get' }, (r) => resolve(r ?? { ok: false }));
+    });
+    if (!resp.ok) {
+      renderProfileAudit(null);
+      return;
+    }
+    renderProfileAudit(resp.state ?? null);
+  } catch {
+    renderProfileAudit(null);
+  }
+}
+
+async function handleProfileAuditRewrite(): Promise<void> {
+  if (!profileAuditRewriteBtn || !profileAuditRewriteLabel) return;
+  if (profileAuditRewriteBtn.disabled) return;
+  // If the label currently reads "Regenerate…", tell background to carry
+  // forward the previously stored avoid-stems so the LLM produces a
+  // genuinely different framing.
+  const isRegenerate = (profileAuditRewriteLabel.textContent ?? '').toLowerCase().includes('regenerate');
+  profileAuditRewriteBtn.disabled = true;
+  profileAuditRewriteBtn.dataset.state = 'loading';
+  const prevLabel = profileAuditRewriteLabel.textContent;
+  profileAuditRewriteLabel.textContent = isRegenerate ? 'Regenerating…' : 'Generating rewrites…';
+  try {
+    const resp = await new Promise<{
+      ok: boolean;
+      state?: ProfileAuditDTO;
+      reason?: string;
+      error?: string;
+    }>((resolve) => {
+      chrome.runtime.sendMessage(
+        { action: 'profile.audit.rewrite', regenerate: isRegenerate },
+        (r) => resolve(r ?? { ok: false, reason: 'network' }),
+      );
+    });
+    if (!resp.ok) {
+      profileAuditRewriteBtn.disabled = false;
+      profileAuditRewriteBtn.dataset.state = 'idle';
+      profileAuditRewriteLabel.textContent = prevLabel ?? 'Get AI rewrites';
+      if (resp.reason === 'no_key') {
+        showAuditStatus(
+          'Add an OpenAI key in Settings to get AI rewrites.',
+          'info',
+        );
+      } else if (resp.reason === 'no_profile') {
+        showAuditStatus('Capture your profile first.', 'error');
+      } else if (resp.reason === 'parse') {
+        showAuditStatus('AI returned malformed JSON. Try again.', 'error');
+      } else {
+        showAuditStatus(`Failed: ${resp.error ?? 'unknown error'}`, 'error');
+      }
+      return;
+    }
+    if (resp.state) renderProfileAudit(resp.state);
+  } catch (err) {
+    profileAuditRewriteBtn.disabled = false;
+    profileAuditRewriteBtn.dataset.state = 'idle';
+    profileAuditRewriteLabel.textContent = prevLabel ?? 'Get AI rewrites';
+    showAuditStatus(`Failed: ${String(err)}`, 'error');
+  }
+}
+
+async function handleProfileAuditRerun(): Promise<void> {
+  await loadProfileAudit();
+  showAuditStatus('Audit refreshed.', 'success');
 }
 
 // ─── Profile Context ────────────────────────────────────────────────────────
@@ -1408,6 +1900,18 @@ function wire(): void {
   suggestPostBtn?.addEventListener('click', () => void openPostModal());
   postModalClose?.addEventListener('click', closePostModal);
   postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
+  profileAuditRewriteBtn?.addEventListener('click', () => void handleProfileAuditRewrite());
+  profileAuditRerunBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void handleProfileAuditRerun();
+  });
+  profileAuditFilters?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement | null)?.closest<HTMLButtonElement>('.profile-audit__filter');
+    if (!btn) return;
+    const f = btn.dataset.filter as 'all' | AuditCategory | undefined;
+    if (!f) return;
+    setAuditFilter(f);
+  });
 }
 
 /**
@@ -1436,6 +1940,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCadenceTargets(),
     loadGoalsOverride(),
     loadToday(),
+    loadProfileAudit(),
   ]);
   chrome.runtime.sendMessage({ action: 'popupReady' });
   // Fire-and-forget: don't block the popup paint on a 10–20s capture.

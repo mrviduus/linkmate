@@ -32,6 +32,17 @@ import {
 } from './storage-schema';
 import { aiScoreBatch, clearAiCache, AiParseError } from './ai-feed-analyzer';
 import { getUserProfile, profileContextFromUserProfile } from './user-profile-store';
+import { auditProfile, computeActivitySignals } from './profile-audit';
+import {
+  AVOID_STEM_HISTORY_CAP,
+  AVOID_STEM_LEN,
+  generateProfileRecommendations,
+  ProfileRecommenderParseError,
+} from './profile-recommender';
+import {
+  getProfileAuditState,
+  setProfileAuditState,
+} from './storage-schema';
 import type { ProfileContext } from './storage-schema';
 
 /**
@@ -465,6 +476,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     handleQueueAiScoreFeed(request.posts as ParsedPost[], sendResponse);
     return true;
   }
+  if (request.action === 'profile.audit.get') {
+    handleProfileAuditGet(sendResponse);
+    return true;
+  }
+  if (request.action === 'profile.audit.rewrite') {
+    handleProfileAuditRewrite(Boolean(request.regenerate), sendResponse);
+    return true;
+  }
   if (request.action === 'settings.getGoalsOverride') {
     getGoalsOverride()
       .then((value) => sendResponse({ ok: true, value }))
@@ -887,6 +906,139 @@ async function handleQueueAiScoreFeed(
   } finally {
     keepAlive.stop();
   }
+}
+
+// ─── Issue #28 — profile audit + AI rewrite suggestions ───────────────────
+
+async function handleProfileAuditGet(
+  sendResponse: (response: unknown) => void,
+): Promise<void> {
+  try {
+    const up = await getUserProfile().catch(() => null);
+    if (!up) {
+      sendResponse({ ok: true, state: null });
+      return;
+    }
+    const audit = auditProfile(up);
+    const [stored, ssiHistory] = await Promise.all([
+      getProfileAuditState().catch(() => null),
+      getSsiHistory().catch(() => []),
+    ]);
+    const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
+    const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
+    const recommendations =
+      stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendations : null;
+    const recommendationsAt =
+      stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendationsAt : 0;
+    const avoidStems =
+      stored && stored.profileCapturedAt === up.capturedAt ? stored.avoidStems ?? [] : [];
+    sendResponse({
+      ok: true,
+      state: {
+        profileCapturedAt: up.capturedAt,
+        audit,
+        recommendations,
+        recommendationsAt,
+        ssi,
+        avoidStems,
+        activitySignals,
+      },
+    });
+  } catch (err) {
+    console.warn('[linkmate] profile.audit.get failed:', err);
+    sendResponse({ ok: false, error: String(err) });
+  }
+}
+
+async function handleProfileAuditRewrite(
+  regenerate: boolean,
+  sendResponse: (response: unknown) => void,
+): Promise<void> {
+  keepAlive.start();
+  try {
+    const up = await getUserProfile().catch(() => null);
+    if (!up) {
+      sendResponse({ ok: false, reason: 'no_profile' });
+      return;
+    }
+    let provider;
+    try {
+      provider = await getActiveProvider();
+    } catch {
+      sendResponse({ ok: false, reason: 'no_key' });
+      return;
+    }
+    const audit = auditProfile(up);
+    const [goals, ssiHistory, storedAudit] = await Promise.all([
+      getGoalsOverride(),
+      getSsiHistory().catch(() => []),
+      getProfileAuditState().catch(() => null),
+    ]);
+    const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
+    // Only carry stems forward if the profile snapshot hasn't changed. A new
+    // capture should start with a blank slate so the LLM gets fresh framing.
+    const carriedStems =
+      regenerate && storedAudit && storedAudit.profileCapturedAt === up.capturedAt
+        ? storedAudit.avoidStems ?? []
+        : [];
+    try {
+      const recommendations = await generateProfileRecommendations({
+        provider,
+        profile: up,
+        audit,
+        goals,
+        ssi,
+        avoidStems: carriedStems,
+      });
+      const newEntries = recommendations
+        .map((r) => ({
+          checkId: r.checkId,
+          stem: r.suggestion.slice(0, AVOID_STEM_LEN).trim(),
+        }))
+        .filter((e) => e.stem.length > 0);
+      // Dedupe by stem (same wording is useless to send twice). Most recent
+      // wins. Cap to AVOID_STEM_HISTORY_CAP to keep prompt size bounded.
+      const merged = dedupeEntriesKeepLast([...carriedStems, ...newEntries]).slice(
+        -AVOID_STEM_HISTORY_CAP,
+      );
+      const state = {
+        profileCapturedAt: up.capturedAt,
+        audit,
+        recommendations,
+        recommendationsAt: Date.now(),
+        avoidStems: merged,
+      };
+      await setProfileAuditState(state);
+      // Include live-derived fields (ssi + activitySignals) in the wire
+      // response so the popup can update the header + signal rows without
+      // a second round-trip.
+      const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
+      sendResponse({ ok: true, state: { ...state, ssi, activitySignals } });
+    } catch (err) {
+      if (err instanceof ProfileRecommenderParseError) {
+        console.warn('[linkmate] profile.audit.rewrite parse failure:', err.message);
+        sendResponse({ ok: false, reason: 'parse' });
+      } else {
+        console.warn('[linkmate] profile.audit.rewrite failed:', err);
+        sendResponse({ ok: false, reason: 'network', error: String(err) });
+      }
+    }
+  } finally {
+    keepAlive.stop();
+  }
+}
+
+/** Keep last occurrence of each duplicate stem; preserves insertion order otherwise. */
+function dedupeEntriesKeepLast<T extends { stem: string }>(entries: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (seen.has(e.stem)) continue;
+    seen.add(e.stem);
+    out.unshift(e);
+  }
+  return out;
 }
 
 // ─── Reply generation (standard + with comments) ────────────────────────────

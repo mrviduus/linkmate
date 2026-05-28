@@ -13,6 +13,8 @@ LinkedIn's Social Selling Index ranks you 0–100 across four pillars (Brand · 
 ## What LinkMate does
 
 - **Reads your SSI + your profile** and tracks how the score moves week-over-week.
+- **Audits your profile** against 6 LinkedIn All-Star essentials (current position / education / skills ≥5 / about ≥50 chars / location / connections ≥50) and surfaces 4 activity signals (SSI ≥50, posts ≥4/30d, comments ≥8/30d, network ≥500) — all deterministic, instant, free.
+- **Generates paste-ready profile rewrites** via two parallel LLM calls — a copy editor (headline + about + experience + photoBanner + openToWork) and an SSI strategist (weakest-pillar action + engagement angle grounded in your top posts + network growth tactic). Each click stores `{checkId, stem}` history so regenerate avoids repeating concepts.
 - **Sets weekly quotas** mapped to each SSI pillar (1 post / 5 invites / 3 comments / 2 thread replies — tunable). Bars + a streak counter make it visceral.
 - **Picks 3 actions a day** biased to your weakest pillar. Each card opens the relevant LinkedIn page in one click.
 - **Drafts replies and original posts** in your voice using captured profile context + your topic distribution.
@@ -22,10 +24,12 @@ LinkedIn's Social Selling Index ranks you 0–100 across four pillars (Brand · 
 
 1. Load unpacked → paste OpenAI key.
 2. Open your own LinkedIn profile → **Capture Profile** in popup (extracts headline / about / skills / themes → AI synthesizes a 2-sentence positioning summary).
-3. Open `linkedin.com/sales/ssi` → **Refresh now** → score + 4 pillar gauges + donut chart populate.
-4. Open `linkedin.com/feed/` → ✨ Reply button on every post; sidebar ranks the feed by relevance to your profile.
-5. Open popup → **Today** tab: 3 AI cards biased to weakest pillar + cadence progress bars + streak.
-6. Click **Suggest a post** → modal opens with 3 distinct drafts (story / hot take / lesson) tuned to your underweight topics.
+3. **Profile audit** section appears under the hero — progress bar of 6 essentials + activity signals (SSI, posts/30d, comments/30d, network depth) — all computed instantly without an API call.
+4. Click **Get AI rewrites for N gaps** → paste-ready copy lands under each failed check (headline / about / experience) + SSI tactical action + engagement angle. Each card has a **Copy** button. Click **Regenerate AI rewrites** for a different concept on every item.
+5. Open `linkedin.com/sales/ssi` → **Refresh now** → score + 4 pillar gauges + donut chart populate.
+6. Open `linkedin.com/feed/` → ✨ Reply button on every post; sidebar ranks the feed by relevance to your profile.
+7. Open popup → **Today** tab: 3 AI cards biased to weakest pillar + cadence progress bars + streak.
+8. Click **Suggest a post** → modal opens with 3 distinct drafts (story / hot take / lesson) tuned to your underweight topics.
 
 ## Architecture
 
@@ -54,6 +58,73 @@ linkedin.com/feed/*  ─┘   (scrape + inject)  (orchestrator)    (Today/SSI/
 | `linkedin-content.ts` | Injects Reply button into every post; mounts Engagement Queue on `/feed/` |
 | `ssi-content.ts` + `ssi-parser.ts` | Daily scrape of `/sales/ssi` — total + 4 component scores + industry/network rank |
 | `profile-parser.ts` + `profile-context.ts` | Captures own profile fields and orchestrates the AI positioning summary |
+| `profile-audit.ts` | Pure rule engine: 6 completeness checks + 4 activity signals (SSI, posts/30d, comments/30d, network) — no I/O, fully tested |
+| `profile-audit-prompts.ts` | Two strict-JSON prompt builders — copy editor (rewrites + photoBanner + openToWork) and SSI strategist (pillar action + engagement + network growth) with a shared banned-phrase list and concept-rotation directives |
+| `profile-recommender.ts` | Runs both prompts via Promise.allSettled (partial success allowed), parses + dedupes + caps |
+
+### Profile audit flow
+
+```
+                    ┌─────────────────────────────────┐
+                    │   LinkedIn profile (DOM)        │
+                    └──────────────┬──────────────────┘
+                                   │ parser
+                                   ▼
+                    ┌─────────────────────────────────┐
+                    │   IDB.userProfile (full snap)   │
+                    │   + SsiSnapshot history         │
+                    └──────────────┬──────────────────┘
+                                   │
+                  ┌────────────────┴──────────────────┐
+                  ▼                                   ▼
+       ┌──────────────────┐                ┌──────────────────────┐
+       │ auditProfile()   │                │ computeActivity      │
+       │ 6 rules → score  │                │ Signals(profile,ssi) │
+       └─────────┬────────┘                └──────────┬───────────┘
+                 │  deterministic                     │  deterministic
+                 ▼                                    ▼
+       ┌────────────────────────────────────────────────────┐
+       │  popup renders Profile audit + Activity signals    │
+       │  (no LLM yet — instant, free)                      │
+       └─────────────────────┬──────────────────────────────┘
+                             │  user clicks "Get AI rewrites"
+                             ▼
+       ┌────────────────────────────────────────────────────┐
+       │   background.handleProfileAuditRewrite             │
+       │   ┌─────────────────────────────────────────────┐  │
+       │   │ 1. Load: profile, audit, ssi, goals,        │  │
+       │   │    storedState.avoidStems (if regenerate)   │  │
+       │   └────────────┬────────────────────────────────┘  │
+       │                ▼                                    │
+       │   ┌─────────────────────────────────────────────┐  │
+       │   │ Promise.allSettled([                        │  │
+       │   │   copyEditor(profile,audit,goals,avoid),    │  │
+       │   │   ssiStrategist(profile,ssi,goals,avoid)    │  │
+       │   │ ])                                          │  │
+       │   └────────────┬────────────────────────────────┘  │
+       │                ▼                                    │
+       │   ┌─────────────────────────────────────────────┐  │
+       │   │ parseJSON → ProfileRecommendation[]         │  │
+       │   │ merge, dedupe by checkId, cap 12            │  │
+       │   └────────────┬────────────────────────────────┘  │
+       │                ▼                                    │
+       │   ┌─────────────────────────────────────────────┐  │
+       │   │ accumulate avoidStems[]: prev + new         │  │
+       │   │ (as {checkId, stem 200 chars} per entry)    │  │
+       │   │ dedupe + cap 24, save to chrome.storage     │  │
+       │   └────────────┬────────────────────────────────┘  │
+       └────────────────┼───────────────────────────────────┘
+                        ▼
+            ┌────────────────────────────┐
+            │ popup re-renders cards     │
+            │ Copy button per item       │
+            └────────────────────────────┘
+
+   Click "Regenerate" → same flow with `regenerate=true` → reads
+   stored.avoidStems → feeds both prompts grouped by checkId so the
+   LLM has to pick a DIFFERENT concept for each known checkId.
+```
+
 | `engagement-queue.ts` + `relevance-scorer.ts` | Ranks feed posts vs profile (topic match 40% / tier 20% / degree 15% / recency 10% / engagement 10% / diversity 5%) |
 | `action-log.ts` + `cadence.ts` | Append-only IndexedDB ledger of every action; rolling 7-day quota math + weakest-pillar selection + streak |
 | `topic-tagger.ts` | Heuristic keyword tagger over 13 topics (no AI cost) attributing each action to a topic |
@@ -80,6 +151,7 @@ Three backends — chosen by data shape, not convenience. Everything stays in yo
 | `linkmate.cadence.targets.v1` | `{brand, finding, engaging, building}` weekly quotas |
 | `linkmate.cadence.streak.v1` | `{count, lastWindowEnd}` consecutive full-quota weeks |
 | `linkmate.recommender.cards.v1` | Cached AI cards + generatedAt + source (ai/rule) |
+| `linkmate.profile.audit.v1` | Last audit report + AI recommendations + `avoidStems[]` (concept history `{checkId, stem}` capped at 24, fed back on regenerate to force fresh angles) |
 | `linkmate.retro.lastShown.v1` | Timestamp of last weekly-retro dismissal |
 | `linkmate.schema.version` | For future migrations |
 
