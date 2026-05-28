@@ -1,9 +1,12 @@
 /**
- * Profile recommender — language heuristic, prompt structure, JSON parsing.
+ * Profile recommender — prompt structure, JSON parsing, 2-call orchestration.
  */
 
 import { auditProfile } from '../src/profile-audit';
-import { buildProfileRewritePrompt } from '../src/profile-audit-prompts';
+import {
+  buildProfileRewritePrompt,
+  buildSsiStrategyPrompt,
+} from '../src/profile-audit-prompts';
 import {
   generateProfileRecommendations,
   parseProfileRecommendations,
@@ -11,6 +14,7 @@ import {
 } from '../src/profile-recommender';
 import type { UserProfile } from '../src/lib/idb';
 import type { InferenceProvider } from '../src/providers/inference-provider';
+import type { SsiSnapshot } from '../src/storage-schema';
 
 function profile(overrides: Partial<UserProfile> = {}): UserProfile {
   return {
@@ -29,28 +33,73 @@ function profile(overrides: Partial<UserProfile> = {}): UserProfile {
     education: [{ school: 'KPI', degree: 'BSc', field: 'CS' }],
     certifications: [],
     languages: [],
-    recentPosts: [],
-    recentComments: [],
+    recentPosts: [
+      { id: 'p1', text: 'Shipped a RAG pipeline that cut latency 40%', timestamp: '2026-04-20', engagement: { likes: 42, comments: 8, reposts: 1 }, isRepost: false },
+      { id: 'p2', text: 'Repost of foo', timestamp: '2026-04-15', isRepost: true },
+    ],
+    recentComments: [
+      { id: 'c1', text: 'Worth pairing this with an eval harness.', timestamp: '2026-04-22', originalPostText: 'On RAG hallucinations', originalAuthor: 'Alice' },
+    ],
     ...overrides,
   };
 }
 
-function fakeProvider(response: string): InferenceProvider & { calls: number; lastPrompt: { system: string; user: string } | null } {
+function ssi(overrides: Partial<SsiSnapshot> = {}): SsiSnapshot {
+  return {
+    total: 62,
+    components: {
+      establishBrand: 18,
+      findRightPeople: 14,
+      engageWithInsights: 10,
+      buildRelationships: 20,
+    },
+    industryRank: 'top 18%',
+    networkRank: 'top 12%',
+    capturedAt: Date.parse('2026-05-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+/**
+ * Fake provider with a per-call response queue. The recommender now runs
+ * two parallel calls; tests want to control each independently.
+ */
+function fakeProvider(
+  responses: string[],
+): InferenceProvider & { calls: number; prompts: Array<{ system: string; user: string }> } {
+  let i = 0;
   return {
     name: 'fake',
     isCloud: false,
     calls: 0,
-    lastPrompt: null,
+    prompts: [],
     async generate(params) {
       this.calls += 1;
-      this.lastPrompt = { system: params.system, user: params.user };
-      return response;
+      this.prompts.push({ system: params.system, user: params.user });
+      const r = responses[i] ?? responses[responses.length - 1];
+      i += 1;
+      return r;
     },
   };
 }
 
+const copyResponse = JSON.stringify({
+  recommendations: [
+    { checkId: 'about', diagnosis: 'too short', suggestion: 'Backend engineer with 10 years…', rationale: 'Ties to current role.' },
+    { checkId: 'photoBanner', diagnosis: 'verify pro photo', suggestion: 'Upload an industry-relevant banner.', rationale: 'Visibility.' },
+    { checkId: 'openToWork', diagnosis: 'private only', suggestion: 'Switch frame to Recruiters Only.', rationale: 'Leverage.' },
+  ],
+});
+
+const strategyResponse = JSON.stringify({
+  recommendations: [
+    { checkId: 'ssi', diagnosis: 'weakest pillar engageWithInsights', suggestion: 'Comment on 5 posts about RAG eval this week.', rationale: 'engageWithInsights 10/25.' },
+    { checkId: 'engagementStrategy', diagnosis: 'lean into RAG content', suggestion: 'Publish a lesson-style post on eval harnesses.', rationale: 'RAG post got 42 likes.' },
+  ],
+});
+
 describe('buildProfileRewritePrompt', () => {
-  it('emits all key sections in the user prompt', () => {
+  it('emits compact profile + audit state + advisory instructions', () => {
     const p = profile();
     const audit = auditProfile(p);
     const { user, system } = buildProfileRewritePrompt({
@@ -66,6 +115,7 @@ describe('buildProfileRewritePrompt', () => {
     expect(user).toContain('Senior engineer');
     expect(user).toContain('Kyiv');
     expect(user).toContain('Land a senior backend role at a fintech');
+    expect(user).toContain('Audit state');
   });
   it('marks empty goals explicitly', () => {
     const p = profile();
@@ -76,7 +126,7 @@ describe('buildProfileRewritePrompt', () => {
     });
     expect(user).toContain('not provided');
   });
-  it('marks audit failures with severity + label', () => {
+  it('lists failed audit ids with severity', () => {
     const p = profile({ about: '', skills: ['a'], education: [] });
     const audit = auditProfile(p);
     const { user } = buildProfileRewritePrompt({ profile: p, audit, goals: null });
@@ -84,31 +134,53 @@ describe('buildProfileRewritePrompt', () => {
     expect(user).toContain('skills (high)');
     expect(user).toContain('education (high)');
   });
-  it('mentions advisory-only mode when there are no gaps', () => {
+  it('reports FAIL (none) when all rules pass', () => {
     const p = profile();
-    const audit = auditProfile(p);
-    const { user } = buildProfileRewritePrompt({ profile: p, audit, goals: null });
-    expect(user).toContain('advisory items for photoBanner and openToWork');
+    const { user } = buildProfileRewritePrompt({ profile: p, audit: auditProfile(p), goals: null });
+    expect(user).toContain('FAIL: (none');
+  });
+});
+
+describe('buildSsiStrategyPrompt', () => {
+  it('emits SSI breakdown + posts + comments', () => {
+    const p = profile();
+    const { user, system } = buildSsiStrategyPrompt({
+      profile: p,
+      ssi: ssi(),
+      goals: 'grow in eval space',
+    });
+    expect(system).toContain('growth strategist');
+    expect(system).toContain('"ssi"');
+    expect(system).toContain('engagementStrategy');
+    expect(user).toContain('62/100');
+    expect(user).toContain('engageWithInsights:   10/25');
+    expect(user).toContain('Weakest pillar: engageWithInsights');
+    expect(user).toContain('RAG pipeline');
+    expect(user).toContain('eval harness');
+    expect(user).toContain('grow in eval space');
+  });
+  it('skips SSI block when snapshot missing', () => {
+    const p = profile();
+    const { user } = buildSsiStrategyPrompt({ profile: p, ssi: null, goals: null });
+    expect(user).toContain('no SSI snapshot captured yet');
+  });
+  it('filters reposts from own-posts section', () => {
+    const p = profile();
+    const { user } = buildSsiStrategyPrompt({ profile: p, ssi: ssi(), goals: null });
+    expect(user).not.toContain('Repost of foo');
   });
 });
 
 describe('parseProfileRecommendations', () => {
   it('parses a well-formed payload', () => {
-    const raw = JSON.stringify({
-      recommendations: [
-        {
-          checkId: 'about',
-          diagnosis: 'About is empty',
-          suggestion: 'Backend engineer with 5 years…',
-          rationale: 'Your role at Acme supports this framing.',
-        },
-        { checkId: 'photoBanner', diagnosis: 'Remember photo', suggestion: 'Upload pro headshot.', rationale: 'Visibility.' },
-        { checkId: 'openToWork', diagnosis: 'Recruiter leverage', suggestion: 'Switch to Recruiters Only.', rationale: 'Optics.' },
-      ],
-    });
-    const out = parseProfileRecommendations(raw);
+    const out = parseProfileRecommendations(copyResponse);
     expect(out).toHaveLength(3);
     expect(out![0].checkId).toBe('about');
+  });
+  it('accepts new SSI-strategy checkIds', () => {
+    const out = parseProfileRecommendations(strategyResponse);
+    expect(out).toHaveLength(2);
+    expect(out!.map((r) => r.checkId)).toEqual(['ssi', 'engagementStrategy']);
   });
   it('drops entries with unknown checkIds', () => {
     const raw = JSON.stringify({
@@ -147,11 +219,9 @@ describe('parseProfileRecommendations', () => {
     expect(out![0].suggestion.length).toBeLessThan(huge.length);
   });
   it('tolerates ```json fences', () => {
-    const raw = '```json\n' + JSON.stringify({
-      recommendations: [{ checkId: 'about', diagnosis: 'x', suggestion: 'y', rationale: 'z' }],
-    }) + '\n```';
+    const raw = '```json\n' + copyResponse + '\n```';
     const out = parseProfileRecommendations(raw);
-    expect(out).toHaveLength(1);
+    expect(out).toHaveLength(3);
   });
   it('returns null on malformed JSON', () => {
     expect(parseProfileRecommendations('not json')).toBeNull();
@@ -159,31 +229,19 @@ describe('parseProfileRecommendations', () => {
   it('returns null when recommendations key is missing', () => {
     expect(parseProfileRecommendations('{"foo":1}')).toBeNull();
   });
-  it('caps total recommendations at 10', () => {
-    const valid = ['about', 'skills', 'education', 'location', 'connections', 'currentPosition', 'photoBanner', 'openToWork'];
+  it('caps single-payload recommendations at 12', () => {
+    const valid = ['about', 'skills', 'education', 'location', 'connections', 'currentPosition', 'headline', 'photoBanner', 'openToWork', 'ssi', 'engagementStrategy', 'networkGrowth'];
     const raw = JSON.stringify({
-      recommendations: [
-        ...valid.map((id) => ({ checkId: id, diagnosis: 'd', suggestion: 's', rationale: 'r' })),
-        // 5 extras with bogus ids would be dropped anyway, so add 5 more "valid"
-        // entries that would otherwise overflow — but dedup also kicks in.
-        // Use distinct synthetic-but-allowed ids via duplicates to confirm the
-        // cap path is reachable: we cannot exceed 8 unique valid ids today,
-        // so this test asserts the upper bound stays at or below 10.
-      ],
+      recommendations: valid.map((id) => ({ checkId: id, diagnosis: 'd', suggestion: 's', rationale: 'r' })),
     });
     const out = parseProfileRecommendations(raw);
-    expect(out!.length).toBeLessThanOrEqual(10);
+    expect(out!.length).toBeLessThanOrEqual(12);
   });
 });
 
 describe('generateProfileRecommendations', () => {
-  it('forwards through to provider and parses', async () => {
-    const raw = JSON.stringify({
-      recommendations: [
-        { checkId: 'about', diagnosis: 'd', suggestion: 's', rationale: 'r' },
-      ],
-    });
-    const provider = fakeProvider(raw);
+  it('runs both calls in parallel and merges results', async () => {
+    const provider = fakeProvider([copyResponse, strategyResponse]);
     const p = profile({ about: '' });
     const audit = auditProfile(p);
     const out = await generateProfileRecommendations({
@@ -191,17 +249,35 @@ describe('generateProfileRecommendations', () => {
       profile: p,
       audit,
       goals: 'find senior role',
+      ssi: ssi(),
     });
-    expect(provider.calls).toBe(1);
-    expect(out).toHaveLength(1);
-    expect(provider.lastPrompt!.user).toContain('find senior role');
+    expect(provider.calls).toBe(2);
+    const ids = out.map((r) => r.checkId);
+    expect(ids).toContain('about');
+    expect(ids).toContain('ssi');
+    expect(ids).toContain('engagementStrategy');
   });
-  it('throws ProfileRecommenderParseError on bad JSON', async () => {
-    const provider = fakeProvider('garbage');
-    const p = profile({ about: '' });
+  it('returns partial results when only one call succeeds', async () => {
+    const provider = fakeProvider([copyResponse, 'garbage']);
+    const p = profile();
+    const audit = auditProfile(p);
+    const out = await generateProfileRecommendations({
+      provider,
+      profile: p,
+      audit,
+      goals: null,
+      ssi: ssi(),
+    });
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.map((r) => r.checkId)).toContain('about');
+    expect(out.map((r) => r.checkId)).not.toContain('ssi');
+  });
+  it('throws ProfileRecommenderParseError when BOTH calls fail', async () => {
+    const provider = fakeProvider(['garbage', 'also garbage']);
+    const p = profile();
     const audit = auditProfile(p);
     await expect(
-      generateProfileRecommendations({ provider, profile: p, audit, goals: null })
+      generateProfileRecommendations({ provider, profile: p, audit, goals: null, ssi: null }),
     ).rejects.toBeInstanceOf(ProfileRecommenderParseError);
   });
 });

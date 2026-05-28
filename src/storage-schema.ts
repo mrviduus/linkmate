@@ -515,9 +515,23 @@ export interface ProfileAuditSummary {
   failed: ProfileAuditCheckId[];
 }
 
-/** checkId is `ProfileAuditCheckId` for gap-driven items, or 'photoBanner' / 'openToWork' for advisory. */
+/**
+ * checkId union:
+ *   - the 6 audit ids (rule-based gap rewrites)
+ *   - 'headline' / 'photoBanner' / 'openToWork' (copy-editor advisory)
+ *   - 'ssi' / 'engagementStrategy' / 'networkGrowth' (SSI-strategy tactics)
+ */
+export type ProfileRecommendationCheckId =
+  | ProfileAuditCheckId
+  | 'headline'
+  | 'photoBanner'
+  | 'openToWork'
+  | 'ssi'
+  | 'engagementStrategy'
+  | 'networkGrowth';
+
 export interface ProfileRecommendation {
-  checkId: ProfileAuditCheckId | 'photoBanner' | 'openToWork';
+  checkId: ProfileRecommendationCheckId;
   diagnosis: string;
   suggestion: string;
   rationale: string;

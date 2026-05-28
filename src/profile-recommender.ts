@@ -1,27 +1,35 @@
 /**
- * Issue #28 — profile audit AI rewrite orchestrator.
+ * Issue #28 — profile audit AI orchestrator.
  *
- * Runs ONE LLM call per "Get AI rewrites" click (batched, not per-check) —
- * mirrors the feed-scorer batching pattern in `ai-feed-analyzer.ts`. The
- * recommender consumes the deterministic `AuditReport` produced by
- * `profile-audit.ts`; it never tries to detect gaps itself.
+ * Two parallel LLM calls:
+ *   1. Copy editor — paste-ready rewrites for failing audit items + optional
+ *      headline/about polish + photoBanner/openToWork advisory.
+ *   2. SSI strategist — tactical actions grounded in the user's weakest SSI
+ *      pillar and what they actually post/comment about.
  *
- * Pure module: provider injected, no DOM, no chrome.storage. Background SW
- * holds the storage side via `setProfileAuditState`.
+ * They run concurrently via Promise.allSettled so one failure doesn't blank
+ * the entire result. Merged + deduped by checkId before returning.
+ *
+ * Pure module: provider + clock injected. Background SW owns persistence via
+ * setProfileAuditState.
  */
 
 import type { UserProfile } from './lib/idb';
 import type { AuditReport } from './profile-audit';
-import { buildProfileRewritePrompt } from './profile-audit-prompts';
+import {
+  buildProfileRewritePrompt,
+  buildSsiStrategyPrompt,
+} from './profile-audit-prompts';
 import type { InferenceProvider } from './providers/inference-provider';
-import type { ProfileRecommendation } from './storage-schema';
+import type { ProfileRecommendation, SsiSnapshot } from './storage-schema';
 
-const REWRITE_MAX_TOKENS = 1200;
+const COPY_MAX_TOKENS = 900;
+const STRATEGY_MAX_TOKENS = 700;
 const REWRITE_TIMEOUT_MS = 45_000;
 const SUGGESTION_MAX_LEN = 2200;
 const DIAGNOSIS_MAX_LEN = 240;
 const RATIONALE_MAX_LEN = 320;
-const MAX_RECOMMENDATIONS = 10;
+const MAX_RECOMMENDATIONS = 12;
 
 const VALID_CHECK_IDS = new Set<ProfileRecommendation['checkId']>([
   'currentPosition',
@@ -30,8 +38,12 @@ const VALID_CHECK_IDS = new Set<ProfileRecommendation['checkId']>([
   'about',
   'location',
   'connections',
+  'headline',
   'photoBanner',
   'openToWork',
+  'ssi',
+  'engagementStrategy',
+  'networkGrowth',
 ]);
 
 export class ProfileRecommenderParseError extends Error {
@@ -46,17 +58,60 @@ export interface GenerateProfileRecommendationsInput {
   profile: UserProfile;
   audit: AuditReport;
   goals: string | null;
+  ssi: SsiSnapshot | null;
 }
 
+/**
+ * Runs both prompts in parallel. Returns the merged recommendation list.
+ *
+ * - If BOTH calls fail (parse or network), throws ProfileRecommenderParseError
+ *   so the background handler can surface a single error to UI.
+ * - If only one call succeeds, returns its results; the other is logged but
+ *   doesn't block UX. This is intentional: partial advice beats no advice.
+ */
 export async function generateProfileRecommendations(
-  input: GenerateProfileRecommendationsInput
+  input: GenerateProfileRecommendationsInput,
 ): Promise<ProfileRecommendation[]> {
-  const { provider, profile, audit, goals } = input;
-  const { system, user } = buildProfileRewritePrompt({ profile, audit, goals });
+  const { provider, profile, audit, goals, ssi } = input;
+
+  const copyPrompt = buildProfileRewritePrompt({ profile, audit, goals });
+  const strategyPrompt = buildSsiStrategyPrompt({ profile, ssi, goals });
+
+  const [copyResult, strategyResult] = await Promise.allSettled([
+    runOne(provider, copyPrompt, COPY_MAX_TOKENS),
+    runOne(provider, strategyPrompt, STRATEGY_MAX_TOKENS),
+  ]);
+
+  const copy = unwrap(copyResult, 'copy');
+  const strategy = unwrap(strategyResult, 'strategy');
+
+  if (copy === null && strategy === null) {
+    throw new ProfileRecommenderParseError('Both profile recommender calls failed');
+  }
+
+  // Merge: copy items first (failing audit + advisory), then SSI tactics.
+  // Dedupe by checkId — copy wins on collision (shouldn't happen given
+  // disjoint checkId pools, but defensive).
+  const merged: ProfileRecommendation[] = [];
+  const seen = new Set<string>();
+  for (const r of [...(copy ?? []), ...(strategy ?? [])]) {
+    if (seen.has(r.checkId)) continue;
+    merged.push(r);
+    seen.add(r.checkId);
+    if (merged.length >= MAX_RECOMMENDATIONS) break;
+  }
+  return merged;
+}
+
+async function runOne(
+  provider: InferenceProvider,
+  prompt: { system: string; user: string },
+  maxTokens: number,
+): Promise<ProfileRecommendation[]> {
   const raw = await provider.generate({
-    system,
-    user,
-    maxTokens: REWRITE_MAX_TOKENS,
+    system: prompt.system,
+    user: prompt.user,
+    maxTokens,
     temperature: 0.4,
     topP: 0.9,
     timeoutMs: REWRITE_TIMEOUT_MS,
@@ -68,6 +123,15 @@ export async function generateProfileRecommendations(
   return parsed;
 }
 
+function unwrap(
+  result: PromiseSettledResult<ProfileRecommendation[]>,
+  label: string,
+): ProfileRecommendation[] | null {
+  if (result.status === 'fulfilled') return result.value;
+  console.warn(`[linkmate] profile recommender ${label} call failed:`, result.reason);
+  return null;
+}
+
 interface RawRecommendation {
   checkId?: unknown;
   diagnosis?: unknown;
@@ -77,8 +141,8 @@ interface RawRecommendation {
 
 /**
  * Strict-JSON parser. Drops entries with unknown checkIds. Drops duplicates
- * (keeps the first). Trims long strings. Returns null on any structural
- * failure so the caller can surface a fallback in UI.
+ * within a single call (keeps the first). Trims long strings. Returns null
+ * on any structural failure so the caller can surface a fallback in UI.
  */
 export function parseProfileRecommendations(raw: string): ProfileRecommendation[] | null {
   try {

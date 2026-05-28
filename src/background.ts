@@ -963,13 +963,18 @@ async function handleProfileAuditRewrite(
       return;
     }
     const audit = auditProfile(up);
-    const goals = await getGoalsOverride();
+    const [goals, ssiHistory] = await Promise.all([
+      getGoalsOverride(),
+      getSsiHistory().catch(() => []),
+    ]);
+    const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
     try {
       const recommendations = await generateProfileRecommendations({
         provider,
         profile: up,
         audit,
         goals,
+        ssi,
       });
       const state = {
         profileCapturedAt: up.capturedAt,
