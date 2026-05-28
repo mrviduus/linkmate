@@ -26,6 +26,7 @@ import {
   clearUserProfile,
   getUserProfile,
   isFresh,
+  profileContextFromUserProfile,
   saveUserProfile,
   USER_PROFILE_TTL_MS,
 } from '../src/user-profile-store';
@@ -80,5 +81,52 @@ describe('user-profile-store', () => {
       capturedAt: new Date(Date.now() - USER_PROFILE_TTL_MS - 1000).toISOString(),
     });
     expect(isFresh(stale)).toBe(false);
+  });
+});
+
+describe('profileContextFromUserProfile (issue #18 follow-up)', () => {
+  it('maps the slim ProfileContext fields from the rich IDB UserProfile', () => {
+    const up = fixture({
+      name: 'Vasyl Vdovychenko',
+      headline: 'Senior Engineer',
+      about: 'Builder of AI in prod.',
+      skills: ['TypeScript', 'AI', 'DevOps', 'Node.js'],
+    });
+    const ctx = profileContextFromUserProfile(up);
+    expect(ctx.fullName).toBe('Vasyl Vdovychenko');
+    expect(ctx.headline).toBe('Senior Engineer');
+    expect(ctx.about).toBe('Builder of AI in prod.');
+    expect(ctx.topSkills).toEqual(['TypeScript', 'AI', 'DevOps', 'Node.js']);
+    expect(ctx.positioningSummary).toBe('');
+    expect(ctx.recentPostThemes).toEqual([]);
+  });
+
+  it('parses capturedAt from ISO string to ms epoch', () => {
+    const iso = '2026-01-15T10:00:00.000Z';
+    const ctx = profileContextFromUserProfile(fixture({ capturedAt: iso }));
+    expect(ctx.capturedAt).toBe(Date.parse(iso));
+  });
+
+  it('falls back to now() when capturedAt is unparseable', () => {
+    const before = Date.now();
+    const ctx = profileContextFromUserProfile(fixture({ capturedAt: 'not-a-date' }));
+    expect(ctx.capturedAt).toBeGreaterThanOrEqual(before);
+    expect(ctx.capturedAt).toBeLessThanOrEqual(Date.now() + 5);
+  });
+
+  it('caps topSkills at 10 and about at 1500 chars', () => {
+    const skills = Array.from({ length: 20 }, (_, i) => `skill-${i}`);
+    const longAbout = 'x'.repeat(3000);
+    const ctx = profileContextFromUserProfile(fixture({ skills, about: longAbout }));
+    expect(ctx.topSkills.length).toBe(10);
+    expect(ctx.topSkills[0]).toBe('skill-0');
+    expect(ctx.about.length).toBe(1500);
+  });
+
+  it('handles missing optional fields without throwing', () => {
+    // about is optional in UserProfile schema.
+    const up = fixture({ about: undefined });
+    expect(() => profileContextFromUserProfile(up)).not.toThrow();
+    expect(profileContextFromUserProfile(up).about).toBe('');
   });
 });

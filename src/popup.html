@@ -192,6 +192,37 @@
           <div id="providerStatus" class="status-message" style="display: none"></div>
         </div>
 
+        <!-- Goals override (issue #18) — drives AI feed scoring + Analyze Feed -->
+        <details class="settings-section settings-section--collapsible">
+          <summary>
+            <i class="fa fa-bullseye"></i>
+            Goals
+          </summary>
+          <p class="settings-description">
+            What you're looking for on LinkedIn — used by AI feed scoring and Analyze Feed.
+            Defaults to your captured positioning summary when blank.
+          </p>
+          <label class="provider-field">
+            <span>Your goals</span>
+            <textarea
+              id="goalsOverride"
+              rows="4"
+              maxlength="600"
+              placeholder="e.g. Looking for AI engineering roles · building DevOps audience · learning from senior staff engineers"
+            ></textarea>
+            <small class="provider-field__hint">
+              Up to 600 chars. <span id="goalsOverrideCount">0</span> / 600.
+              <span id="goalsOverridePlaceholderHint" class="provider-field__hint-muted"></span>
+            </small>
+          </label>
+          <div class="provider-actions">
+            <button id="goalsOverrideSave" class="btn btn-primary">
+              <i class="fa fa-save"></i> Save goals
+            </button>
+          </div>
+          <div id="goalsOverrideStatus" class="status-message" style="display: none"></div>
+        </details>
+
         <!-- Weekly cadence targets -->
         <details class="settings-section settings-section--collapsible">
           <summary>

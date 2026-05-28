@@ -16,6 +16,9 @@ import {
   migrateIfNeeded,
   MAX_SSI_SNAPSHOTS,
   ENGAGED_POST_TTL_MS,
+  GOALS_OVERRIDE_MAX_LEN,
+  getGoalsOverride,
+  setGoalsOverride,
 } from '../src/storage-schema';
 import type {
   ProfileContext,
@@ -194,6 +197,30 @@ describe('storage-schema (T010)', () => {
       expect(visible.map((e: EngagedPost) => e.postId)).toEqual(['post-fresh']);
       await expect(isEngaged('post-stale')).resolves.toBe(false);
       await expect(isEngaged('post-fresh')).resolves.toBe(true);
+    });
+  });
+
+  describe('goalsOverride (issue #18)', () => {
+    it('returns null when nothing stored', async () => {
+      await expect(getGoalsOverride()).resolves.toBeNull();
+    });
+
+    it('round-trips a value through set/get', async () => {
+      await setGoalsOverride('Looking for AI engineering roles');
+      await expect(getGoalsOverride()).resolves.toBe('Looking for AI engineering roles');
+    });
+
+    it('caps stored value at GOALS_OVERRIDE_MAX_LEN', async () => {
+      const huge = 'x'.repeat(GOALS_OVERRIDE_MAX_LEN + 200);
+      await setGoalsOverride(huge);
+      const back = await getGoalsOverride();
+      expect(back?.length).toBe(GOALS_OVERRIDE_MAX_LEN);
+    });
+
+    it('treats empty string as a clear (returns null)', async () => {
+      await setGoalsOverride('something');
+      await setGoalsOverride('');
+      await expect(getGoalsOverride()).resolves.toBeNull();
     });
   });
 

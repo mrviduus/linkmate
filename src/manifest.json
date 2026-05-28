@@ -36,10 +36,10 @@
     }
   ],
   "permissions": ["storage", "tabs", "activeTab", "windows", "alarms", "scripting", "sidePanel", "notifications"],
-  "host_permissions": ["https://*.linkedin.com/*"],
+  "host_permissions": ["https://*.linkedin.com/*", "https://api.openai.com/*"],
   "web_accessible_resources": [
     {
-      "resources": ["linkedin-styles.css", "engagement-queue.css"],
+      "resources": ["linkedin-styles.css"],
       "matches": ["https://*.linkedin.com/*"]
     },
     {

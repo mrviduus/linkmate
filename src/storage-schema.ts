@@ -31,8 +31,11 @@ export const STORAGE_KEYS = {
   postDraftsState: 'linkmate.recommender.postDrafts.v1',
   captureFullProfile: 'linkmate.settings.captureFullProfile.v1',
   onboardingCompleted: 'linkmate.settings.onboardingCompleted.v1',
+  goalsOverride: 'linkmate.profile.goalsOverride.v1',
   schemaVersion: 'linkmate.schema.version',
 } as const;
+
+export const GOALS_OVERRIDE_MAX_LEN = 600;
 
 export const MAX_SSI_SNAPSHOTS = 90;
 export const ENGAGED_POST_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -423,4 +426,26 @@ export async function getOnboardingCompleted(): Promise<boolean> {
 
 export async function setOnboardingCompleted(value: boolean): Promise<void> {
   await writeKey(STORAGE_KEYS.onboardingCompleted, value);
+}
+
+// ─── Settings: goals override (issue #18) ──────────────────────────────────
+
+/**
+ * Optional user-entered "what I'm looking for" string used by AI feed scoring
+ * + Analyze Feed. Falls back to `ProfileContext.positioningSummary` when null.
+ * Capped at GOALS_OVERRIDE_MAX_LEN to keep prompt budget bounded.
+ */
+export async function getGoalsOverride(): Promise<string | null> {
+  const stored = await readKey<string>(STORAGE_KEYS.goalsOverride);
+  if (typeof stored !== 'string') return null;
+  return stored.length === 0 ? null : stored.slice(0, GOALS_OVERRIDE_MAX_LEN);
+}
+
+export async function setGoalsOverride(value: string): Promise<void> {
+  const trimmed = (value ?? '').slice(0, GOALS_OVERRIDE_MAX_LEN);
+  if (trimmed.length === 0) {
+    await chrome.storage.local.remove(STORAGE_KEYS.goalsOverride);
+    return;
+  }
+  await writeKey(STORAGE_KEYS.goalsOverride, trimmed);
 }

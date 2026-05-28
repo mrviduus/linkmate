@@ -35,7 +35,7 @@ import {
   parseRecentComments,
 } from './profile-parser';
 import type { RawProfileFields } from './profile-parser';
-import { getCaptureFullProfile, getProfile, setProfile } from './storage-schema';
+import { getCaptureFullProfile, getProfile, getProviderConfig, setProfile } from './storage-schema';
 import type { ProfileContext } from './storage-schema';
 import { getUserProfile, isFresh, saveUserProfile } from './user-profile-store';
 import type { UserProfile } from './lib/idb';
@@ -51,6 +51,7 @@ const PROFILE_URL_PATTERN = /^https?:\/\/(www\.)?linkedin\.com\/in\/[^/?#]+\/?(\
 export type CaptureFailureReason =
   | 'no-active-tab'
   | 'not-on-profile'
+  | 'not-signed-in'
   | 'script-failed'
   | 'summary-failed';
 
@@ -63,6 +64,90 @@ export type CaptureResult =
       summaryError?: string;
     }
   | { ok: false; reason: CaptureFailureReason; message: string };
+
+export type CaptureProgress =
+  | 'cache-check'
+  | 'opening-tab'
+  | 'waiting-profile-load'
+  | 'scraping'
+  | 'parsing'
+  | 'summarizing'
+  | 'done';
+
+export interface CaptureOptions {
+  /** Optional progress reporter; called as the capture moves through substeps. */
+  onProgress?: (step: CaptureProgress) => void;
+}
+
+const HIDDEN_PROFILE_TAB_URL = 'https://www.linkedin.com/in/me/';
+const HIDDEN_TAB_LOAD_TIMEOUT_MS = 20_000;
+const LOGIN_URL_FRAGMENTS = ['/login', '/uas/login', '/checkpoint', '/authwall'];
+
+/**
+ * Opens a hidden background tab at /in/me/ and resolves with its tabId once
+ * LinkedIn redirects to a real /in/<handle> URL. Rejects on login redirect or
+ * timeout. Caller MUST `closeHiddenTab(tabId)` in a finally to avoid leaks.
+ *
+ * Mirrors the proven pattern in background.ts:startSsiCapture so the user's
+ * current tab is never navigated away (issue #18 follow-up: capture UX).
+ */
+async function openHiddenProfileTab(): Promise<number> {
+  const tab = await chrome.tabs.create({ url: HIDDEN_PROFILE_TAB_URL, active: false });
+  const tabId = tab.id;
+  if (tabId === undefined) {
+    throw new Error('Could not create background tab for profile capture.');
+  }
+
+  let listener: ((id: number, info: chrome.tabs.TabChangeInfo, t: chrome.tabs.Tab) => void) | null = null;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        if (listener) chrome.tabs.onUpdated.removeListener(listener);
+        listener = null;
+      };
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Profile tab did not load within ${HIDDEN_TAB_LOAD_TIMEOUT_MS / 1000}s`));
+      }, HIDDEN_TAB_LOAD_TIMEOUT_MS);
+
+      listener = (id, info, t) => {
+        if (id !== tabId) return;
+        const url = info.url ?? t.url ?? '';
+        // Login redirect — LinkedIn punted us; fail fast so the user sees a clear error.
+        if (url && LOGIN_URL_FRAGMENTS.some((f) => url.includes(f))) {
+          clearTimeout(timeoutId);
+          cleanup();
+          reject(new Error('not-signed-in'));
+          return;
+        }
+        // Wait for both URL transition to /in/<handle> AND status === 'complete'.
+        if (info.status === 'complete' && PROFILE_URL_PATTERN.test(t.url ?? '')) {
+          clearTimeout(timeoutId);
+          cleanup();
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+  } catch (err) {
+    // Best-effort cleanup; caller's finally will try again.
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch {
+      /* swallow */
+    }
+    throw err;
+  }
+  return tabId;
+}
+
+async function closeHiddenTab(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.remove(tabId);
+  } catch {
+    /* tab may already be gone; nothing to do */
+  }
+}
 
 interface ProfileCaptureResponse {
   ok: boolean;
@@ -88,11 +173,14 @@ function getExplicitTargetTabId(): number | null {
 }
 
 export class ProfileContextService {
-  async capture(): Promise<CaptureResult> {
+  async capture(opts: CaptureOptions = {}): Promise<CaptureResult> {
+    const progress = opts.onProgress ?? (() => {});
+
     // Issue #16 — when full-capture is ON and IDB snapshot is <24h, short-circuit
     // before doing any DOM grab. Falls through to full capture otherwise.
     // IDB read is fail-soft: in environments without IndexedDB (jsdom tests,
     // some service-worker contexts) we just proceed with the regular flow.
+    progress('cache-check');
     const fullProfileEnabled = await getCaptureFullProfile();
     if (fullProfileEnabled) {
       try {
@@ -103,6 +191,7 @@ export class ProfileContextService {
           // IDB snapshot is still valid — surface it as cached without forcing
           // a 30s re-scrape.
           const existingProfile = (await getProfile()) ?? undefined;
+          progress('done');
           return { ok: true, profile: existingProfile, cached: true, userProfile: cached };
         }
       } catch (err) {
@@ -110,40 +199,94 @@ export class ProfileContextService {
       }
     }
 
-    // Step 1: target tab — prefer explicit ?targetTab= from the side panel URL,
-    // otherwise find the active tab in the last-focused window (side panel
-    // shares window context with content).
-    let activeTab: chrome.tabs.Tab | undefined;
+    // Step 1: target tab.
+    //
+    // Priority order:
+    //   (a) Explicit ?targetTab= from the side panel URL AND it's on a profile
+    //       page — happens when the user opens the panel from their own /in/
+    //       (issue #16 auto-open flow). Use that tab; do not open a new one.
+    //   (b) Any active LinkedIn tab that's already on /in/<handle> — use it.
+    //   (c) Otherwise: open a HIDDEN background tab at /in/me/ — captures
+    //       without disrupting the user's current tab. Tab is closed in finally.
+    let tabId: number | undefined;
+    let hiddenTabId: number | undefined; // tracks tab WE opened so finally can close it
+    let url = '';
     try {
       const explicitId = getExplicitTargetTabId();
       if (explicitId !== null) {
-        activeTab = await chrome.tabs.get(explicitId);
-      } else {
-        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        activeTab = tabs[0];
+        try {
+          const t = await chrome.tabs.get(explicitId);
+          if (t && PROFILE_URL_PATTERN.test(t.url ?? '')) {
+            tabId = t.id ?? undefined;
+            url = t.url ?? '';
+          }
+        } catch {
+          /* explicit tab may be stale; fall through to fallbacks */
+        }
+      }
+      if (tabId === undefined) {
+        const candidates = await chrome.tabs.query({ url: 'https://www.linkedin.com/in/*' });
+        const fresh = candidates.find((t) => PROFILE_URL_PATTERN.test(t.url ?? ''));
+        if (fresh?.id !== undefined) {
+          tabId = fresh.id;
+          url = fresh.url ?? '';
+        }
+      }
+      if (tabId === undefined) {
+        progress('opening-tab');
+        try {
+          hiddenTabId = await openHiddenProfileTab();
+          progress('waiting-profile-load');
+          // openHiddenProfileTab already waited for /in/<handle> + complete.
+          const t = await chrome.tabs.get(hiddenTabId);
+          tabId = hiddenTabId;
+          url = t.url ?? '';
+        } catch (err) {
+          const message = String(err instanceof Error ? err.message : err);
+          if (message === 'not-signed-in') {
+            return {
+              ok: false,
+              reason: 'not-signed-in',
+              message:
+                'Not signed in to LinkedIn. Sign in to linkedin.com in this browser and try again.',
+            };
+          }
+          return {
+            ok: false,
+            reason: 'no-active-tab',
+            message: `Could not open a profile tab in the background: ${message}`,
+          };
+        }
       }
     } catch (err) {
       return {
         ok: false,
         reason: 'no-active-tab',
-        message: `Could not query active tab: ${String(err)}`,
+        message: `Could not resolve a profile tab: ${String(err)}`,
       };
     }
-    if (!activeTab || activeTab.id === undefined) {
-      return { ok: false, reason: 'no-active-tab', message: 'No active tab available.' };
+
+    if (tabId === undefined) {
+      return { ok: false, reason: 'no-active-tab', message: 'No profile tab available.' };
     }
 
-    // Step 2: URL guard (compliance — must be on the user's own profile)
-    const url = activeTab.url ?? '';
+    // Step 2: URL guard (defence-in-depth — branches above should already ensure this).
     if (!PROFILE_URL_PATTERN.test(url)) {
+      if (hiddenTabId !== undefined) await closeHiddenTab(hiddenTabId);
       return {
         ok: false,
         reason: 'not-on-profile',
         message:
-          'LinkMate captures from the LinkedIn profile page only. Open your profile (linkedin.com/in/your-handle) and click Capture.',
+          'LinkMate captures from a LinkedIn profile page only. Open your profile (linkedin.com/in/your-handle) and click Capture.',
       };
     }
+    // Synthesise an activeTab-like object for the existing downstream code paths
+    // that previously used `activeTab.id` / `activeTab.url`.
+    const activeTab = { id: tabId, url } as chrome.tabs.Tab;
 
+    // Wrap the rest of the capture in a try/finally so the hidden tab is ALWAYS
+    // closed — even on early-return error paths below — and never leaks.
+    try {
     // Step 3: inject an HTML-grab function. Parser runs in popup context (step 4).
     //
     // v0.5.6 — LinkedIn migrated to React Server-Driven UI (SDUI). The initial
@@ -153,10 +296,11 @@ export class ProfileContextService {
     //
     // So we scroll the page programmatically, wait for SDUI to fetch the async
     // sections, then grab the HTML. ~3.5s total wait inside keepAlive.
+    progress('scraping');
     let html: string | null = null;
     try {
       const results = await chrome.scripting.executeScript({
-        target: { tabId: activeTab.id },
+        target: { tabId },
         func: async () => {
           const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
           const originalScroll = window.scrollY;
@@ -261,6 +405,7 @@ export class ProfileContextService {
     }
 
     // Step 4: parse in popup context
+    progress('parsing');
     const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
     const rawFields: RawProfileFields = parseProfileDom(parsedDoc);
 
@@ -306,34 +451,59 @@ export class ProfileContextService {
       }
     }
 
-    // Step 6 — legacy: OpenAI positioning summary + chrome.storage ProfileContext.
-    // This powers AI-drafted comments elsewhere in the extension. NON-BLOCKING:
+    // Step 6 — OpenAI positioning summary + chrome.storage ProfileContext.
+    // Powers AI-drafted comments elsewhere in the extension. NON-BLOCKING:
     // failure here doesn't invalidate the IDB write above.
+    //
+    // Skip the OpenAI round-trip entirely when no API key is configured —
+    // the summary call would just fail anyway, but skipping avoids ~5s of
+    // background work and a noisy error in the console. The AI feed scoring
+    // (issue #18) does not require positioningSummary; it falls back to the
+    // rich IDB UserProfile via formatUserBackground().
+    progress('summarizing');
     let profile: ProfileContext | undefined;
     let summaryError: string | undefined;
+    let providerKeyConfigured = true;
     try {
-      const response = (await chrome.runtime.sendMessage({
-        action: 'profile.capture',
-        fields: rawFields,
-      })) as ProfileCaptureResponse;
-      if (response?.ok && response.positioningSummary) {
-        profile = {
-          ...rawFields,
-          positioningSummary: response.positioningSummary,
-          capturedAt: Date.now(),
-        };
-        await setProfile(profile);
-      } else {
-        summaryError = response?.error ?? 'No positioning summary returned.';
+      const cfg = await getProviderConfig();
+      providerKeyConfigured = Boolean(cfg.openai?.apiKey?.trim());
+    } catch {
+      /* read failure → assume no key, skip the call */
+      providerKeyConfigured = false;
+    }
+    if (!providerKeyConfigured) {
+      summaryError = 'No OpenAI API key configured — positioning summary skipped.';
+    } else {
+      try {
+        const response = (await chrome.runtime.sendMessage({
+          action: 'profile.capture',
+          fields: rawFields,
+        })) as ProfileCaptureResponse;
+        if (response?.ok && response.positioningSummary) {
+          profile = {
+            ...rawFields,
+            positioningSummary: response.positioningSummary,
+            capturedAt: Date.now(),
+          };
+          await setProfile(profile);
+        } else {
+          summaryError = response?.error ?? 'No positioning summary returned.';
+        }
+      } catch (err) {
+        summaryError = `Background did not respond: ${String(err)}`;
       }
-    } catch (err) {
-      summaryError = `Background did not respond: ${String(err)}`;
     }
     if (summaryError) {
       console.warn('[LinkMate] positioning summary skipped:', summaryError);
     }
 
+    progress('done');
     return { ok: true, profile, userProfile, summaryError };
+    } finally {
+      // ALWAYS close the hidden tab we opened, regardless of how we exited the
+      // capture body. No-op when we used an explicit/existing tab.
+      if (hiddenTabId !== undefined) await closeHiddenTab(hiddenTabId);
+    }
   }
 
   /** Read the currently-stored profile (or null). Cheap; no network/DOM access. */
