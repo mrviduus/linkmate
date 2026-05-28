@@ -925,7 +925,11 @@ async function handleProfileAuditGet(
       return;
     }
     const audit = auditProfile(up);
-    const stored = await getProfileAuditState().catch(() => null);
+    const [stored, ssiHistory] = await Promise.all([
+      getProfileAuditState().catch(() => null),
+      getSsiHistory().catch(() => []),
+    ]);
+    const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
     const recommendations =
       stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendations : null;
     const recommendationsAt =
@@ -937,6 +941,7 @@ async function handleProfileAuditGet(
         audit,
         recommendations,
         recommendationsAt,
+        ssi,
       },
     });
   } catch (err) {

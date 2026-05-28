@@ -89,7 +89,11 @@ async function handleProviderSave(): Promise<void> {
       );
     });
     if (resp.ok) {
-      showProviderMessage(`Saved. Using ${model}.`, 'success');
+      showProviderMessage(`Saved. Using ${model}. Click "Get AI rewrites" in Profile audit now.`, 'success');
+      // Make sure the audit section re-renders into the idle state and
+      // (if visible) flashes a hint so the user knows where to retry.
+      await loadProfileAudit();
+      showAuditStatus('OpenAI key saved — click Get AI rewrites for suggestions.', 'info');
     } else {
       showProviderMessage(`Save failed: ${resp.error ?? 'unknown'}`, 'error');
     }
@@ -244,6 +248,7 @@ interface ProfileAuditDTO {
     rationale: string;
   }> | null;
   recommendationsAt: number;
+  ssi: SsiSnapshot | null;
 }
 
 const profileAuditSection = $('profileAudit');
@@ -384,7 +389,8 @@ function renderProfileAudit(state: ProfileAuditDTO | null): void {
 
   const { passed, total, score } = state.audit;
   if (profileAuditCounter) {
-    profileAuditCounter.textContent = `${passed} of ${total} essentials`;
+    const ssiLabel = state.ssi ? ` · SSI ${state.ssi.total}/100` : '';
+    profileAuditCounter.textContent = `${passed} of ${total} profile basics filled${ssiLabel}`;
   }
   if (profileAuditProgressFill) {
     profileAuditProgressFill.style.width = `${score}%`;
