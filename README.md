@@ -1,4 +1,4 @@
-# LinkMate
+[# LinkMate
 
 > **Stop working for LinkedIn.** LinkMate is an AI agent that makes LinkedIn work for you — auditing your profile and feed, then telling you what to fix, who to engage, and what to post next.
 
@@ -235,3 +235,4 @@ Pre-built zip per tag at <https://github.com/mrviduus/linkmate/releases>. Downlo
 ## License
 
 ISC.
+](https://mrviduus.github.io/linkmate/)
