@@ -4,10 +4,7 @@
     <meta charset="UTF-8" />
     <title>LinkMate</title>
     <link rel="stylesheet" href="popup.css" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-    />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   </head>
   <body>
     <div class="card">
@@ -58,11 +55,7 @@
             <button id="heroRefresh" class="btn btn-primary capture-hero__btn">
               <i class="fa fa-camera"></i> Capture profile
             </button>
-            <button
-              id="heroCopyJson"
-              class="btn btn-secondary capture-hero__btn"
-              style="display: none"
-            >
+            <button id="heroCopyJson" class="btn btn-secondary capture-hero__btn" style="display: none">
               <i class="fa fa-copy"></i> Copy JSON
             </button>
           </div>
@@ -75,9 +68,7 @@
             <i class="fa fa-chart-line"></i>
             SSI Tracker
           </h3>
-          <p class="settings-description">
-            Daily snapshot of your LinkedIn Social Selling Index.
-          </p>
+          <p class="settings-description">Daily snapshot of your LinkedIn Social Selling Index.</p>
 
           <div id="ssiStatus">
             <div id="ssiNoneState" class="ssi-none">
@@ -94,12 +85,7 @@
                 <strong id="ssiNetwork">—</strong>
               </div>
               <div class="ssi-donut-wrapper">
-                <canvas
-                  id="ssiDonutCanvas"
-                  width="160"
-                  height="160"
-                  aria-label="SSI components breakdown"
-                ></canvas>
+                <canvas id="ssiDonutCanvas" width="160" height="160" aria-label="SSI components breakdown"></canvas>
                 <div class="ssi-donut-center">
                   <div class="ssi-donut-center__total" id="ssiDonutTotal">—</div>
                   <div class="ssi-donut-center__label">/ 100</div>
@@ -133,9 +119,7 @@
           </div>
 
           <div class="ssi-actions">
-            <button id="ssiRefresh" class="btn btn-primary">
-              <i class="fa fa-sync"></i> Refresh now
-            </button>
+            <button id="ssiRefresh" class="btn btn-primary"><i class="fa fa-sync"></i> Refresh now</button>
             <button id="ssiOpenPage" class="btn btn-secondary">
               <i class="fa fa-external-link-alt"></i> Open SSI page
             </button>
@@ -144,18 +128,25 @@
           <div id="ssiMessage" class="status-message" style="display: none"></div>
         </div>
 
-        <!-- OpenAI key + model -->
+        <!-- AI Provider key + model -->
         <div class="settings-section">
           <h3>
             <i class="fa fa-key"></i>
-            OpenAI
+            AI Provider
           </h3>
           <p class="settings-description">
-            LinkMate uses OpenAI for all AI generation. Bring your own key — stored locally in this
-            browser only, never synced.
+            LinkMate uses AI for all generation. Bring your own key — stored locally in this browser only, never synced.
           </p>
 
           <div class="provider-openai-config">
+            <label class="provider-field">
+              <span>Provider</span>
+              <select id="providerMode">
+                <option value="openai">OpenAI</option>
+                <option value="groq">Groq</option>
+              </select>
+            </label>
+
             <label class="provider-field">
               <span>API Key</span>
               <input
@@ -165,9 +156,7 @@
                 autocomplete="off"
                 spellcheck="false"
               />
-              <small class="provider-field__hint">
-                Get one at platform.openai.com/api-keys
-              </small>
+              <small class="provider-field__hint" id="providerKeyHint"> Get one at platform.openai.com/api-keys </small>
             </label>
 
             <label class="provider-field">
@@ -199,8 +188,8 @@
             Goals
           </summary>
           <p class="settings-description">
-            What you're looking for on LinkedIn — used by AI feed scoring and Analyze Feed.
-            Defaults to your captured positioning summary when blank.
+            What you're looking for on LinkedIn — used by AI feed scoring and Analyze Feed. Defaults to your captured
+            positioning summary when blank.
           </p>
           <label class="provider-field">
             <span>Your goals</span>
@@ -216,9 +205,7 @@
             </small>
           </label>
           <div class="provider-actions">
-            <button id="goalsOverrideSave" class="btn btn-primary">
-              <i class="fa fa-save"></i> Save goals
-            </button>
+            <button id="goalsOverrideSave" class="btn btn-primary"><i class="fa fa-save"></i> Save goals</button>
           </div>
           <div id="goalsOverrideStatus" class="status-message" style="display: none"></div>
         </details>
@@ -229,9 +216,7 @@
             <i class="fa fa-calendar-week"></i>
             Weekly Targets
           </summary>
-          <p class="settings-description">
-            How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.
-          </p>
+          <p class="settings-description">How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.</p>
           <div class="cadence-targets-form">
             <label class="provider-field">
               <span>Posts (Brand)</span>
@@ -251,9 +236,7 @@
             </label>
           </div>
           <div class="provider-actions">
-            <button id="cadenceSaveBtn" class="btn btn-primary">
-              <i class="fa fa-save"></i> Save targets
-            </button>
+            <button id="cadenceSaveBtn" class="btn btn-primary"><i class="fa fa-save"></i> Save targets</button>
           </div>
           <div id="cadenceStatus" class="status-message" style="display: none"></div>
         </details>
@@ -265,8 +248,8 @@
             Profile Context
           </summary>
           <p class="settings-description">
-            Capture your LinkedIn profile so AI drafts read in your voice. Open your own profile
-            page, then click Capture below.
+            Capture your LinkedIn profile so AI drafts read in your voice. Open your own profile page, then click
+            Capture below.
           </p>
 
           <div id="profileStatus" class="profile-status">
@@ -279,11 +262,8 @@
               <div class="profile-row profile-headline" id="profileHeadline">-</div>
               <div class="profile-row profile-positioning" id="profilePositioning">-</div>
               <div class="profile-meta">
-                Captured <span id="profileCapturedAt">-</span> ·
-                <span id="profileSkillsCount">0</span> skills
-                <span id="profileStaleChip" class="profile-stale-chip" style="display: none"
-                  >stale</span
-                >
+                Captured <span id="profileCapturedAt">-</span> · <span id="profileSkillsCount">0</span> skills
+                <span id="profileStaleChip" class="profile-stale-chip" style="display: none">stale</span>
               </div>
             </div>
           </div>
@@ -430,9 +410,7 @@
           <button id="postModalClose" class="post-modal__close">✕</button>
         </div>
         <div id="postModalBody" class="post-modal__body">
-          <div class="post-modal__loading">
-            <i class="fa fa-circle-notch fa-spin"></i> Drafting…
-          </div>
+          <div class="post-modal__loading"><i class="fa fa-circle-notch fa-spin"></i> Drafting…</div>
         </div>
       </div>
     </div>

@@ -82,10 +82,7 @@ export function isFresh(p: UserProfile, ttlMs = USER_PROFILE_TTL_MS, now = Date.
  *
  * Pure function — no IDB calls. Pass `null` for `existing` on first capture.
  */
-export function mergeUserProfile(
-  existing: UserProfile | null,
-  fresh: UserProfile
-): UserProfile {
+export function mergeUserProfile(existing: UserProfile | null, fresh: UserProfile): UserProfile {
   if (!existing) return fresh;
   return {
     ...fresh,

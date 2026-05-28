@@ -51,7 +51,7 @@ export function formatUserBackground(userProfile: UserProfile | null | undefined
             const desc = oneLine(e.description ?? '', EXPERIENCE_DESC_CAP);
             return desc ? `${head} — ${desc}` : head;
           })
-          .join('\n'),
+          .join('\n')
     );
   }
 
@@ -81,7 +81,7 @@ export function formatUserBackground(userProfile: UserProfile | null | undefined
               : '';
             return `- "${oneLine(p.text, RECENT_POST_TEXT_CAP)}"${eng}`;
           })
-          .join('\n'),
+          .join('\n')
     );
   }
 
@@ -103,10 +103,10 @@ export function formatUserBackground(userProfile: UserProfile | null | undefined
             (c) =>
               `- on "${oneLine(c.originalPostText, RECENT_COMMENT_ORIGINAL_CAP)}" → "${oneLine(
                 c.text,
-                RECENT_COMMENT_TEXT_CAP,
-              )}"`,
+                RECENT_COMMENT_TEXT_CAP
+              )}"`
           )
-          .join('\n'),
+          .join('\n')
     );
   }
 
@@ -118,9 +118,8 @@ function formatPostsForPrompt(posts: ParsedPost[], includeAuthorTitle: boolean):
   return posts
     .map((p, i) => {
       const text = (p.text || '').slice(0, POST_TEXT_CAP).replace(/\s+/g, ' ').trim();
-      const authorBit = includeAuthorTitle && p.authorTitle
-        ? `${p.authorName} · ${p.authorTitle}`
-        : p.authorName;
+      const authorBit =
+        includeAuthorTitle && p.authorTitle ? `${p.authorName} · ${p.authorTitle}` : p.authorName;
       return `[${i + 1}] id=${p.id} author="${authorBit}" text="${text}"`;
     })
     .join('\n');
@@ -141,11 +140,11 @@ export function buildAiScoreBatchPrompt(input: BuildAiScoreBatchPromptInput): {
 
   const system = [
     'You score LinkedIn feed posts for a specific user.',
-    'Score each post 0..10 for how aligned it is with the user\'s positioning, background, and stated goals.',
+    "Score each post 0..10 for how aligned it is with the user's positioning, background, and stated goals.",
     '10 = essential read for this user. 0 = irrelevant noise.',
-    'Use the user\'s real work history, skills, and recent activity as grounding — not the positioning summary alone.',
+    "Use the user's real work history, skills, and recent activity as grounding — not the positioning summary alone.",
     'For each post, write a 1–2 sentence "whyForYou" that:',
-    '  - references at least one of the user\'s skills, themes, past roles, or stated goals,',
+    "  - references at least one of the user's skills, themes, past roles, or stated goals,",
     '  - cites one concrete detail from the post (not a generic platitude),',
     '  - addresses the user in second person ("you").',
     'No marketing buzzwords. No restating the post.',
@@ -168,4 +167,3 @@ export function buildAiScoreBatchPrompt(input: BuildAiScoreBatchPromptInput): {
 
   return { system, user };
 }
-

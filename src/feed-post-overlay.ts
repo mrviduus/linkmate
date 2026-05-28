@@ -22,9 +22,7 @@ import type { ParsedPost, ScoredPost } from './storage-schema';
 
 // ─── Types shared with linkedin-content.ts deps ──────────────────────────
 
-export type ScoreFeedResult =
-  | { ok: true; scored: ScoredPost[] }
-  | { ok: false; warning: string };
+export type ScoreFeedResult = { ok: true; scored: ScoredPost[] } | { ok: false; warning: string };
 
 export interface AiScoredPostDTO {
   postId: string;
@@ -40,17 +38,24 @@ export type AiScoreFeedResult =
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
     switch (c) {
-      case '&': return '&amp;';
-      case '<': return '&lt;';
-      case '>': return '&gt;';
-      case '"': return '&quot;';
-      case "'": return '&#39;';
-      default: return c;
+      case '&':
+        return '&amp;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '"':
+        return '&quot;';
+      case "'":
+        return '&#39;';
+      default:
+        return c;
     }
   });
 }
 
 const CHIP_CLASS = 'linkmate-post-chip';
+const FOCUS_BTN_CLASS = 'linkmate-focus-fab';
 const POST_ANCHOR_ATTR = 'data-linkmate-post-id';
 const SCAN_DEBOUNCE_MS = 800;
 // Hard cap so a constantly-mutating feed (LinkedIn animations / video players /
@@ -71,6 +76,11 @@ export interface FeedPostOverlayDeps {
 
 export class FeedPostOverlay {
   private observer: MutationObserver | null = null;
+  private fabContainer: HTMLElement | null = null;
+  private focusBtn: HTMLButtonElement | null = null;
+  private skipBtn: HTMLButtonElement | null = null;
+  private skippedPostIds = new Set<string>();
+  private lastFocusedPostId: string | null = null;
   private rescanTimer: ReturnType<typeof setTimeout> | null = null;
   private periodicTimer: ReturnType<typeof setInterval> | null = null;
   private knownIds = new Set<string>();
@@ -99,8 +109,52 @@ export class FeedPostOverlay {
 
   mount(): void {
     if (this.observer) return;
-    this.observer = new MutationObserver(() => this.scheduleScan());
+
+    // Inject the Floating Action Button for Focus Top Post first
+    // so its DOM insertion doesn't trigger the MutationObserver we are about to start.
+    this.injectFocusButton();
+
+    this.observer = new MutationObserver((mutations) => {
+      // Filter out mutations that only involve LinkMate elements (chips, toasts, FAB)
+      // to prevent unnecessary re-scans and infinite mutation loops.
+      const interesting = mutations.some((m) => {
+        // If target is one of our elements, ignore it
+        const target = m.target as HTMLElement;
+        if (
+          target.classList?.contains(CHIP_CLASS) ||
+          target.classList?.contains(FOCUS_BTN_CLASS) ||
+          target.classList?.contains('linkmate-toast') ||
+          target.closest?.(`.${CHIP_CLASS}`) ||
+          target.closest?.(`.${FOCUS_BTN_CLASS}`) ||
+          target.closest?.('.linkmate-toast')
+        ) {
+          return false;
+        }
+
+        // Check added nodes
+        for (let i = 0; i < m.addedNodes.length; i++) {
+          const node = m.addedNodes[i] as HTMLElement;
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            if (
+              node.classList?.contains(CHIP_CLASS) ||
+              node.classList?.contains(FOCUS_BTN_CLASS) ||
+              node.classList?.contains('linkmate-toast')
+            ) {
+              continue;
+            }
+            return true;
+          }
+        }
+        return m.removedNodes.length > 0;
+      });
+
+      if (interesting) {
+        this.scheduleScan();
+      }
+    });
+
     this.observer.observe(document.body, { childList: true, subtree: true });
+
     // First pass — feed posts usually present before content_script fires.
     this.scheduleScan(500);
     // Long-poll fallback: re-evaluate every 30s for posts that scrolled in
@@ -112,6 +166,10 @@ export class FeedPostOverlay {
   unmount(): void {
     this.observer?.disconnect();
     this.observer = null;
+    this.fabContainer?.remove();
+    this.fabContainer = null;
+    this.focusBtn = null;
+    this.skipBtn = null;
     if (this.rescanTimer) clearTimeout(this.rescanTimer);
     if (this.periodicTimer) clearInterval(this.periodicTimer);
     this.rescanTimer = null;
@@ -154,7 +212,8 @@ export class FeedPostOverlay {
     const roots = findFeedPostRoots();
     let injectedNew = false;
     for (const { element, id } of roots) {
-      if (this.knownIds.has(id)) continue;
+      const alreadyDecorated = element.hasAttribute(POST_ANCHOR_ATTR);
+      if (alreadyDecorated) continue;
       this.knownIds.add(id);
       this.injectPlaceholderChip(element, id);
       injectedNew = true;
@@ -193,16 +252,21 @@ export class FeedPostOverlay {
       // Chunk into AI_BATCH_SIZE-sized requests. Server-side handler slices to
       // 10 per call; we loop on the client so every visible non-skip post gets
       // scored. SW in-memory cache (1h) deduplicates re-scans cheaply.
-      const chunks: typeof eligible[] = [];
+      const chunks: (typeof eligible)[] = [];
       for (let i = 0; i < eligible.length; i += AI_BATCH_SIZE) {
         chunks.push(eligible.slice(i, i + AI_BATCH_SIZE));
       }
-      const chunkResults = await Promise.all(chunks.map((c) => this.deps.aiScoreFeed(c)));
+
+      const chunkResults: AiScoreFeedResult[] = [];
+      for (const chunk of chunks) {
+        const res = await this.deps.aiScoreFeed(chunk);
+        chunkResults.push(res);
+      }
 
       // First, detect engine-unavailable verdict in ANY chunk — flips the
       // overlay into a terminal "AI off" state.
       const engineDown = chunkResults.find(
-        (r) => !r.ok && (r.reason === 'no_key' || r.reason === 'no_profile'),
+        (r) => !r.ok && (r.reason === 'no_key' || r.reason === 'no_profile')
       );
       if (engineDown) {
         this.aiUnavailable = true;
@@ -318,20 +382,297 @@ export class FeedPostOverlay {
 
   private markAllAiUnavailable(): void {
     const tip = 'AI score unavailable — check OpenAI key in Settings';
-    document
-      .querySelectorAll<HTMLElement>(`.${CHIP_CLASS}__ai`)
-      .forEach((el) => {
-        el.setAttribute('data-state', 'na');
-        el.textContent = '🤖 —';
-        el.setAttribute('title', tip);
-        el.setAttribute('data-tooltip', tip);
-      });
+    document.querySelectorAll<HTMLElement>(`.${CHIP_CLASS}__ai`).forEach((el) => {
+      el.setAttribute('data-state', 'na');
+      el.textContent = '🤖 —';
+      el.setAttribute('title', tip);
+      el.setAttribute('data-tooltip', tip);
+    });
   }
 
   private findChip(postId: string): HTMLElement | null {
     return document.querySelector<HTMLElement>(
-      `.${CHIP_CLASS}[data-post-id="${CSS.escape(postId)}"]`,
+      `.${CHIP_CLASS}[data-post-id="${postId.replace(/"/g, '\\"')}"]`
     );
+  }
+
+  private injectFocusButton(): void {
+    if (document.querySelector('.linkmate-fab-container')) return;
+
+    const container = document.createElement('div');
+    container.className = 'linkmate-fab-container';
+
+    // Restore saved coordinates from localStorage if present
+    const savedPos = localStorage.getItem('linkmate-fab-pos');
+    if (savedPos) {
+      try {
+        const { left, top } = JSON.parse(savedPos);
+        if (left && top) {
+          container.style.left = left;
+          container.style.top = top;
+          container.style.bottom = 'auto';
+          container.style.right = 'auto';
+        }
+      } catch {
+        /* fallback to stylesheet bottom/right default */
+      }
+    }
+
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'linkmate-fab-drag-handle';
+    dragHandle.title = 'Drag to reposition';
+    dragHandle.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+        <path d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+      </svg>
+    `;
+
+    const focusBtn = document.createElement('button');
+    focusBtn.className = FOCUS_BTN_CLASS;
+    focusBtn.type = 'button';
+    focusBtn.setAttribute('aria-label', 'Focus top scored post');
+    focusBtn.innerHTML = `
+      <svg class="linkmate-focus-icon animate-pulse" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10 10-4.49 10-10S17.51 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3-8c0 1.66-1.34 3-3 3s-3-1.34-3-3 1.34-3 3-3 3 1.34 3 3z"/>
+      </svg>
+      <span>⚡ Focus Top Post</span>
+    `;
+    focusBtn.addEventListener('click', () => this.handleFocusClick(false));
+
+    const skipBtn = document.createElement('button');
+    skipBtn.className = 'linkmate-skip-fab';
+    skipBtn.type = 'button';
+    skipBtn.setAttribute('aria-label', 'Skip to next scored post');
+    skipBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+      </svg>
+      <span>Skip</span>
+    `;
+    skipBtn.addEventListener('click', () => this.handleSkipClick());
+
+    container.appendChild(dragHandle);
+    container.appendChild(focusBtn);
+    container.appendChild(skipBtn);
+    document.body.appendChild(container);
+
+    this.fabContainer = container;
+    this.focusBtn = focusBtn;
+    this.skipBtn = skipBtn;
+
+    // Draggable functionality
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
+
+    const onMouseDown = (e: MouseEvent) => {
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = container.getBoundingClientRect();
+      initialLeft = rect.left;
+      initialTop = rect.top;
+      dragHandle.style.cursor = 'grabbing';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      container.style.left = `${initialLeft + dx}px`;
+      container.style.top = `${initialTop + dy}px`;
+      container.style.right = 'auto';
+      container.style.bottom = 'auto';
+    };
+
+    const onMouseUp = () => {
+      isDragging = false;
+      dragHandle.style.cursor = 'grab';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      localStorage.setItem(
+        'linkmate-fab-pos',
+        JSON.stringify({
+          left: container.style.left,
+          top: container.style.top,
+        })
+      );
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      isDragging = true;
+      const touch = e.touches[0];
+      startX = touch.clientX;
+      startY = touch.clientY;
+      const rect = container.getBoundingClientRect();
+      initialLeft = rect.left;
+      initialTop = rect.top;
+      document.addEventListener('touchmove', onTouchMove, { passive: false });
+      document.addEventListener('touchend', onTouchEnd);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isDragging) return;
+      const touch = e.touches[0];
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      container.style.left = `${initialLeft + dx}px`;
+      container.style.top = `${initialTop + dy}px`;
+      container.style.right = 'auto';
+      container.style.bottom = 'auto';
+      e.preventDefault();
+    };
+
+    const onTouchEnd = () => {
+      isDragging = false;
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+      localStorage.setItem(
+        'linkmate-fab-pos',
+        JSON.stringify({
+          left: container.style.left,
+          top: container.style.top,
+        })
+      );
+    };
+
+    dragHandle.addEventListener('mousedown', onMouseDown);
+    dragHandle.addEventListener('touchstart', onTouchStart, { passive: true });
+  }
+
+  private handleSkipClick(): void {
+    if (this.lastFocusedPostId) {
+      this.skippedPostIds.add(this.lastFocusedPostId);
+      console.log(`[Focus Top Post] Skipped post: ${this.lastFocusedPostId}`);
+    }
+    this.handleFocusClick(true);
+  }
+
+  private handleFocusClick(isSkip = false): void {
+    console.log('[Focus Top Post] Button clicked!');
+    const chips = Array.from(document.querySelectorAll<HTMLElement>(`.${CHIP_CLASS}`));
+    console.log(`[Focus Top Post] Found ${chips.length} chips on the page.`);
+    if (chips.length === 0) {
+      this.showToast('No posts found on screen.', 'error');
+      return;
+    }
+
+    let bestChip: HTMLElement | null = null;
+    let bestScore = -1;
+    let bestHeuristic = -1;
+
+    for (const chip of chips) {
+      const postId = chip.getAttribute('data-post-id');
+      if (!postId) continue;
+
+      if (this.skippedPostIds.has(postId)) {
+        continue;
+      }
+
+      if (isSkip && postId === this.lastFocusedPostId) {
+        continue;
+      }
+
+      const aiSpan = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__ai`);
+      const heuristicSpan = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__heuristic`);
+
+      let aiScore = -1;
+      let heuristicScore = -1;
+
+      if (aiSpan && aiSpan.getAttribute('data-state') === 'ready') {
+        const match = aiSpan.textContent?.match(/(\d+)\/10/);
+        if (match) aiScore = parseInt(match[1], 10);
+      }
+
+      if (heuristicSpan && heuristicSpan.getAttribute('data-state') === 'ready') {
+        const match = heuristicSpan.textContent?.match(/(\d+)\/10/);
+        if (match) heuristicScore = parseInt(match[1], 10);
+      }
+
+      console.log(
+        `[Focus Top Post] Chip ${postId} -> AI: ${aiScore}, Heuristic: ${heuristicScore}`
+      );
+
+      const currentScore = aiScore >= 0 ? aiScore : heuristicScore;
+      if (
+        currentScore > bestScore ||
+        (currentScore === bestScore && heuristicScore > bestHeuristic)
+      ) {
+        bestScore = currentScore;
+        bestHeuristic = heuristicScore;
+        bestChip = chip;
+      }
+    }
+
+    if (!bestChip || bestScore === -1) {
+      console.log(
+        '[Focus Top Post] No valid best chip found. Scores might be all negative or loading.'
+      );
+      if (isSkip) {
+        if (this.skippedPostIds.size > 0) {
+          console.log('[Focus Top Post] All posts skipped. Wrapping around...');
+          this.skippedPostIds.clear();
+          this.lastFocusedPostId = null;
+          this.handleFocusClick(false);
+          this.showToast('Resetting and wrapping around feed...');
+          return;
+        }
+      }
+      this.showToast('Still scoring posts... Please wait.');
+      return;
+    }
+
+    const postId = bestChip.getAttribute('data-post-id');
+    console.log(
+      `[Focus Top Post] Best chip selected: ${postId} with score ${bestScore} (heuristic ${bestHeuristic})`
+    );
+
+    if (!postId) return;
+
+    this.lastFocusedPostId = postId;
+
+    const postEl = document.querySelector<HTMLElement>(
+      `[${POST_ANCHOR_ATTR}="${postId.replace(/"/g, '\\"')}"]`
+    );
+    if (postEl) {
+      console.log(`[Focus Top Post] Post element found for scroll. Scrolling...`);
+      postEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      postEl.classList.add('linkmate-priority-highlight');
+      setTimeout(() => {
+        postEl.classList.remove('linkmate-priority-highlight');
+      }, 3000);
+
+      this.showToast(`Focused post (${bestScore}/10)`);
+    } else {
+      console.warn(
+        `[Focus Top Post] Could not find post root element matching [${POST_ANCHOR_ATTR}="${postId}"]!`
+      );
+      this.showToast('Could not find the post on screen.', 'error');
+    }
+  }
+
+  private showToast(message: string, type: 'success' | 'error' = 'success'): void {
+    const toast = document.createElement('div');
+    toast.className = `linkmate-toast linkmate-toast-${type}`;
+    toast.textContent = message;
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'polite');
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('linkmate-toast-show');
+    }, 10);
+
+    setTimeout(() => {
+      toast.classList.remove('linkmate-toast-show');
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
   }
 }
 
@@ -343,7 +684,7 @@ export function findFeedPostRoots(): Array<{ element: HTMLElement; id: string }>
   const out: Array<{ element: HTMLElement; id: string }> = [];
   const seen = new Set<Element>();
   const reactionButtons = document.querySelectorAll(
-    'button[aria-label^="Reaction button state" i]',
+    'button[aria-label^="Reaction button state" i]'
   );
   for (const rxBtn of Array.from(reactionButtons)) {
     let cur: HTMLElement | null = rxBtn as HTMLElement;

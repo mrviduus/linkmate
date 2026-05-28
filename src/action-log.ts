@@ -47,7 +47,10 @@ export async function append(input: AppendInput): Promise<number> {
 }
 
 /** Top-N topics across submitted actions in the past `days` window. */
-export async function topTopics(days = 14, n = 5): Promise<Array<{ topic: string; count: number }>> {
+export async function topTopics(
+  days = 14,
+  n = 5
+): Promise<Array<{ topic: string; count: number }>> {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
   const db = await getDb();
   const all = await db.getAllFromIndex('actions', 'by-ts', IDBKeyRange.lowerBound(cutoff));

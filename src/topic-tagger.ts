@@ -22,9 +22,7 @@ const TOPICS: Record<string, RegExp[]> = {
     /\b(hiring|recruit(ing|ers?)?|interview|candidate|job\s*search|laid\s*off|layoffs?)\b/i,
     /\b(we['']?re hiring|open\s+role|join\s+us|career\s+opportunity)\b/i,
   ],
-  Web3: [
-    /\b(web3|crypto|blockchain|nft|defi|dao|token|ethereum|bitcoin|smart\s+contract)\b/i,
-  ],
+  Web3: [/\b(web3|crypto|blockchain|nft|defi|dao|token|ethereum|bitcoin|smart\s+contract)\b/i],
   Career: [
     /\b(career|promotion|pivot|transition|growth|raise|salary|negotiation)\b/i,
     /\b(side[-\s]?project|portfolio|imposter syndrome)\b/i,
@@ -45,18 +43,10 @@ const TOPICS: Record<string, RegExp[]> = {
     /\b(marketing|seo|sem|content\s+marketing|brand|copywriting|ads?|campaign)\b/i,
     /\b(linkedin\s+algorithm|engagement|reach|impressions)\b/i,
   ],
-  Sales: [
-    /\b(sales|prospecting|outbound|cold\s*(email|outreach)|crm|pipeline|quota|sdr|bdr)\b/i,
-  ],
-  Design: [
-    /\b(design(er)?|ux|ui|figma|prototype|wireframe|user\s+interface)\b/i,
-  ],
-  Remote: [
-    /\b(remote\s+(work|team|first)|wfh|work\s+from\s+home|async\s+work|distributed)\b/i,
-  ],
-  Productivity: [
-    /\b(productivity|focus|deep\s+work|time\s+management|gtd|inbox\s+zero)\b/i,
-  ],
+  Sales: [/\b(sales|prospecting|outbound|cold\s*(email|outreach)|crm|pipeline|quota|sdr|bdr)\b/i],
+  Design: [/\b(design(er)?|ux|ui|figma|prototype|wireframe|user\s+interface)\b/i],
+  Remote: [/\b(remote\s+(work|team|first)|wfh|work\s+from\s+home|async\s+work|distributed)\b/i],
+  Productivity: [/\b(productivity|focus|deep\s+work|time\s+management|gtd|inbox\s+zero)\b/i],
 };
 
 /**

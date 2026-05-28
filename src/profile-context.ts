@@ -141,7 +141,8 @@ async function openHiddenProfileTab(): Promise<number> {
     throw new Error('Could not create background tab for profile capture.');
   }
 
-  let listener: ((id: number, info: chrome.tabs.TabChangeInfo, t: chrome.tabs.Tab) => void) | null = null;
+  let listener: ((id: number, info: chrome.tabs.TabChangeInfo, t: chrome.tabs.Tab) => void) | null =
+    null;
   try {
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
@@ -170,11 +171,7 @@ async function openHiddenProfileTab(): Promise<number> {
         // downstream code (recent-activity URLs, profileUrl) would be built
         // against /in/me/ which 404s.
         const stillOnAlias = /\/in\/me\/?(\?.*)?$/i.test(t.url ?? '');
-        if (
-          info.status === 'complete' &&
-          PROFILE_URL_PATTERN.test(t.url ?? '') &&
-          !stillOnAlias
-        ) {
+        if (info.status === 'complete' && PROFILE_URL_PATTERN.test(t.url ?? '') && !stillOnAlias) {
           clearTimeout(timeoutId);
           cleanup();
           resolve();
@@ -208,7 +205,6 @@ interface ProfileCaptureResponse {
   error?: string;
 }
 
-
 export class ProfileContextService {
   async capture(opts: CaptureOptions = {}): Promise<CaptureResult> {
     const progress = opts.onProgress ?? (() => {});
@@ -232,7 +228,10 @@ export class ProfileContextService {
           return { ok: true, profile: existingProfile, cached: true, userProfile: cached };
         }
       } catch (err) {
-        console.warn('[LinkMate] UserProfile cache check failed; proceeding with fresh capture:', err);
+        console.warn(
+          '[LinkMate] UserProfile cache check failed; proceeding with fresh capture:',
+          err
+        );
       }
     }
 
@@ -301,247 +300,256 @@ export class ProfileContextService {
     // Wrap the rest of the capture in a try/finally so the hidden tab is ALWAYS
     // closed — even on early-return error paths below — and never leaks.
     try {
-    // Step 3: inject an HTML-grab function. Parser runs in popup context (step 4).
-    //
-    // v0.5.6 — LinkedIn migrated to React Server-Driven UI (SDUI). The initial
-    // HTML only contains top-card (name/headline/location). About / Skills /
-    // Activity sections are EMPTY placeholders (`<div componentkey="...">`) that
-    // get filled via async XHR after the user scrolls them into view.
-    //
-    // So we scroll the page programmatically, wait for SDUI to fetch the async
-    // sections, then grab the HTML. ~3.5s total wait inside keepAlive.
-    progress('scraping');
-    // Deep mode is the only mode now. Clear stale cancel/progress before the
-    // recent-activity scrape can poll them. The main-profile inject below
-    // intentionally does NOT use deep/cancel/progress — byte-for-byte v0.4.0.
-    await setDeepScrapeCancel(false);
-    await setDeepScrapeProgress(null);
-    let html: string | null = null;
-    try {
-      // INTENTIONAL: this inject is byte-for-byte the v0.4.0 main-profile
-      // scrape. Anything more (cancel polling, progress writes, extra DOM
-      // checks) prolongs the run and triggers LinkedIn's degraded SSR for
-      // owner-view of /in/{handle}/. Keep it minimal. Deep-mode features
-      // live in scrapeInActiveTab (recent-activity scrape).
-      const results = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: async () => {
-          const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-          const originalScroll = window.scrollY;
-          const main = document.querySelector('main');
-          const scope = main ?? document;
-          const heightLog: number[] = [];
+      // Step 3: inject an HTML-grab function. Parser runs in popup context (step 4).
+      //
+      // v0.5.6 — LinkedIn migrated to React Server-Driven UI (SDUI). The initial
+      // HTML only contains top-card (name/headline/location). About / Skills /
+      // Activity sections are EMPTY placeholders (`<div componentkey="...">`) that
+      // get filled via async XHR after the user scrolls them into view.
+      //
+      // So we scroll the page programmatically, wait for SDUI to fetch the async
+      // sections, then grab the HTML. ~3.5s total wait inside keepAlive.
+      progress('scraping');
+      // Deep mode is the only mode now. Clear stale cancel/progress before the
+      // recent-activity scrape can poll them. The main-profile inject below
+      // intentionally does NOT use deep/cancel/progress — byte-for-byte v0.4.0.
+      await setDeepScrapeCancel(false);
+      await setDeepScrapeProgress(null);
+      let html: string | null = null;
+      try {
+        // INTENTIONAL: this inject is byte-for-byte the v0.4.0 main-profile
+        // scrape. Anything more (cancel polling, progress writes, extra DOM
+        // checks) prolongs the run and triggers LinkedIn's degraded SSR for
+        // owner-view of /in/{handle}/. Keep it minimal. Deep-mode features
+        // live in scrapeInActiveTab (recent-activity scrape).
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: async () => {
+            const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+            const originalScroll = window.scrollY;
+            const main = document.querySelector('main');
+            const scope = main ?? document;
+            const heightLog: number[] = [];
 
-          // Phase 1 — brute scroll until ALL expected sections appear in DOM
-          // OR scrollHeight has been stable for 3 iterations. Bails as soon as
-          // experience/education/skills/projects h2s are present.
-          const TARGETS = /^(experience|education|skills(\s*\(\d+\))?|projects(\s*\(\d+\))?)/i;
-          const hasAllTargets = () => {
-            const seen = new Set<string>();
-            const list = Array.from((main ?? document).querySelectorAll('h2, h3'));
-            for (const h of list) {
-              const t = (h.textContent ?? '').trim();
-              const m = t.match(/^(experience|education|skills|projects)/i);
-              if (m) seen.add(m[1].toLowerCase());
-            }
-            return seen.size >= 4;
-          };
-          let lastHeight = 0;
-          let stableCount = 0;
-          for (let i = 0; i < 20; i++) {
-            const h = Math.max(
-              document.documentElement.scrollHeight,
-              document.body.scrollHeight,
-              main?.scrollHeight ?? 0,
-            );
-            heightLog.push(h);
-            window.scrollTo({ top: h, behavior: 'instant' });
-            if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
-            document.documentElement.scrollTop = h;
-            await wait(700);
-            if (i >= 4 && hasAllTargets()) break;
-            if (h === lastHeight) {
-              stableCount++;
-              if (stableCount >= 3 && i >= 6) break;
-            } else {
-              stableCount = 0;
-            }
-            lastHeight = h;
-          }
-
-          // Phase 2 — only scrollIntoView the target sections (not every h2).
-          // Wait 500ms each; LinkedIn 2026 uses <div componentkey> + <p>, not
-          // <li>, so the old "if items==0 wait more" heuristic was wrong.
-          const headings = Array.from(scope.querySelectorAll('h2, h3')) as HTMLElement[];
-          for (const h of headings) {
-            if (!TARGETS.test((h.textContent ?? '').trim())) continue;
-            try {
-              h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
-              await wait(500);
-            } catch {
-              /* ignore */
-            }
-          }
-          await wait(400);
-
-          window.scrollTo({ top: originalScroll, behavior: 'instant' });
-          if (main && 'scrollTo' in main) main.scrollTo({ top: originalScroll, behavior: 'instant' });
-          await wait(300);
-
-          // Diagnostic dump alongside HTML so popup can console.log it.
-          const targets = ['experience', 'education', 'skills', 'licenses', 'languages', 'projects', 'certifications'];
-          const diag = {
-            heightLog,
-            finalHeight: Math.max(
-              document.documentElement.scrollHeight,
-              document.body.scrollHeight,
-              main?.scrollHeight ?? 0,
-            ),
-            h2List: headings.map((h) => (h.textContent ?? '').trim()).slice(0, 40),
-            sectionItemCounts: targets.map((t) => {
-              const h = headings.find((el) =>
-                new RegExp(`^${t}(\\s*\\(\\d+\\))?\\b`, 'i').test((el.textContent ?? '').trim()),
+            // Phase 1 — brute scroll until ALL expected sections appear in DOM
+            // OR scrollHeight has been stable for 3 iterations. Bails as soon as
+            // experience/education/skills/projects h2s are present.
+            const TARGETS = /^(experience|education|skills(\s*\(\d+\))?|projects(\s*\(\d+\))?)/i;
+            const hasAllTargets = () => {
+              const seen = new Set<string>();
+              const list = Array.from((main ?? document).querySelectorAll('h2, h3'));
+              for (const h of list) {
+                const t = (h.textContent ?? '').trim();
+                const m = t.match(/^(experience|education|skills|projects)/i);
+                if (m) seen.add(m[1].toLowerCase());
+              }
+              return seen.size >= 4;
+            };
+            let lastHeight = 0;
+            let stableCount = 0;
+            for (let i = 0; i < 20; i++) {
+              const h = Math.max(
+                document.documentElement.scrollHeight,
+                document.body.scrollHeight,
+                main?.scrollHeight ?? 0
               );
-              const card = h?.closest('section, div[componentkey]') ?? null;
-              return { t, found: !!h, items: card?.querySelectorAll('li').length ?? 0 };
-            }),
-          };
-          return (
-            document.documentElement.outerHTML +
-            `\n<!-- LINKMATE_DIAG:${JSON.stringify(diag)} -->`
-          );
-        },
-      });
-      html = (results?.[0]?.result as string | undefined) ?? null;
-    } catch (err) {
-      return {
-        ok: false,
-        reason: 'script-failed',
-        message: `Could not read profile DOM: ${String(err)}`,
-      };
-    }
-    if (!html) {
-      return {
-        ok: false,
-        reason: 'script-failed',
-        message: 'Profile DOM grab returned nothing. The page may still be loading.',
-      };
-    }
+              heightLog.push(h);
+              window.scrollTo({ top: h, behavior: 'instant' });
+              if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
+              document.documentElement.scrollTop = h;
+              await wait(700);
+              if (i >= 4 && hasAllTargets()) break;
+              if (h === lastHeight) {
+                stableCount++;
+                if (stableCount >= 3 && i >= 6) break;
+              } else {
+                stableCount = 0;
+              }
+              lastHeight = h;
+            }
 
-    // Step 4: parse in popup context
-    progress('parsing');
-    const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
-    const rawFields: RawProfileFields = parseProfileDom(parsedDoc);
+            // Phase 2 — only scrollIntoView the target sections (not every h2).
+            // Wait 500ms each; LinkedIn 2026 uses <div componentkey> + <p>, not
+            // <li>, so the old "if items==0 wait more" heuristic was wrong.
+            const headings = Array.from(scope.querySelectorAll('h2, h3')) as HTMLElement[];
+            for (const h of headings) {
+              if (!TARGETS.test((h.textContent ?? '').trim())) continue;
+              try {
+                h.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+                await wait(500);
+              } catch {
+                /* ignore */
+              }
+            }
+            await wait(400);
 
-    // Extract diagnostic block embedded by the inject script (issue #16 debug)
-    const diagMatch = html.match(/<!-- LINKMATE_DIAG:({[\s\S]*?}) -->/);
-    if (diagMatch) {
+            window.scrollTo({ top: originalScroll, behavior: 'instant' });
+            if (main && 'scrollTo' in main)
+              main.scrollTo({ top: originalScroll, behavior: 'instant' });
+            await wait(300);
+
+            // Diagnostic dump alongside HTML so popup can console.log it.
+            const targets = [
+              'experience',
+              'education',
+              'skills',
+              'licenses',
+              'languages',
+              'projects',
+              'certifications',
+            ];
+            const diag = {
+              heightLog,
+              finalHeight: Math.max(
+                document.documentElement.scrollHeight,
+                document.body.scrollHeight,
+                main?.scrollHeight ?? 0
+              ),
+              h2List: headings.map((h) => (h.textContent ?? '').trim()).slice(0, 40),
+              sectionItemCounts: targets.map((t) => {
+                const h = headings.find((el) =>
+                  new RegExp(`^${t}(\\s*\\(\\d+\\))?\\b`, 'i').test((el.textContent ?? '').trim())
+                );
+                const card = h?.closest('section, div[componentkey]') ?? null;
+                return { t, found: !!h, items: card?.querySelectorAll('li').length ?? 0 };
+              }),
+            };
+            return (
+              document.documentElement.outerHTML +
+              `\n<!-- LINKMATE_DIAG:${JSON.stringify(diag)} -->`
+            );
+          },
+        });
+        html = (results?.[0]?.result as string | undefined) ?? null;
+      } catch (err) {
+        return {
+          ok: false,
+          reason: 'script-failed',
+          message: `Could not read profile DOM: ${String(err)}`,
+        };
+      }
+      if (!html) {
+        return {
+          ok: false,
+          reason: 'script-failed',
+          message: 'Profile DOM grab returned nothing. The page may still be loading.',
+        };
+      }
+
+      // Step 4: parse in popup context
+      progress('parsing');
+      const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
+      const rawFields: RawProfileFields = parseProfileDom(parsedDoc);
+
+      // Extract diagnostic block embedded by the inject script (issue #16 debug)
+      const diagMatch = html.match(/<!-- LINKMATE_DIAG:({[\s\S]*?}) -->/);
+      if (diagMatch) {
+        try {
+          const diag = JSON.parse(diagMatch[1]);
+          console.log('[LinkMate diag]', diag);
+        } catch {
+          /* ignore parse error */
+        }
+      }
+
+      // v0.5.2 — sanity check: if EVERY extracted field is empty, the parser
+      // doesn't match the current LinkedIn DOM. Surface a loud error instead of
+      // letting the AI hallucinate a positioning summary from nothing.
+      const parsedAnything =
+        rawFields.fullName ||
+        rawFields.headline ||
+        rawFields.about ||
+        rawFields.topSkills.length > 0 ||
+        rawFields.recentPostThemes.length > 0;
+      if (!parsedAnything) {
+        return {
+          ok: false,
+          reason: 'script-failed',
+          message:
+            "Profile parser couldn't read any fields from this page. LinkedIn's DOM may have changed — please report this. (Tip: run scripts/dump-linkedin-profile-dom.js in DevTools and share the JSON.)",
+        };
+      }
+
+      // Step 5 — Issue #16: pure-algorithm DOM scrape → IDB. Runs FIRST and is
+      // independent of any AI. If OpenAI key isn't configured or the API errors
+      // out later, we still have the structured profile saved.
+      let userProfile: UserProfile | undefined;
+      if (fullProfileEnabled && activeTab?.id !== undefined) {
+        try {
+          const fresh = await captureFullUserProfile(url, parsedDoc, activeTab.id);
+          // URN-merge with previous snapshot — accumulates history across runs
+          // so old activity isn't lost when LinkedIn paginates it out of view.
+          const previous = await getUserProfile().catch(() => null);
+          userProfile = mergeUserProfile(previous, fresh);
+          await saveUserProfile(userProfile);
+        } catch (err) {
+          if (err instanceof CheckpointError) {
+            await setDeepScrapeProgress(null);
+            await setDeepScrapeCancel(false);
+            return {
+              ok: false,
+              reason: 'checkpoint',
+              message:
+                'LinkedIn asked for verification (checkpoint). Open the tab, complete the challenge, then click Capture again.',
+            };
+          }
+          console.warn('[LinkMate] Full profile capture failed:', err);
+        }
+      }
+      // Always clear the progress badge on the way out.
+      // captureFullUserProfile's finally{} does the same for the normal path,
+      // but this catches early-return paths above (parser-empty, etc).
+      await setDeepScrapeProgress(null);
+      await setDeepScrapeCancel(false);
+
+      // Step 6 — OpenAI positioning summary + chrome.storage ProfileContext.
+      // Powers AI-drafted comments elsewhere in the extension. NON-BLOCKING:
+      // failure here doesn't invalidate the IDB write above.
+      //
+      // Skip the OpenAI round-trip entirely when no API key is configured —
+      // the summary call would just fail anyway, but skipping avoids ~5s of
+      // background work and a noisy error in the console. The AI feed scoring
+      // (issue #18) does not require positioningSummary; it falls back to the
+      // rich IDB UserProfile via formatUserBackground().
+      progress('summarizing');
+      let profile: ProfileContext | undefined;
+      let summaryError: string | undefined;
+      let providerKeyConfigured = true;
       try {
-        const diag = JSON.parse(diagMatch[1]);
-        console.log('[LinkMate diag]', diag);
+        const cfg = await getProviderConfig();
+        providerKeyConfigured = Boolean(cfg.openai?.apiKey?.trim());
       } catch {
-        /* ignore parse error */
+        /* read failure → assume no key, skip the call */
+        providerKeyConfigured = false;
       }
-    }
-
-    // v0.5.2 — sanity check: if EVERY extracted field is empty, the parser
-    // doesn't match the current LinkedIn DOM. Surface a loud error instead of
-    // letting the AI hallucinate a positioning summary from nothing.
-    const parsedAnything =
-      rawFields.fullName ||
-      rawFields.headline ||
-      rawFields.about ||
-      rawFields.topSkills.length > 0 ||
-      rawFields.recentPostThemes.length > 0;
-    if (!parsedAnything) {
-      return {
-        ok: false,
-        reason: 'script-failed',
-        message:
-          "Profile parser couldn't read any fields from this page. LinkedIn's DOM may have changed — please report this. (Tip: run scripts/dump-linkedin-profile-dom.js in DevTools and share the JSON.)",
-      };
-    }
-
-    // Step 5 — Issue #16: pure-algorithm DOM scrape → IDB. Runs FIRST and is
-    // independent of any AI. If OpenAI key isn't configured or the API errors
-    // out later, we still have the structured profile saved.
-    let userProfile: UserProfile | undefined;
-    if (fullProfileEnabled && activeTab?.id !== undefined) {
-      try {
-        const fresh = await captureFullUserProfile(url, parsedDoc, activeTab.id);
-        // URN-merge with previous snapshot — accumulates history across runs
-        // so old activity isn't lost when LinkedIn paginates it out of view.
-        const previous = await getUserProfile().catch(() => null);
-        userProfile = mergeUserProfile(previous, fresh);
-        await saveUserProfile(userProfile);
-      } catch (err) {
-        if (err instanceof CheckpointError) {
-          await setDeepScrapeProgress(null);
-          await setDeepScrapeCancel(false);
-          return {
-            ok: false,
-            reason: 'checkpoint',
-            message:
-              'LinkedIn asked for verification (checkpoint). Open the tab, complete the challenge, then click Capture again.',
-          };
+      if (!providerKeyConfigured) {
+        summaryError = 'No OpenAI API key configured — positioning summary skipped.';
+      } else {
+        try {
+          const response = (await chrome.runtime.sendMessage({
+            action: 'profile.capture',
+            fields: rawFields,
+          })) as ProfileCaptureResponse;
+          if (response?.ok && response.positioningSummary) {
+            profile = {
+              ...rawFields,
+              positioningSummary: response.positioningSummary,
+              capturedAt: Date.now(),
+            };
+            await setProfile(profile);
+          } else {
+            summaryError = response?.error ?? 'No positioning summary returned.';
+          }
+        } catch (err) {
+          summaryError = `Background did not respond: ${String(err)}`;
         }
-        console.warn('[LinkMate] Full profile capture failed:', err);
       }
-    }
-    // Always clear the progress badge on the way out.
-    // captureFullUserProfile's finally{} does the same for the normal path,
-    // but this catches early-return paths above (parser-empty, etc).
-    await setDeepScrapeProgress(null);
-    await setDeepScrapeCancel(false);
-
-    // Step 6 — OpenAI positioning summary + chrome.storage ProfileContext.
-    // Powers AI-drafted comments elsewhere in the extension. NON-BLOCKING:
-    // failure here doesn't invalidate the IDB write above.
-    //
-    // Skip the OpenAI round-trip entirely when no API key is configured —
-    // the summary call would just fail anyway, but skipping avoids ~5s of
-    // background work and a noisy error in the console. The AI feed scoring
-    // (issue #18) does not require positioningSummary; it falls back to the
-    // rich IDB UserProfile via formatUserBackground().
-    progress('summarizing');
-    let profile: ProfileContext | undefined;
-    let summaryError: string | undefined;
-    let providerKeyConfigured = true;
-    try {
-      const cfg = await getProviderConfig();
-      providerKeyConfigured = Boolean(cfg.openai?.apiKey?.trim());
-    } catch {
-      /* read failure → assume no key, skip the call */
-      providerKeyConfigured = false;
-    }
-    if (!providerKeyConfigured) {
-      summaryError = 'No OpenAI API key configured — positioning summary skipped.';
-    } else {
-      try {
-        const response = (await chrome.runtime.sendMessage({
-          action: 'profile.capture',
-          fields: rawFields,
-        })) as ProfileCaptureResponse;
-        if (response?.ok && response.positioningSummary) {
-          profile = {
-            ...rawFields,
-            positioningSummary: response.positioningSummary,
-            capturedAt: Date.now(),
-          };
-          await setProfile(profile);
-        } else {
-          summaryError = response?.error ?? 'No positioning summary returned.';
-        }
-      } catch (err) {
-        summaryError = `Background did not respond: ${String(err)}`;
+      if (summaryError) {
+        console.warn('[LinkMate] positioning summary skipped:', summaryError);
       }
-    }
-    if (summaryError) {
-      console.warn('[LinkMate] positioning summary skipped:', summaryError);
-    }
 
-    progress('done');
-    return { ok: true, profile, userProfile, summaryError };
+      progress('done');
+      return { ok: true, profile, userProfile, summaryError };
     } finally {
       // ALWAYS close the capture tab we opened, regardless of how we exited.
       if (hiddenTabId !== undefined) await closeHiddenTab(hiddenTabId);
@@ -606,7 +614,7 @@ async function scrapeAllSkills(tabId: number, handle: string): Promise<string[]>
       (t) => {
         if (t.status === 'complete') finish();
       },
-      () => finish(),
+      () => finish()
     );
   });
   try {
@@ -622,7 +630,7 @@ async function scrapeAllSkills(tabId: number, handle: string): Promise<string[]>
           const h = Math.max(
             document.documentElement.scrollHeight,
             document.body.scrollHeight,
-            main?.scrollHeight ?? 0,
+            main?.scrollHeight ?? 0
           );
           window.scrollTo({ top: h, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
@@ -658,10 +666,7 @@ async function scrapeAllSkills(tabId: number, handle: string): Promise<string[]>
     }
     if (!card) return [];
     const ROLE_CONTEXT = /\bat\s+\S/i;
-    const SKIP_EXACT = new Set([
-      'Skills',
-      'Passed LinkedIn Skill Assessment',
-    ]);
+    const SKIP_EXACT = new Set(['Skills', 'Passed LinkedIn Skill Assessment']);
     const SKIP_PATTERN = /^(\d+\s*endorsements?|Show all|See all)\b/i;
     const skills: string[] = [];
     for (const p of Array.from(card.querySelectorAll('p'))) {
@@ -733,7 +738,7 @@ async function scrapeInActiveTab(
       (tab) => {
         if (tab.status === 'complete') finish();
       },
-      () => finish(),
+      () => finish()
     );
   });
 
@@ -757,7 +762,7 @@ async function scrapeInActiveTab(
         const hasCheckpoint = () =>
           /\/checkpoint\b/i.test(window.location.pathname) ||
           !!document.querySelector(
-            'form[action*="/checkpoint/"], #captcha-internal-iframe, [id^="captcha-"], iframe[src*="arkoselabs"]',
+            'form[action*="/checkpoint/"], #captcha-internal-iframe, [id^="captcha-"], iframe[src*="arkoselabs"]'
           );
         if (hasCheckpoint()) {
           return cfg.checkpointMarker;
@@ -809,7 +814,7 @@ async function scrapeInActiveTab(
           const h = Math.max(
             document.documentElement.scrollHeight,
             document.body.scrollHeight,
-            main?.scrollHeight ?? 0,
+            main?.scrollHeight ?? 0
           );
           window.scrollTo({ top: h, behavior: 'instant' });
           if (main && 'scrollTo' in main) main.scrollTo({ top: h, behavior: 'instant' });
@@ -822,7 +827,7 @@ async function scrapeInActiveTab(
             break;
           }
           const itemCount = (main ?? document).querySelectorAll(
-            '[data-urn^="urn:li:activity"]',
+            '[data-urn^="urn:li:activity"]'
           ).length;
           await writeProgress(i + 1, itemCount, h);
           if (await isCancelled()) {

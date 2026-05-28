@@ -3,11 +3,7 @@
 
 import { FeedPostOverlay } from './feed-post-overlay';
 import { scanPostForOutcome } from './outcome-scanner';
-import type {
-  AiScoreFeedResult,
-  AiScoredPostDTO,
-  ScoreFeedResult,
-} from './feed-post-overlay';
+import type { AiScoreFeedResult, AiScoredPostDTO, ScoreFeedResult } from './feed-post-overlay';
 import type { ParsedPost, ScoredPost } from './storage-schema';
 
 console.log('LinkMate LinkedIn content script loaded');
@@ -81,14 +77,9 @@ class LinkedInLinkMate {
             error?: string;
           }>({ action: 'queue.aiScoreFeed', posts });
           if (!resp) {
-            console.warn('[LinkMate] queue.aiScoreFeed (overlay): no response from SW (channel closed)');
             return { ok: false, reason: 'network' };
           }
           if (resp.ok === false) {
-            console.warn(
-              `[LinkMate] queue.aiScoreFeed (overlay) failed — reason=${resp.reason ?? 'unknown'}`,
-              resp.error ?? '(no error string)',
-            );
             return { ok: false, reason: resp.reason ?? 'network', error: resp.error };
           }
           return { ok: true, results: resp.results ?? [] };
@@ -985,7 +976,7 @@ class LinkedInLinkMate {
         if (chrome.runtime.lastError) {
           console.warn('[linkmate] action.log.append failed', chrome.runtime.lastError.message);
         }
-      },
+      }
     );
   }
 

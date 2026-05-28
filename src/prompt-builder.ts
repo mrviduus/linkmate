@@ -202,7 +202,7 @@ export function buildRecommenderPrompt(input: BuildRecommenderPromptInput): {
           .slice(0, 5)
           .map(
             (o, i) =>
-              `  ${i + 1}. topic=${o.topic ?? '?'} likes=${o.likes ?? '?'} replies=${o.replies ?? '?'}`,
+              `  ${i + 1}. topic=${o.topic ?? '?'} likes=${o.likes ?? '?'} replies=${o.replies ?? '?'}`
           )
           .join('\n');
 
@@ -218,7 +218,7 @@ export function buildRecommenderPrompt(input: BuildRecommenderPromptInput): {
           .slice(0, 6)
           .map(
             (p) =>
-              `  - id=${p.id} author="${p.authorName}" topics=[${(p.topics ?? []).join(',')}] text="${p.text.slice(0, 140)}"`,
+              `  - id=${p.id} author="${p.authorName}" topics=[${(p.topics ?? []).join(',')}] text="${p.text.slice(0, 140)}"`
           )
           .join('\n');
 
@@ -266,7 +266,8 @@ export function buildPostDraftPrompt(input: BuildPostDraftPromptInput): {
 
   const topicsLine =
     input.topTopics.length === 0 ? 'none tracked' : input.topTopics.map((t) => t.topic).join(', ');
-  const gapsLine = input.underweightTopics.length === 0 ? 'none' : input.underweightTopics.join(', ');
+  const gapsLine =
+    input.underweightTopics.length === 0 ? 'none' : input.underweightTopics.join(', ');
 
   const user = [
     `Profile positioning: ${input.profile.positioningSummary}`,
