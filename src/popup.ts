@@ -151,6 +151,12 @@ async function loadProviderConfig(): Promise<void> {
     groq: { apiKey: '', model: 'groq/compound' },
   };
   renderProviderForm(cfg);
+  try {
+    const profile = await getUserProfile();
+    updateOnboardingBanner(profile);
+  } catch {
+    updateOnboardingBanner(null);
+  }
 }
 
 async function handleProviderSave(): Promise<void> {
@@ -187,6 +193,12 @@ async function handleProviderSave(): Promise<void> {
       // (if visible) flashes a hint so the user knows where to retry.
       await loadProfileAudit();
       showAuditStatus('OpenAI key saved — click Get AI rewrites for suggestions.', 'info');
+      try {
+        const profile = await getUserProfile();
+        updateOnboardingBanner(profile);
+      } catch {
+        updateOnboardingBanner(null);
+      }
     } else {
       showProviderMessage(`Save failed: ${resp.error ?? 'unknown'}`, 'error');
     }
@@ -294,9 +306,36 @@ async function refreshCaptureHero(): Promise<void> {
   try {
     const profile = await getUserProfile();
     renderHero(profile ? { kind: 'ok', profile } : { kind: 'empty' });
+    updateOnboardingBanner(profile);
   } catch {
     renderHero({ kind: 'empty' });
+    updateOnboardingBanner(null);
   }
+}
+
+function updateOnboardingBanner(profile: UserProfile | null): void {
+  const banner = document.getElementById('onboardingBanner');
+  const text = document.getElementById('onboardingBannerText');
+  const icon = document.getElementById('onboardingBannerIcon');
+  if (!banner || !text || !icon) return;
+  const cfg = currentProviderConfig;
+  const apiKey =
+    cfg.mode === 'openai' ? cfg.openai?.apiKey?.trim() : cfg.groq?.apiKey?.trim();
+  if (!apiKey) {
+    banner.style.display = '';
+    banner.classList.remove('onboarding-banner--profile');
+    icon.className = 'fa fa-hand-point-down';
+    text.textContent = '👋 Paste your OpenAI API key below to start.';
+    return;
+  }
+  if (!profile) {
+    banner.style.display = '';
+    banner.classList.add('onboarding-banner--profile');
+    icon.className = 'fa fa-camera';
+    text.textContent = "👋 Click 'Capture profile' to scan your LinkedIn.";
+    return;
+  }
+  banner.style.display = 'none';
 }
 
 async function handleHeroRefresh(): Promise<void> {

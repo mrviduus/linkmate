@@ -12,7 +12,7 @@
 
 <p align="center">
   An intelligent, zero-backend, privacy-first AI agent built into your browser.<br/>
-  Audits your profile, maps your metrics, and helps you post, engage, and grow — all locally.
+  Your OpenAI key and data stay in your browser — only the prompts go to OpenAI.
 </p>
 
 <p align="center">
@@ -28,9 +28,9 @@
 <br/>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Unit%20Tests-355-38bdf8?style=flat-square&logo=checkmarx&logoColor=white" />
+  <img src="https://img.shields.io/badge/Unit%20Tests-477-38bdf8?style=flat-square&logo=checkmarx&logoColor=white" />
   &nbsp;&nbsp;
-  <img src="https://img.shields.io/badge/Test%20Suites-28-a78bfa?style=flat-square&logo=jest&logoColor=white" />
+  <img src="https://img.shields.io/badge/Test%20Suites-34-a78bfa?style=flat-square&logo=jest&logoColor=white" />
   &nbsp;&nbsp;
   <img src="https://img.shields.io/badge/Build%20Time-~5%20Days-34d399?style=flat-square&logo=clockify&logoColor=white" />
   &nbsp;&nbsp;
@@ -43,7 +43,7 @@
 
 **The Problem:** LinkedIn uses a complex, opaque **Social Selling Index (SSI)** score — spanning *Brand, Finding, Engaging, and Relationships* — to rank every account. It tells you *what* your score is, but never *how* to change it. Most users guess. The lucky ones grind for hours.
 
-**The Solution:** **LinkMate** is a local-first Chrome Extension that parses your profile and SSI score, instantly surfaces optimization gaps and weekly quotas, then drafts targeted posts and replies in your own voice. **No data ever leaves your browser** except the prompts you send directly to OpenAI with your own key (BYOK).
+**The Solution:** **LinkMate** is a local-first Chrome Extension that parses your profile and SSI score, instantly surfaces optimization gaps and weekly quotas, then drafts targeted posts and replies in your own voice. Your OpenAI key and data stay in your browser — only the prompts you send go to OpenAI (BYOK).
 
 ---
 
@@ -89,7 +89,7 @@ We built LinkMate to make organic LinkedIn growth effortless, transparent, and c
 
 ## 🏗️ System & Design Architecture
 
-The core logic is split across three distinct layers — content scripts, a background service worker, and the popup UI — with all data persisted locally.
+The core logic is split across three distinct layers — content scripts, a background service worker, and the Side Panel UI — with all data persisted locally.
 
 ### System Architecture
 
@@ -113,8 +113,11 @@ The core logic is split across three distinct layers — content scripts, a back
 | `profile-audit.ts` | Rule-check pipeline: 6 completeness conditions + 4 activity thresholds |
 | `profile-audit-prompts.ts` | Structured JSON prompt builder with concept blacklist & rotation arrays |
 | `profile-recommender.ts` | Executes and dedupes parallel LLM suggestions with fallback thresholds |
-| `engagement-queue.ts` | Relevance scorer sorting feed posts based on profile topic overlap |
+| `feed-parser.ts` + `relevance-scorer.ts` | Ranks feed posts vs profile (topic / tier / degree / recency / engagement / diversity) |
+| `feed-post-overlay.ts` + `ai-feed-analyzer.ts` + `ai-feed-prompts.ts` | Per-post AI overlay on `/feed/*` — relevance reasoning + draft reply, gated by profile context |
+| `outcome-scanner.ts` | Lazy auto-read of likes + replies on the user's own comment when they revisit a post |
 | `action-log.ts` + `cadence.ts` | Append-only IndexedDB metrics ledger recording streak patterns |
+| `popup.html` / `.ts` / `.css` | **Rendered as Chrome Side Panel** (manifest `side_panel.default_path`) |
 
 ---
 
@@ -124,7 +127,7 @@ Data is segmented into three storage systems to guarantee maximum privacy and O(
 
 | Storage | Role | Contents |
 |---|---|---|
-| 🔵 **`chrome.storage.local`** | Hot State | Decrypted OpenAI key, profile metrics, cached cards, SSI history snapshots |
+| 🔵 **`chrome.storage.local`** | Hot State | OpenAI key, profile metrics, cached cards, SSI history snapshots |
 | 🟣 **`chrome.storage.sync`** | Cross-Device Sync | Non-sensitive preferences — customized prompts and generation parameters. *Secrets are never synced.* |
 | 🟢 **IndexedDB** | Time-Series Ledger | Append-only action records and outcome logs. Indices keep queries fast as records grow unbounded. |
 
@@ -149,7 +152,7 @@ npm run build
 
 **Step 3 — Add your API Key**
 
-Open the LinkMate popup via the extensions toolbar, go to **Settings**, paste your OpenAI API Key, and save.
+Click the LinkMate icon to open the **Side Panel**, paste your OpenAI API Key, and save.
 
 ---
 
@@ -160,7 +163,7 @@ Open the LinkMate popup via the extensions toolbar, go to **Settings**, paste yo
 | `npm run dev` | Interactive watch mode via Parcel |
 | `npm run build` | Production extension bundle into `/dist` |
 | `npm run zip` | Package release zip for distribution |
-| `npm test` | Run all 355 unit tests across 28 suites |
+| `npm test` | Run all 477 unit tests across 34 suites |
 | `npm run type-check` | Strict TypeScript compile audit |
 
 ---
