@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>LinkMate — Stop working for LinkedIn</title>
-<meta name="description" content="LinkMate is a Chrome extension that audits your LinkedIn profile + feed and tells you what to fix, who to engage, and what to post next. Built for HataCon." />
+<meta name="description" content="LinkMate is a Chrome extension that audits your LinkedIn profile + feed and tells you what to fix, who to engage, and what to post next. Built for TMLS Agentic Hackathon." />
 <meta property="og:title" content="LinkMate — Stop working for LinkedIn" />
-<meta property="og:description" content="AI agent that makes LinkedIn work for you. Chrome MV3 · BYOK · 355 tests · 5 days." />
+<meta property="og:description" content="AI agent that makes LinkedIn work for you. Chrome MV3 · BYOK · 477 tests · 5 days." />
 <meta property="og:image" content="icon.png" />
 <link rel="icon" href="icon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -324,6 +324,94 @@ footer a{color:var(--muted)}footer a:hover{color:var(--text)}
 /* ───── kbd ───── */
 kbd{font-family:'JetBrains Mono',monospace;font-size:12px;background:rgba(255,255,255,.05);border:1px solid var(--border-2);border-bottom-width:2px;padding:2px 7px;border-radius:6px;color:var(--text)}
 
+/* ───── agent loop ───── */
+.agent-loop{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:stretch;
+  position:relative;margin-top:28px;
+}
+.agent-stage{
+  position:relative;padding:22px 20px 20px;border-radius:18px;
+  background:linear-gradient(180deg,rgba(22,27,39,.7),rgba(15,19,28,.7));
+  border:1px solid var(--border);
+  transition:border-color .25s,transform .25s;
+  overflow:hidden;
+}
+.agent-stage:hover{border-color:var(--border-2);transform:translateY(-3px)}
+.agent-stage::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--li-2),var(--accent));opacity:.85;
+}
+.agent-stage .step-num{
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--li-2);
+  background:rgba(10,102,194,.12);border:1px solid rgba(10,102,194,.25);
+  padding:2px 8px;border-radius:6px;display:inline-block;margin-bottom:10px;
+  letter-spacing:.06em;
+}
+.agent-stage h4{font-size:17px;font-weight:700;margin-bottom:8px;letter-spacing:-.01em}
+.agent-stage .what{font-size:13.5px;color:var(--text);margin-bottom:8px;line-height:1.45}
+.agent-stage .why{font-size:12.5px;color:var(--muted);line-height:1.5;border-top:1px dashed var(--border);padding-top:8px}
+.agent-stage .why b{color:var(--accent);font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:10.5px;display:block;margin-bottom:3px}
+.agent-stage .arrow{
+  position:absolute;right:-18px;top:50%;transform:translateY(-50%);
+  width:24px;height:24px;border-radius:50%;
+  background:var(--bg-2);border:1px solid var(--border-2);
+  display:flex;align-items:center;justify-content:center;z-index:2;
+  color:var(--li-2);font-weight:800;font-size:13px;
+}
+.agent-stage:last-child .arrow{display:none}
+.agent-loop-wrap{position:relative}
+.agent-loop-back{
+  position:absolute;left:14px;right:14px;bottom:-44px;height:30px;
+  border-left:2px dashed rgba(167,139,250,.35);
+  border-right:2px dashed rgba(167,139,250,.35);
+  border-bottom:2px dashed rgba(167,139,250,.35);
+  border-radius:0 0 18px 18px;
+  pointer-events:none;
+}
+.agent-loop-back::after{
+  content:'reflection → tomorrow\'s prompt';
+  position:absolute;left:50%;bottom:-22px;transform:translateX(-50%);
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent);
+  background:var(--bg);padding:2px 12px;border-radius:999px;
+  border:1px solid rgba(167,139,250,.35);letter-spacing:.04em;white-space:nowrap;
+}
+@media(max-width:880px){
+  .agent-loop{grid-template-columns:1fr;gap:14px}
+  .agent-stage .arrow{display:none}
+  .agent-loop-back{display:none}
+}
+
+/* ───── demo modal ───── */
+.demo-modal{
+  position:fixed;inset:0;z-index:100;display:none;
+  align-items:center;justify-content:center;
+  background:rgba(2,4,8,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  padding:32px;animation:demoFade .18s ease;
+}
+.demo-modal.open{display:flex}
+@keyframes demoFade{from{opacity:0}to{opacity:1}}
+.demo-modal .demo-shell{
+  position:relative;width:min(1100px,100%);max-height:88vh;
+  border-radius:18px;overflow:hidden;background:#000;
+  border:1px solid var(--border-2);box-shadow:var(--shadow);
+  animation:demoPop .25s cubic-bezier(.2,.9,.2,1);
+}
+@keyframes demoPop{from{transform:scale(.96);opacity:.6}to{transform:scale(1);opacity:1}}
+.demo-modal video,.demo-modal img{width:100%;height:auto;max-height:88vh;display:block;background:#000}
+.demo-modal .demo-close{
+  position:absolute;top:12px;right:12px;z-index:2;
+  width:36px;height:36px;border-radius:50%;border:1px solid var(--border-2);
+  background:rgba(0,0,0,.55);color:#fff;font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .2s,transform .15s;
+}
+.demo-modal .demo-close:hover{background:rgba(0,0,0,.85);transform:scale(1.05)}
+@media(max-width:680px){
+  .demo-modal{padding:0}
+  .demo-modal .demo-shell{width:100%;height:100%;max-height:100%;border-radius:0;border:none;display:flex;align-items:center;justify-content:center}
+  .demo-modal video,.demo-modal img{max-height:100%}
+}
+
 /* ───── conf badge ───── */
 .conf{
   display:inline-flex;align-items:center;gap:8px;padding:5px 11px;border-radius:999px;
@@ -341,6 +429,7 @@ kbd{font-family:'JetBrains Mono',monospace;font-size:12px;background:rgba(255,25
 <nav>
   <a class="brand" href="#top"><img src="icon.png" alt="LinkMate logo" /> LinkMate</a>
   <ul>
+    <li><a href="#agent">Agent</a></li>
     <li><a href="#features">Features</a></li>
     <li><a href="#demo">Demo</a></li>
     <li><a href="#architecture">Architecture</a></li>
@@ -357,7 +446,7 @@ kbd{font-family:'JetBrains Mono',monospace;font-size:12px;background:rgba(255,25
     <div>
       <div class="conf">
         <svg class="star" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7h7.6l-6.2 4.5 2.4 7.5L12 16.5 5.8 21l2.4-7.5L2 9h7.6Z"/></svg>
-        HataCon · live demo
+        TMLS Agentic Hackathon · live demo
       </div>
       <h1>
         Stop working<br/>
@@ -366,10 +455,10 @@ kbd{font-family:'JetBrains Mono',monospace;font-size:12px;background:rgba(255,25
       </h1>
       <p class="lede">
         A Chrome extension + AI agent that audits your LinkedIn profile and feed, then tells you what to fix,
-        who to engage, and what to post next. <b style="color:var(--text)">Cloud‑only, BYOK, your data never leaves the browser.</b>
+        who to engage, and what to post next. <b style="color:var(--text)">Your OpenAI key and data stay in your browser — only the prompts go to OpenAI.</b>
       </p>
       <div class="hero-ctas">
-        <a class="btn primary" href="#demo">
+        <a class="btn primary" href="#demo" id="watchDemoBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
           Watch the demo
         </a>
@@ -380,8 +469,8 @@ kbd{font-family:'JetBrains Mono',monospace;font-size:12px;background:rgba(255,25
       </div>
       <div class="hero-stats">
         <div class="s"><b id="kpi-1">5</b><span>days to build</span></div>
-        <div class="s"><b id="kpi-2">355</b><span>unit tests</span></div>
-        <div class="s"><b id="kpi-3">28</b><span>test suites</span></div>
+        <div class="s"><b id="kpi-2">477</b><span>unit tests</span></div>
+        <div class="s"><b id="kpi-3">34</b><span>test suites</span></div>
         <div class="s"><b id="kpi-4">0</b><span>backend cost</span></div>
       </div>
     </div>
@@ -417,6 +506,50 @@ kbd{font-family:'JetBrains Mono',monospace;font-size:12px;background:rgba(255,25
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="agent" style="padding:80px 24px 100px">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow"><span class="dot" style="background:var(--accent);box-shadow:0 0 12px var(--accent)"></span> where's the agent</div>
+      <h2 style="margin-top:14px">How LinkMate works as an agent.</h2>
+      <p class="lede">A four‑stage loop, not a chatbot. Each click closes the loop — yesterday's outcome shapes tomorrow's prompt.</p>
+    </div>
+
+    <div class="agent-loop-wrap reveal">
+      <div class="agent-loop">
+        <div class="agent-stage">
+          <span class="step-num">01 · perception</span>
+          <h4>Perception</h4>
+          <div class="what">Scrapes SSI score + your profile + feed posts from LinkedIn DOM.</div>
+          <div class="why"><b>What</b>Content scripts on <span class="mono">/in/*</span>, <span class="mono">/sales/ssi</span>, <span class="mono">/feed/*</span>. SW writes to <span class="mono">chrome.storage</span> + IndexedDB.</div>
+          <div class="arrow">→</div>
+        </div>
+        <div class="agent-stage">
+          <span class="step-num">02 · planner</span>
+          <h4>Planner</h4>
+          <div class="what">Parallel LLM calls via <span class="mono">Promise.allSettled</span> — copy editor + SSI strategist.</div>
+          <div class="why"><b>Why parallel</b>Partial success allowed: one prompt failing never blocks the other. Each result dedup'd by <span class="mono">checkId</span>.</div>
+          <div class="arrow">→</div>
+        </div>
+        <div class="agent-stage">
+          <span class="step-num">03 · actuator</span>
+          <h4>Actuator</h4>
+          <div class="what">Paste‑ready replies, headlines, posts. Human always in the loop.</div>
+          <div class="why"><b>Why human</b>LinkedIn ToS forbids auto‑submit. We pre‑fill the composer; you press send. No background tabs, no polling.</div>
+          <div class="arrow">→</div>
+        </div>
+        <div class="agent-stage">
+          <span class="step-num">04 · reflection</span>
+          <h4>Reflection</h4>
+          <div class="what">Lazy outcome scanner reads engagement on yesterday's comments → tomorrow's prompt.</div>
+          <div class="why"><b>Why lazy</b>Piggy‑backs on natural revisits — no extra navigation, no scheduled polling. Outcomes feed <span class="mono">avoidStems</span> + concept rotation.</div>
+          <div class="arrow">↺</div>
+        </div>
+      </div>
+      <div class="agent-loop-back"></div>
     </div>
   </div>
 </section>
@@ -513,10 +646,10 @@ linkedin.com/feed/*  ─┘   (scrape + inject)  (orchestrator)    (Today / SSI 
       <div class="pill reveal"><i>🤖</i> OpenAI gpt‑4o‑mini · BYOK</div>
       <div class="pill reveal"><i>🗃️</i> IndexedDB action ledger</div>
       <div class="pill reveal"><i>📦</i> Parcel · no SDK · raw fetch</div>
-      <div class="pill reveal"><i>🧪</i> 355 Jest tests · CI on every push</div>
+      <div class="pill reveal"><i>🧪</i> 477 Jest tests · CI on every push</div>
       <div class="pill reveal"><i>📈</i> Chart.js tree‑shaken (566 KB gz)</div>
       <div class="pill reveal"><i>🚀</i> Tag‑push → GH Release zip</div>
-      <div class="pill reveal"><i>🔐</i> Cloud‑only · no server</div>
+      <div class="pill reveal"><i>🔐</i> Key + data in browser · no server</div>
     </div>
   </div>
 </section>
@@ -540,8 +673,15 @@ $ npm install &amp;&amp; npm run build
   </div>
 </section>
 
+<div class="demo-modal" id="demoModal" role="dialog" aria-modal="true" aria-label="LinkMate demo video">
+  <div class="demo-shell">
+    <button class="demo-close" id="demoCloseBtn" aria-label="Close demo">✕</button>
+    <video id="demoVideo" src="./demo.mp4" autoplay muted loop playsinline controls preload="metadata"></video>
+  </div>
+</div>
+
 <footer>
-  Built in ~5 days for HataCon · <a href="https://github.com/mrviduus/linkmate" target="_blank" rel="noopener">mrviduus/linkmate</a> · ISC
+  Built in ~5 days for TMLS Agentic Hackathon · <a href="https://github.com/mrviduus/linkmate" target="_blank" rel="noopener">mrviduus/linkmate</a> · ISC
 </footer>
 
 <script>
@@ -559,7 +699,7 @@ document.querySelectorAll('.card').forEach(c=>{
 });
 
 // ───── kpi count-up ─────
-const counts=[{el:'kpi-1',to:5},{el:'kpi-2',to:355},{el:'kpi-3',to:28},{el:'kpi-4',to:0,suffix:'$'}];
+const counts=[{el:'kpi-1',to:5},{el:'kpi-2',to:477},{el:'kpi-3',to:34},{el:'kpi-4',to:0,suffix:'$'}];
 function animateCount(node,to,suffix){
   const dur=1200,start=performance.now();
   function tick(t){
@@ -615,8 +755,30 @@ stage?.addEventListener('mousemove',(e)=>{
 });
 stage?.addEventListener('mouseleave',()=>{stage.querySelector('.mock').style.transform=''});
 
-// ───── keyboard shortcut: press D to scroll to demo ─────
-document.addEventListener('keydown',(e)=>{if(e.key==='d'||e.key==='D')document.getElementById('demo')?.scrollIntoView({behavior:'smooth'})});
+// ───── demo modal ─────
+const demoModal=document.getElementById('demoModal');
+const demoVideo=document.getElementById('demoVideo');
+const demoBtn=document.getElementById('watchDemoBtn');
+const demoClose=document.getElementById('demoCloseBtn');
+function openDemo(){
+  demoModal.classList.add('open');
+  document.body.style.overflow='hidden';
+  try{demoVideo.currentTime=0;demoVideo.play()}catch(e){}
+}
+function closeDemo(){
+  demoModal.classList.remove('open');
+  document.body.style.overflow='';
+  try{demoVideo.pause()}catch(e){}
+}
+demoBtn?.addEventListener('click',(e)=>{e.preventDefault();openDemo()});
+demoClose?.addEventListener('click',closeDemo);
+demoModal?.addEventListener('click',(e)=>{if(e.target===demoModal)closeDemo()});
+
+// ───── keyboard shortcuts ─────
+document.addEventListener('keydown',(e)=>{
+  if(e.key==='Escape'&&demoModal.classList.contains('open')){closeDemo();return}
+  if((e.key==='d'||e.key==='D')&&!demoModal.classList.contains('open'))document.getElementById('demo')?.scrollIntoView({behavior:'smooth'});
+});
 </script>
 </body>
 </html>
