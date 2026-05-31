@@ -557,16 +557,16 @@
 
 .linkmate-post-chip__ai {
   background: rgba(10, 102, 194, 0.12);
-  color: #0a66c2;
+  color: #f8fafc;
 }
 .linkmate-post-chip__ai[data-state="loading"] {
   background: rgba(108, 117, 125, 0.12);
-  color: #6a737d;
+  color: #d1d5db;
   animation: linkmate-post-chip-pulse 1.2s ease-in-out infinite;
 }
 .linkmate-post-chip__ai[data-state="na"] {
   background: rgba(108, 117, 125, 0.12);
-  color: #6a737d;
+  color: #d1d5db;
   font-weight: 500;
 }
 
