@@ -50,6 +50,16 @@ Chrome Web Store API on your behalf. You only do this once.
 
 Reference: <https://developer.chrome.com/docs/webstore/using-api/#beforeyoubegin>
 
+**Quick path — use the helper script** (does steps a + b for you: starts a
+localhost server, opens the consent screen, exchanges the code, prints the token):
+
+```bash
+node scripts/get-refresh-token.mjs <CLIENT_ID> <CLIENT_SECRET>
+```
+
+Copy the printed `refresh_token` into the GitHub secret (step 6). The manual flow
+below is the fallback if you'd rather not run the script.
+
 Replace `$CLIENT_ID` / `$CLIENT_SECRET` below.
 
 **a. Authorize.** Open this URL in a browser (logged in as the publisher account),
