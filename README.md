@@ -7,6 +7,10 @@
   <a href="https://mrviduus.github.io/linkmate/">
     <img src="https://img.shields.io/badge/View%20Live%20Demo%20%26%20Landing%20Page-%E2%86%92%20Launch-ffffff?style=for-the-badge&labelColor=0A66C2&color=4338ca" height="46" alt="View Live Demo"/>
   </a>
+  &nbsp;
+  <a href="https://chrome.google.com/webstore/detail/ehakmbhencmboidbhjecighefplfbgmh">
+    <img src="https://img.shields.io/badge/Chrome%20Web%20Store-%E2%86%92%20Install-ffffff?style=for-the-badge&logo=googlechrome&labelColor=0A66C2&color=22c55e" height="46" alt="Install from Chrome Web Store"/>
+  </a>
   <br/><br/>
 </p>
 
@@ -133,7 +137,11 @@ Data is segmented into three storage systems to guarantee maximum privacy and O(
 
 ---
 
-## 🚀 Install in 3 Steps
+## 🚀 Install
+
+**From the Chrome Web Store** (recommended): [install LinkMate](https://chrome.google.com/webstore/detail/ehakmbhencmboidbhjecighefplfbgmh), then open the Side Panel and add your API key.
+
+**From source** — 3 steps:
 
 **Step 1 — Build**
 
@@ -156,6 +164,16 @@ Click the LinkMate icon to open the **Side Panel**, paste your OpenAI API Key, a
 
 ---
 
+## 📸 Screenshots
+
+| SSI Dashboard | Profile Audit | Smart Reply |
+|---|---|---|
+| ![SSI Dashboard](docs/screenshots/ssi-dashboard.png) | ![Profile Audit](docs/screenshots/profile-audit.png) | ![Smart Reply](docs/screenshots/smart-reply.png) |
+
+> Screenshots live in `docs/screenshots/`. See the [live demo](https://mrviduus.github.io/linkmate/) for a full walkthrough.
+
+---
+
 ## 💻 CLI Reference
 
 | Command | Description |
@@ -171,6 +189,7 @@ Click the LinkMate icon to open the **Side Panel**, paste your OpenAI API Key, a
 ## 📜 License & Disclaimers
 
 - **License:** ISC
+- **Privacy:** Zero-backend, BYOK. See the full [Privacy Policy](PRIVACY.md).
 - **LinkedIn ToS:** Draft generation is exclusively pre-fill. LinkMate never auto-submits, auto-clicks, or schedules actions on your behalf — keeping your account fully compliant.
 
 ---
