@@ -42,7 +42,7 @@ jobs:
         if: ${{ env.CWS_REFRESH_TOKEN != '' }}
         env:
           CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
-        uses: mnao305/chrome-extension-upload@v6
+        uses: mnao305/chrome-extension-upload@v6.0.0
         with:
           file-path: linkmate.zip
           extension-id: ${{ secrets.CWS_EXTENSION_ID }}
