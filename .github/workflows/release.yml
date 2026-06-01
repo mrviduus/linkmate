@@ -2,7 +2,7 @@ name: release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*.*.*']
 
 permissions:
   contents: write
@@ -20,14 +20,32 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - name: Package
-        run: cd dist && zip -r ../linkmate-${{ github.ref_name }}.zip . && cd ..
-      - uses: softprops/action-gh-release@v2
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm test
+      - name: Package (npm run zip → linkmate.zip)
+        run: npm run zip
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          files: linkmate-${{ github.ref_name }}.zip
+          files: linkmate.zip
           generate_release_notes: true
           # Overwrite (don't append) on tag re-push — softprops appends body
           # by default which produced duplicated changelog text on v0.2.0
           # after a history rewrite moved the tag.
           append_body: false
+
+      # Optional Chrome Web Store upload+publish. Runs only when the four CWS
+      # secrets are present, so forks / unconfigured repos skip it cleanly.
+      # Setup guide: docs/RELEASE.md
+      - name: Publish to Chrome Web Store
+        if: ${{ env.CWS_REFRESH_TOKEN != '' }}
+        env:
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        uses: mnao305/chrome-extension-upload@v6
+        with:
+          file-path: linkmate.zip
+          extension-id: ${{ secrets.CWS_EXTENSION_ID }}
+          client-id: ${{ secrets.CWS_CLIENT_ID }}
+          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
