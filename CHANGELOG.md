@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-01
+
+First published Chrome Web Store build. Fixes the release pipeline (the `v1.0.0`
+tag's run failed at setup on an unresolvable action ref and shipped nothing).
+
+### Fixed
+
+- Pin Chrome Web Store upload action to `mnao305/chrome-extension-upload@v6.0.0`
+  (no floating `v6` tag existed; GitHub resolves all action refs at job setup
+  even when `if`-gated, which failed the whole job).
+
 ## [1.0.0] - 2026-06-01
 
 Major rebrand: **ReplyMate → LinkMate**, first stable Chrome Web Store release.
@@ -28,4 +39,5 @@ Major rebrand: **ReplyMate → LinkMate**, first stable Chrome Web Store release
 
 - Renamed the extension and all branding from ReplyMate to LinkMate.
 
+[1.0.1]: https://github.com/mrviduus/linkmate/releases/tag/v1.0.1
 [1.0.0]: https://github.com/mrviduus/linkmate/releases/tag/v1.0.0
