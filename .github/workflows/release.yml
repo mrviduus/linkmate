@@ -49,3 +49,17 @@ jobs:
           client-id: ${{ secrets.CWS_CLIENT_ID }}
           client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
           refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+
+      # Optional inference-proxy deploy (Cloudflare Worker, see proxy/). Runs
+      # only when CLOUDFLARE_API_TOKEN is set, so forks / unconfigured repos
+      # skip it cleanly. The OPENAI_API_KEY Worker secret is NOT touched by a
+      # deploy — set it once with `wrangler secret put`. Token scopes needed:
+      # Workers Scripts:Edit + Workers KV Storage:Edit.
+      - name: Deploy inference proxy (Cloudflare Worker)
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        working-directory: proxy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npm ci
+          npx wrangler deploy

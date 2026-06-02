@@ -26,24 +26,41 @@ function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
 // ─── Provider (OpenAI/Groq) ───────────────────────────────────────────────────
 
+type ProviderMode = 'managed' | 'openai' | 'groq';
+
 interface ProviderConfigDTO {
-  mode: 'openai' | 'groq';
+  mode: ProviderMode;
+  managed?: { model: string; baseUrl?: string };
   openai?: { apiKey: string; model: string; baseUrl?: string };
   groq?: { apiKey: string; model: string; baseUrl?: string };
 }
 
 const providerModeSelect = $<HTMLSelectElement>('providerMode');
+const providerKeyField = $('providerKeyField');
+const providerQuota = $('providerQuota');
+const byokBanner = $('byokBanner');
+const byokBannerSwitch = $<HTMLButtonElement>('byokBannerSwitch');
 const providerOpenAIKeyInput = $<HTMLInputElement>('providerOpenAIKey');
 const providerOpenAIModelSelect = $<HTMLSelectElement>('providerOpenAIModel');
 const providerKeyHint = $('providerKeyHint');
 const providerSaveBtn = $<HTMLButtonElement>('providerSave');
 const providerStatus = $('providerStatus');
 
-let currentProviderConfig: ProviderConfigDTO = {
-  mode: 'openai',
+const DEFAULT_PROVIDER_DTO: ProviderConfigDTO = {
+  mode: 'managed',
+  managed: { model: 'gpt-4o-mini' },
   openai: { apiKey: '', model: 'gpt-4o-mini' },
   groq: { apiKey: '', model: 'groq/compound' },
 };
+
+let currentProviderConfig: ProviderConfigDTO = { ...DEFAULT_PROVIDER_DTO };
+
+/** Models the managed proxy whitelists (keep in sync with proxy PRICING). */
+const MANAGED_MODELS = [
+  { value: 'gpt-4o-mini', text: 'gpt-4o-mini (fast, cheap)' },
+  { value: 'gpt-4.1-mini', text: 'gpt-4.1-mini' },
+  { value: 'gpt-4.1-nano', text: 'gpt-4.1-nano' },
+];
 
 function showProviderMessage(text: string, kind: 'success' | 'error' | 'info'): void {
   if (!providerStatus) return;
@@ -57,14 +74,20 @@ function showProviderMessage(text: string, kind: 'success' | 'error' | 'info'): 
 
 function updateProviderUI() {
   if (!providerModeSelect) return;
-  const mode = providerModeSelect.value as 'openai' | 'groq';
+  const mode = providerModeSelect.value as ProviderMode;
+  const isManaged = mode === 'managed';
+
+  // Managed mode needs no API key — hide the key field and show the quota line.
+  if (providerKeyField) providerKeyField.style.display = isManaged ? 'none' : '';
+  if (providerQuota) providerQuota.style.display = isManaged ? '' : 'none';
+
   if (providerKeyHint) {
     providerKeyHint.textContent =
       mode === 'openai'
         ? 'Get one at platform.openai.com/api-keys'
         : 'Get one at console.groq.com/keys';
   }
-  if (providerOpenAIKeyInput) {
+  if (providerOpenAIKeyInput && !isManaged) {
     providerOpenAIKeyInput.value =
       mode === 'openai'
         ? (currentProviderConfig.openai?.apiKey ?? '')
@@ -74,22 +97,24 @@ function updateProviderUI() {
   if (providerOpenAIModelSelect) {
     providerOpenAIModelSelect.innerHTML = '';
     const models =
-      mode === 'openai'
-        ? [
-            { value: 'gpt-4o-mini', text: 'gpt-4o-mini (fast, cheap)' },
-            { value: 'gpt-4o', text: 'gpt-4o (best quality)' },
-            { value: 'gpt-4.1-mini', text: 'gpt-4.1-mini' },
-            { value: 'gpt-4.1', text: 'gpt-4.1' },
-            { value: 'o4-mini', text: 'o4-mini (reasoning)' },
-          ]
-        : [
-            { value: 'groq/compound', text: 'groq/compound' },
-            { value: 'groq/compound-mini', text: 'groq/compound-mini' },
-            {
-              value: 'meta-llama/llama-4-scout-17b-16e-instruct',
-              text: 'llama-4-scout-17b-16e-instruct',
-            },
-          ];
+      mode === 'managed'
+        ? MANAGED_MODELS
+        : mode === 'openai'
+          ? [
+              { value: 'gpt-4o-mini', text: 'gpt-4o-mini (fast, cheap)' },
+              { value: 'gpt-4o', text: 'gpt-4o (best quality)' },
+              { value: 'gpt-4.1-mini', text: 'gpt-4.1-mini' },
+              { value: 'gpt-4.1', text: 'gpt-4.1' },
+              { value: 'o4-mini', text: 'o4-mini (reasoning)' },
+            ]
+          : [
+              { value: 'groq/compound', text: 'groq/compound' },
+              { value: 'groq/compound-mini', text: 'groq/compound-mini' },
+              {
+                value: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                text: 'llama-4-scout-17b-16e-instruct',
+              },
+            ];
     models.forEach((m) => {
       const opt = document.createElement('option');
       opt.value = m.value;
@@ -97,7 +122,11 @@ function updateProviderUI() {
       providerOpenAIModelSelect.appendChild(opt);
     });
     const currentModel =
-      mode === 'openai' ? currentProviderConfig.openai?.model : currentProviderConfig.groq?.model;
+      mode === 'managed'
+        ? currentProviderConfig.managed?.model
+        : mode === 'openai'
+          ? currentProviderConfig.openai?.model
+          : currentProviderConfig.groq?.model;
     if (currentModel) {
       const exists = Array.from(providerOpenAIModelSelect.options).some(
         (o) => o.value === currentModel
@@ -114,26 +143,34 @@ function updateProviderUI() {
 }
 
 providerModeSelect?.addEventListener('change', () => {
+  // Persist the in-progress edits of the mode we're leaving, then switch.
   if (currentProviderConfig.mode === 'openai') {
     currentProviderConfig.openai = {
       ...currentProviderConfig.openai,
       apiKey: providerOpenAIKeyInput?.value ?? '',
       model: providerOpenAIModelSelect?.value ?? 'gpt-4o-mini',
     };
-  } else {
+  } else if (currentProviderConfig.mode === 'groq') {
     currentProviderConfig.groq = {
       ...currentProviderConfig.groq,
       apiKey: providerOpenAIKeyInput?.value ?? '',
       model: providerOpenAIModelSelect?.value ?? 'groq/compound',
     };
+  } else {
+    currentProviderConfig.managed = {
+      ...currentProviderConfig.managed,
+      model: providerOpenAIModelSelect?.value ?? 'gpt-4o-mini',
+    };
   }
-  currentProviderConfig.mode = providerModeSelect.value as 'openai' | 'groq';
+  currentProviderConfig.mode = providerModeSelect.value as ProviderMode;
   updateProviderUI();
+  if (currentProviderConfig.mode === 'managed') void loadQuota();
 });
 
 function renderProviderForm(cfg: ProviderConfigDTO): void {
   currentProviderConfig = {
-    mode: cfg.mode || 'openai',
+    mode: cfg.mode || 'managed',
+    managed: cfg.managed || { model: 'gpt-4o-mini' },
     openai: cfg.openai || { apiKey: '', model: 'gpt-4o-mini' },
     groq: cfg.groq || { apiKey: '', model: 'groq/compound' },
   };
@@ -141,16 +178,72 @@ function renderProviderForm(cfg: ProviderConfigDTO): void {
   updateProviderUI();
 }
 
+/** Fetch + render the managed free-tier balance. No-op for BYOK modes. */
+async function loadQuota(): Promise<void> {
+  if (!providerQuota) return;
+  if (currentProviderConfig.mode !== 'managed') {
+    providerQuota.style.display = 'none';
+    return;
+  }
+  providerQuota.style.display = '';
+  providerQuota.textContent = 'Free AI: checking balance…';
+  const resp = await new Promise<{
+    ok: boolean;
+    unlimited?: boolean;
+    usedUSD?: number;
+    limitUSD?: number;
+    remainingUSD?: number;
+  }>((resolve) => {
+    chrome.runtime.sendMessage({ action: 'quota.get' }, (r) => resolve(r ?? { ok: false }));
+  });
+  if (!resp.ok || resp.unlimited) {
+    providerQuota.textContent = 'Free AI: balance unavailable';
+    return;
+  }
+  const used = resp.usedUSD ?? 0;
+  const limit = resp.limitUSD ?? 0;
+  const remaining = resp.remainingUSD ?? Math.max(0, limit - used);
+  providerQuota.textContent = `Free AI: $${remaining.toFixed(2)} of $${limit.toFixed(2)} remaining`;
+  const empty = remaining <= 0;
+  providerQuota.classList.toggle('provider-quota--empty', empty);
+  if (empty) showByokSwitchBanner();
+  else hideByokSwitchBanner();
+}
+
+/** Show the quota-exhausted banner prompting a switch to the user's own key. */
+function showByokSwitchBanner(): void {
+  if (byokBanner) byokBanner.style.display = '';
+}
+
+function hideByokSwitchBanner(): void {
+  if (byokBanner) byokBanner.style.display = 'none';
+}
+
+/** True for a managed-tier quota-exhausted failure (structured or by message). */
+function isQuotaError(resp: { reason?: string; error?: string }): boolean {
+  if (resp.reason === 'quota') return true;
+  return /quota_exceeded|free ai allowance/i.test(resp.error ?? '');
+}
+
+// Banner CTA: flip provider mode to BYOK (OpenAI), reveal the key field, focus it.
+byokBannerSwitch?.addEventListener('click', () => {
+  hideByokSwitchBanner();
+  if (providerModeSelect) {
+    providerModeSelect.value = 'openai';
+    currentProviderConfig.mode = 'openai';
+    updateProviderUI();
+  }
+  byokBanner?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  providerOpenAIKeyInput?.focus();
+});
+
 async function loadProviderConfig(): Promise<void> {
   const resp = await new Promise<{ ok: boolean; config?: ProviderConfigDTO }>((resolve) => {
     chrome.runtime.sendMessage({ action: 'provider.get' }, (r) => resolve(r ?? { ok: false }));
   });
-  const cfg = resp.config ?? {
-    mode: 'openai',
-    openai: { apiKey: '', model: 'gpt-4o-mini' },
-    groq: { apiKey: '', model: 'groq/compound' },
-  };
+  const cfg = resp.config ?? { ...DEFAULT_PROVIDER_DTO };
   renderProviderForm(cfg);
+  void loadQuota();
   try {
     const profile = await getUserProfile();
     updateOnboardingBanner(profile);
@@ -161,20 +254,25 @@ async function loadProviderConfig(): Promise<void> {
 
 async function handleProviderSave(): Promise<void> {
   if (!providerSaveBtn) return;
-  const mode = (providerModeSelect?.value as 'openai' | 'groq') ?? 'openai';
+  const mode = (providerModeSelect?.value as ProviderMode) ?? 'managed';
   const apiKey = providerOpenAIKeyInput?.value.trim() ?? '';
   const model =
-    providerOpenAIModelSelect?.value ?? (mode === 'openai' ? 'gpt-4o-mini' : 'groq/compound');
+    providerOpenAIModelSelect?.value ??
+    (mode === 'groq' ? 'groq/compound' : 'gpt-4o-mini');
 
-  if (!apiKey) {
-    showProviderMessage('API key is required.', 'error');
-    return;
-  }
-
-  if (mode === 'openai') {
-    currentProviderConfig.openai = { ...currentProviderConfig.openai, apiKey, model };
+  if (mode === 'managed') {
+    // Free tier — no key required.
+    currentProviderConfig.managed = { ...currentProviderConfig.managed, model };
   } else {
-    currentProviderConfig.groq = { ...currentProviderConfig.groq, apiKey, model };
+    if (!apiKey) {
+      showProviderMessage('API key is required.', 'error');
+      return;
+    }
+    if (mode === 'openai') {
+      currentProviderConfig.openai = { ...currentProviderConfig.openai, apiKey, model };
+    } else {
+      currentProviderConfig.groq = { ...currentProviderConfig.groq, apiKey, model };
+    }
   }
   currentProviderConfig.mode = mode;
 
@@ -188,11 +286,13 @@ async function handleProviderSave(): Promise<void> {
       );
     });
     if (resp.ok) {
-      showProviderMessage(`Saved. Using ${model}. Click "Get AI rewrites" in Profile audit now.`, 'success');
+      const savedLabel = mode === 'managed' ? 'LinkMate free AI' : `${model}`;
+      showProviderMessage(`Saved. Using ${savedLabel}. Click "Get AI rewrites" in Profile audit now.`, 'success');
+      if (mode === 'managed') void loadQuota();
       // Make sure the audit section re-renders into the idle state and
       // (if visible) flashes a hint so the user knows where to retry.
       await loadProfileAudit();
-      showAuditStatus('OpenAI key saved — click Get AI rewrites for suggestions.', 'info');
+      showAuditStatus('AI provider saved — click Get AI rewrites for suggestions.', 'info');
       try {
         const profile = await getUserProfile();
         updateOnboardingBanner(profile);
@@ -815,7 +915,10 @@ async function handleProfileAuditRewrite(): Promise<void> {
       profileAuditRewriteBtn.disabled = false;
       profileAuditRewriteBtn.dataset.state = 'idle';
       profileAuditRewriteLabel.textContent = prevLabel ?? 'Get AI rewrites';
-      if (resp.reason === 'no_key') {
+      if (isQuotaError(resp)) {
+        showAuditStatus('Free AI used up — switch to your own key to continue.', 'info');
+        showByokSwitchBanner();
+      } else if (resp.reason === 'no_key') {
         showAuditStatus(
           'Add an OpenAI key in Settings to get AI rewrites.',
           'info',

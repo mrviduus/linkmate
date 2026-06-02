@@ -276,6 +276,52 @@ body {
   gap: 8px;
 }
 
+.provider-quota {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0a66c2;
+  background: #eef3f8;
+  border: 1px solid #d0dbe6;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.provider-quota--empty {
+  color: #b42318;
+  background: #fdecea;
+  border-color: #f3c2bd;
+}
+
+.byok-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: #fef6e7;
+  border: 1px solid #f1d28a;
+  border-radius: 8px;
+}
+
+.byok-banner__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #6b4e0f;
+}
+
+.byok-banner__text strong {
+  font-size: 13px;
+  color: #5a3d00;
+}
+
+.byok-banner .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* ── Profile ──────────────────────────────────────────────────────────── */
 
 .profile-status {

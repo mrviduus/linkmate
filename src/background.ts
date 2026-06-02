@@ -10,7 +10,7 @@ import { keepAlive } from './keep-alive';
 import { buildPositioningPrompt, buildCommentPrompt } from './prompt-builder';
 import type { RawProfileFields } from './profile-parser';
 import { scoreRelevance } from './relevance-scorer';
-import { getActiveProvider } from './providers';
+import { getActiveProvider, MANAGED_BASE_URL, QuotaExceededError } from './providers';
 import {
   getProfile,
   getEngagedPosts,
@@ -23,6 +23,9 @@ import {
   clearSsiLastError,
   getProviderConfig,
   setProviderConfig,
+  getInstallToken,
+  ensureInstallToken,
+  migrateIfNeeded,
   getCadenceTargets,
   setCadenceTargets,
   getCadenceStreak,
@@ -373,6 +376,13 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.storage.local.set({ hasUsedExtension: true });
 });
 
+/** Run storage migrations + mint the anonymous install token at every SW
+ *  startup. migrateIfNeeded is idempotent; ensureInstallToken is a no-op once
+ *  set. This guarantees managed mode has a token before any generate() call. */
+migrateIfNeeded()
+  .then(() => ensureInstallToken())
+  .catch((err) => console.warn('[LinkMate] migration/install-token init failed:', err));
+
 // ─── Message router ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
@@ -392,17 +402,33 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 
   if (request.action === 'checkEngineStatus') {
-    getProviderConfig().then((cfg) => {
-      const hasKey = !!cfg.openai?.apiKey;
+    (async () => {
+      const cfg = await getProviderConfig();
+      if (cfg.mode === 'managed') {
+        const token = await ensureInstallToken();
+        const ready = !!token;
+        sendResponse({
+          engineReady: ready,
+          initializing: false,
+          currentModel: cfg.managed?.model ?? 'gpt-4o-mini',
+          healthy: ready,
+          cached: true,
+          cacheMessage: ready ? 'LinkMate free AI ready' : 'Initializing…',
+        });
+        return;
+      }
+      const byokKey = cfg.mode === 'groq' ? cfg.groq?.apiKey : cfg.openai?.apiKey;
+      const hasKey = !!byokKey;
+      const label = cfg.mode === 'groq' ? 'Groq' : 'OpenAI';
       sendResponse({
         engineReady: hasKey,
         initializing: false,
-        currentModel: cfg.openai?.model ?? null,
+        currentModel: (cfg.mode === 'groq' ? cfg.groq?.model : cfg.openai?.model) ?? null,
         healthy: hasKey,
         cached: true,
-        cacheMessage: hasKey ? 'OpenAI configured' : 'Add OpenAI API key in popup',
+        cacheMessage: hasKey ? `${label} configured` : `Add ${label} API key in popup`,
       });
-    });
+    })();
     return true;
   }
 
@@ -511,6 +537,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     setProviderConfig(request.config as ProviderConfig)
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'quota.get') {
+    handleQuotaGet(sendResponse);
     return true;
   }
 
@@ -1015,7 +1045,9 @@ async function handleProfileAuditRewrite(
       const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
       sendResponse({ ok: true, state: { ...state, ssi, activitySignals } });
     } catch (err) {
-      if (err instanceof ProfileRecommenderParseError) {
+      if (err instanceof QuotaExceededError) {
+        sendResponse({ ok: false, reason: 'quota', error: err.message });
+      } else if (err instanceof ProfileRecommenderParseError) {
         console.warn('[linkmate] profile.audit.rewrite parse failure:', err.message);
         sendResponse({ ok: false, reason: 'parse' });
       } else {
@@ -1070,6 +1102,48 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
   return retryValidation.valid || (retryValidation.score ?? 0) > (firstValidation.score ?? 0)
     ? retryReply
     : firstReply;
+}
+
+/**
+ * Report the managed free-tier balance for the popup. Only meaningful in
+ * managed mode; BYOK is unlimited. Fails soft — UI shows "—" on error rather
+ * than blocking, and never surfaces the install token.
+ */
+async function handleQuotaGet(sendResponse: (response: unknown) => void): Promise<void> {
+  try {
+    const cfg = await getProviderConfig();
+    if (cfg.mode !== 'managed') {
+      sendResponse({ ok: true, unlimited: true });
+      return;
+    }
+    const token = await getInstallToken();
+    if (!token) {
+      sendResponse({ ok: false, error: 'No install token yet' });
+      return;
+    }
+    const baseUrl = cfg.managed?.baseUrl ?? MANAGED_BASE_URL;
+    const res = await fetch(`${baseUrl}/quota`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      sendResponse({ ok: false, error: `Quota check failed (${res.status})` });
+      return;
+    }
+    const data = (await res.json()) as {
+      usedUSD?: number;
+      limitUSD?: number;
+      remainingUSD?: number;
+    };
+    sendResponse({
+      ok: true,
+      unlimited: false,
+      usedUSD: data.usedUSD ?? 0,
+      limitUSD: data.limitUSD ?? 0,
+      remainingUSD: data.remainingUSD ?? 0,
+    });
+  } catch (err) {
+    sendResponse({ ok: false, error: String(err) });
+  }
 }
 
 async function handleLinkedInReplyWithComments(

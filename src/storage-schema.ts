@@ -12,7 +12,7 @@
  *                       always send a message to background which writes
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const STORAGE_KEYS = {
   profile: 'linkmate.profile.v1',
@@ -24,6 +24,7 @@ export const STORAGE_KEYS = {
   connectionsSuggestions: 'linkmate.connections.suggestions.v1',
   connectionsDraftedThisWeek: 'linkmate.connections.draftedThisWeek.v1',
   provider: 'linkmate.provider.v1',
+  installToken: 'linkmate.install.token.v1',
   cadenceTargets: 'linkmate.cadence.targets.v1',
   cadenceStreak: 'linkmate.cadence.streak.v1',
   recommenderCards: 'linkmate.recommender.cards.v1',
@@ -143,12 +144,22 @@ export interface QueuePreferences {
  * chrome.storage.local (never `sync` — the OpenAI API key is a per-device
  * secret).
  *
- * LinkMate ships OpenAI-only; the union is kept narrow but future-extensible.
+ * Modes:
+ *   - 'managed' — default. Calls LinkMate's own proxy (api.textstack.app) with
+ *     an anonymous install token instead of an API key; the OpenAI key lives on
+ *     the proxy and a per-user $2 spend quota is enforced server-side.
+ *   - 'openai' / 'groq' — BYOK ("bring your own key"), unlimited. Advanced
+ *     fallback for users who hit the free quota or want their own provider.
  */
-export type ProviderMode = 'openai' | 'groq';
+export type ProviderMode = 'managed' | 'openai' | 'groq';
 
 export interface ProviderConfig {
   mode: ProviderMode;
+  /** Managed (proxy) mode — no apiKey; auth is the install token at request time. */
+  managed?: {
+    model: string; // must be on the proxy whitelist, e.g. "gpt-4o-mini"
+    baseUrl?: string;
+  };
   openai?: {
     apiKey: string;
     model: string; // e.g. "gpt-4o-mini"
@@ -162,7 +173,8 @@ export interface ProviderConfig {
 }
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
-  mode: 'openai',
+  mode: 'managed',
+  managed: { model: 'gpt-4o-mini' },
   openai: { apiKey: '', model: 'gpt-4o-mini' },
   groq: { apiKey: '', model: 'groq/compound' },
 };
@@ -252,6 +264,26 @@ export async function setProviderConfig(cfg: ProviderConfig): Promise<void> {
   await writeKey(STORAGE_KEYS.provider, cfg);
 }
 
+// ─── Install token (anonymous id for managed-mode quota) ─────────────────────
+//
+// A UUID generated once per install, stored only in chrome.storage.local. The
+// managed proxy keys the per-user $2 quota off it. Not a secret and not synced
+// (a fresh install legitimately starts a fresh allowance).
+
+/** Read the install token, or null if not generated yet. */
+export async function getInstallToken(): Promise<string | null> {
+  return readKey<string>(STORAGE_KEYS.installToken);
+}
+
+/** Return the install token, generating + persisting one on first call. */
+export async function ensureInstallToken(): Promise<string> {
+  const existing = await getInstallToken();
+  if (existing) return existing;
+  const token = crypto.randomUUID();
+  await writeKey(STORAGE_KEYS.installToken, token);
+  return token;
+}
+
 // ─── SSI last-error chip ────────────────────────────────────────────────────
 
 /** Read the most recent SSI capture failure (or null). Surfaced as popup chip. */
@@ -300,10 +332,28 @@ export async function isDismissed(postId: string): Promise<boolean> {
 export async function migrateIfNeeded(): Promise<void> {
   const stored = await readKey<number>(STORAGE_KEYS.schemaVersion);
   const currentStored = stored ?? 0;
-  if (currentStored < SCHEMA_VERSION) {
-    // future: run migrations from currentStored → SCHEMA_VERSION here
-    await writeKey(STORAGE_KEYS.schemaVersion, SCHEMA_VERSION);
+  if (currentStored >= SCHEMA_VERSION) return;
+
+  // v1 → v2: introduce managed (proxy) mode + anonymous install token.
+  if (currentStored < 2) {
+    await ensureInstallToken();
+    const cfg = await readKey<ProviderConfig>(STORAGE_KEYS.provider);
+    if (cfg) {
+      // Existing BYOK users keep their working key + mode; only users without
+      // a key are moved onto the free managed tier. Backfill the managed block
+      // so the settings UI can render it either way.
+      const hasOwnKey = !!cfg.openai?.apiKey?.trim() || !!cfg.groq?.apiKey?.trim();
+      const next: ProviderConfig = {
+        ...cfg,
+        managed: cfg.managed ?? { model: 'gpt-4o-mini' },
+        mode: hasOwnKey ? cfg.mode : 'managed',
+      };
+      await writeKey(STORAGE_KEYS.provider, next);
+    }
+    // No stored config → getProviderConfig() already returns the managed default.
   }
+
+  await writeKey(STORAGE_KEYS.schemaVersion, SCHEMA_VERSION);
 }
 
 // ─── Cadence targets + streak (weekly quotas) ───────────────────────────────
