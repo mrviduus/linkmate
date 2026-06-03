@@ -135,6 +135,41 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((err) => console.warn('[LinkMate] setPanelBehavior failed:', err));
 
+// Restrict the side panel to LinkedIn (plus the extension's own onboarding
+// page) — on every other tab the panel is disabled so the toolbar click does
+// nothing there. Enabled/disabled per-tab as the user navigates / switches.
+function sidePanelAllowed(url?: string): boolean {
+  if (!url) return false;
+  if (url.startsWith('chrome-extension://')) return true; // welcome / onboarding
+  try {
+    return /(^|\.)linkedin\.com$/.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function syncSidePanelForTab(tabId: number, url?: string): Promise<void> {
+  const sp = chrome.sidePanel as unknown as {
+    setOptions: (o: { tabId: number; enabled: boolean }) => Promise<void>;
+  };
+  try {
+    await sp.setOptions({ tabId, enabled: sidePanelAllowed(url) });
+  } catch (err) {
+    console.warn('[LinkMate] sidePanel.setOptions failed:', err);
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.status === 'complete' || info.url) void syncSidePanelForTab(tabId, tab.url);
+});
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  chrome.tabs.get(tabId).then(
+    (tab) => void syncSidePanelForTab(tabId, tab.url),
+    () => {},
+  );
+});
+
 // Issue #16 — content-script forwards the first user gesture on a LinkedIn
 // profile page so we can open the side panel without the user clicking the
 // extension icon. Chrome preserves the user-gesture token across this hop.

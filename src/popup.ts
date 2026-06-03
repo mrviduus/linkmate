@@ -1,6 +1,7 @@
 'use strict';
 
 import './popup.css';
+import { Chart as ChartCtor } from './chart-loader';
 import { ProfileContextService } from './profile-context';
 import {
   renderLatest as renderSsiLatest,
@@ -203,7 +204,12 @@ async function loadQuota(): Promise<void> {
   const used = resp.usedUSD ?? 0;
   const limit = resp.limitUSD ?? 0;
   const remaining = resp.remainingUSD ?? Math.max(0, limit - used);
-  providerQuota.textContent = `Free AI: $${remaining.toFixed(2)} of $${limit.toFixed(2)} remaining`;
+  // Show a friendly "tokens" credit instead of raw dollars ($0.10 = 1 token,
+  // so the $2 free tier reads as 20 tokens).
+  const USD_PER_TOKEN = 0.1;
+  const remainingTokens = Math.round(remaining / USD_PER_TOKEN);
+  const limitTokens = Math.round(limit / USD_PER_TOKEN);
+  providerQuota.textContent = `Free AI: ${remainingTokens} of ${limitTokens} tokens left`;
   const empty = remaining <= 0;
   providerQuota.classList.toggle('provider-quota--empty', empty);
   if (empty) showByokSwitchBanner();
@@ -419,9 +425,11 @@ function updateOnboardingBanner(profile: UserProfile | null): void {
   const icon = document.getElementById('onboardingBannerIcon');
   if (!banner || !text || !icon) return;
   const cfg = currentProviderConfig;
-  const apiKey =
-    cfg.mode === 'openai' ? cfg.openai?.apiKey?.trim() : cfg.groq?.apiKey?.trim();
-  if (!apiKey) {
+  // Managed mode always has AI (no key needed) → only the profile gate applies.
+  const hasAI =
+    cfg.mode === 'managed' ||
+    !!(cfg.mode === 'openai' ? cfg.openai?.apiKey?.trim() : cfg.groq?.apiKey?.trim());
+  if (!hasAI) {
     banner.style.display = '';
     banner.classList.remove('onboarding-banner--profile');
     icon.className = 'fa fa-hand-point-down';
@@ -597,6 +605,15 @@ function renderAuditList(state: ProfileAuditDTO): void {
     for (const r of state.recommendations) recsByCheckId.set(r.checkId, r);
   }
 
+  // Two collapsible groups: "Need improvement" (yellow fail/low + advisory, open
+  // by default) and "Looking good" (green/pass confirmations, collapsed).
+  const improveList = document.createElement('ul');
+  improveList.className = 'profile-audit__list profile-audit__group-list';
+  let improveVisible = 0;
+  const goodList = document.createElement('ul');
+  goodList.className = 'profile-audit__list profile-audit__group-list';
+  let goodVisible = 0;
+
   for (const row of rows) {
     const li = document.createElement('li');
     li.className = 'profile-audit__check';
@@ -656,7 +673,14 @@ function renderAuditList(state: ProfileAuditDTO): void {
     if ((row.status === 'fail' || row.status === 'low') && rec) {
       li.appendChild(renderSuggestion(rec));
     }
-    profileAuditList.appendChild(li);
+    // Green "pass" → "Looking good"; everything that needs work → "Need improvement".
+    if (row.status === 'pass') {
+      goodList.appendChild(li);
+      if (!li.hidden) goodVisible += 1;
+    } else {
+      improveList.appendChild(li);
+      if (!li.hidden) improveVisible += 1;
+    }
   }
 
   // Advisory recommendations (photoBanner, openToWork) rendered as extra rows
@@ -703,9 +727,57 @@ function renderAuditList(state: ProfileAuditDTO): void {
       mainRow.appendChild(tags);
       li.appendChild(mainRow);
       li.appendChild(renderSuggestion(r));
-      profileAuditList.appendChild(li);
+      improveList.appendChild(li);
+      if (!li.hidden) improveVisible += 1;
     }
   }
+
+  // "Need improvement" — open by default (this is what to act on).
+  appendAuditGroup(profileAuditList, {
+    list: improveList,
+    visible: improveVisible,
+    label: 'Need improvement',
+    icon: 'fa-circle-exclamation',
+    tone: 'warn',
+    open: true,
+  });
+  // "Looking good" — collapsed (just confirmation).
+  appendAuditGroup(profileAuditList, {
+    list: goodList,
+    visible: goodVisible,
+    label: 'Looking good',
+    icon: 'fa-circle-check',
+    tone: 'good',
+    open: false,
+  });
+}
+
+/** Wrap a list of audit rows in a collapsible group (<details>) with a header. */
+function appendAuditGroup(
+  parent: HTMLElement,
+  opts: {
+    list: HTMLUListElement;
+    visible: number;
+    label: string;
+    icon: string;
+    tone: 'warn' | 'good';
+    open: boolean;
+  },
+): void {
+  if (opts.list.children.length === 0) return;
+  const wrapper = document.createElement('li');
+  wrapper.className = 'profile-audit__group-wrapper';
+  if (opts.visible === 0) wrapper.hidden = true;
+  const details = document.createElement('details');
+  details.className = `profile-audit__group profile-audit__group--${opts.tone}`;
+  if (opts.open) details.open = true;
+  const summary = document.createElement('summary');
+  summary.className = 'profile-audit__group-summary';
+  summary.innerHTML = `<i class="fa-solid ${opts.icon}"></i> ${opts.label} <span class="profile-audit__group-count">${opts.visible}</span>`;
+  details.appendChild(summary);
+  details.appendChild(opts.list);
+  wrapper.appendChild(details);
+  parent.appendChild(wrapper);
 }
 
 function updateFilterCounts(state: ProfileAuditDTO): void {
@@ -1043,6 +1115,12 @@ async function handleCaptureProfile(): Promise<void> {
     return;
   }
   captureInFlight = true;
+  // Instant feedback: show the progress bar the moment capture starts, before
+  // the background tab + scraper write their first real progress event (that
+  // setup takes a couple of seconds and otherwise looks like nothing happened).
+  if (captureFullProfileToggle?.checked) {
+    renderDeepScrapeProgress({ phase: 'profile', iter: 0, items: 0, height: 0, ts: 0 });
+  }
   if (!captureProfileBtn) {
     // Allow flow to continue even without the legacy button mounted.
   }
@@ -1123,6 +1201,10 @@ async function handleCaptureProfile(): Promise<void> {
     showProfileMessage(`Unexpected error: ${String(err)}`, 'error');
   } finally {
     captureInFlight = false;
+    // Capture (incl. the deep scrape) is fully awaited above, so by here the
+    // scraper has cleared its own progress; this just covers the cached / quick
+    // path where no scrape events fired and the instant bar would otherwise hang.
+    renderDeepScrapeProgress(null);
     if (captureProfileBtn) {
       captureProfileBtn.disabled = false;
       if (prevText !== undefined) captureProfileBtn.innerHTML = prevText;
@@ -1140,18 +1222,37 @@ async function handleCaptureFullProfileToggle(): Promise<void> {
   await setCaptureFullProfile(captureFullProfileToggle.checked);
 }
 
+const SCRAPE_PHASE_ORDER: Array<DeepScrapeProgress['phase']> = ['profile', 'posts', 'comments'];
+
 function renderDeepScrapeProgress(p: DeepScrapeProgress | null): void {
   if (!deepScrapeProgressEl) return;
   if (!p) {
     deepScrapeProgressEl.style.display = 'none';
     return;
   }
-  deepScrapeProgressEl.style.display = 'flex';
+  deepScrapeProgressEl.style.display = 'block';
+
+  // Friendly, non-technical status (no raw iteration counter).
   if (deepScrapeProgressText) {
-    const phaseLabel =
-      p.phase === 'posts' ? 'posts' : p.phase === 'comments' ? 'comments' : 'profile';
-    deepScrapeProgressText.textContent = `Scraping ${phaseLabel} — ${p.items} items, iter ${p.iter}`;
+    const headline =
+      p.phase === 'posts'
+        ? 'Collecting your recent posts…'
+        : p.phase === 'comments'
+          ? 'Collecting your recent comments…'
+          : 'Reading your profile…';
+    const count = p.items > 0 ? ` · ${p.items} collected` : '';
+    deepScrapeProgressText.textContent = `${headline}${count}`;
   }
+
+  // Mark the step pills: past phases done, current active.
+  const current = SCRAPE_PHASE_ORDER.indexOf(p.phase);
+  deepScrapeProgressEl
+    .querySelectorAll<HTMLElement>('.deep-scrape-progress__steps span')
+    .forEach((el) => {
+      const idx = SCRAPE_PHASE_ORDER.indexOf(el.dataset.phase as DeepScrapeProgress['phase']);
+      el.classList.toggle('is-done', idx < current);
+      el.classList.toggle('is-active', idx === current);
+    });
 }
 
 async function handleDeepScrapeCancel(): Promise<void> {
@@ -1163,10 +1264,17 @@ function wireDeepScrapeProgressListener(): void {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (!(STORAGE_KEYS.deepScrapeProgress in changes)) return;
-    const next = changes[STORAGE_KEYS.deepScrapeProgress].newValue as
-      | DeepScrapeProgress
-      | undefined;
+    const change = changes[STORAGE_KEYS.deepScrapeProgress];
+    const next = change.newValue as DeepScrapeProgress | undefined;
     renderDeepScrapeProgress(next ?? null);
+    // Scrape just finished (progress cleared after running) → the captured
+    // profile + audit are ready, so refresh them without needing a reopen.
+    if (!next && change.oldValue) {
+      setTimeout(() => {
+        void refreshCaptureHero();
+        void loadProfileAudit();
+      }, 600);
+    }
   });
 }
 
@@ -1193,15 +1301,15 @@ const ssiMessage = $('ssiMessage');
 
 let ssiChart: { destroy: () => void } | null = null;
 let ssiDonutChart: { destroy: () => void } | null = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Chart class via dynamic import
-let cachedChartCtor: any = null;
 
+// Chart.js is imported statically (not via `await import()`). A dynamic import
+// makes Parcel split a chunk and emit an inline `<script type="importmap">`,
+// which the MV3 CSP `script-src 'self'` blocks — so the charts silently failed
+// to load. MV3 forbids inline-script hashes/nonces on extension pages, so a
+// static import (no async chunk, no importmap) is the reliable fix. The SSI
+// dashboard renders charts on open anyway, so lazy-loading bought little.
 async function loadChartCtor(): Promise<unknown> {
-  if (!cachedChartCtor) {
-    const mod = await import('./chart-loader');
-    cachedChartCtor = mod.Chart;
-  }
-  return cachedChartCtor;
+  return ChartCtor;
 }
 
 function ssiRefs() {
@@ -1483,110 +1591,17 @@ interface ActionRowDto {
 const streakCount = $('streakCount');
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const cadenceBars = $('cadenceBars');
-const recommendCards = $('recommendCards');
 const pendingChips = $('pendingChips');
 const pendingChipsList = $('pendingChipsList');
 const topicsRow = $('topicsRow');
 const topicsChips = $('topicsChips');
-const cadenceSaveBtn = $<HTMLButtonElement>('cadenceSaveBtn');
-const cadenceStatus = $('cadenceStatus');
 const retroCard = $('retroCard');
 const retroText = $('retroText');
 const retroDismiss = $<HTMLButtonElement>('retroDismiss');
-const cardsSource = $('cardsSource');
-const cardsRefresh = $<HTMLButtonElement>('cardsRefresh');
 const suggestPostBtn = $<HTMLButtonElement>('suggestPostBtn');
 const postModal = $('postModal');
 const postModalClose = $<HTMLButtonElement>('postModalClose');
 const postModalBody = $('postModalBody');
-const targetBrand = $<HTMLInputElement>('targetBrand');
-const targetFinding = $<HTMLInputElement>('targetFinding');
-const targetEngaging = $<HTMLInputElement>('targetEngaging');
-const targetBuilding = $<HTMLInputElement>('targetBuilding');
-
-const PILLAR_COPY: Record<Pillar, { label: string; cta: string; href: string; reason: string }> = {
-  brand: {
-    label: 'Publish a post',
-    cta: 'Open composer',
-    href: 'https://www.linkedin.com/feed/?shareActive=true',
-    reason: 'Brand pillar — original posts move it most.',
-  },
-  finding: {
-    label: 'Send connection invites',
-    cta: 'Open My Network',
-    href: 'https://www.linkedin.com/mynetwork/grow/',
-    reason: 'Finding pillar — outbound invites the only signal LinkedIn rewards.',
-  },
-  engaging: {
-    label: 'Comment on a relevant post',
-    cta: 'Open feed',
-    href: 'https://www.linkedin.com/feed/',
-    reason: 'Engaging pillar — thoughtful comments outperform reactions 3-to-1.',
-  },
-  building: {
-    label: 'Reply in a comment thread',
-    cta: 'Open feed',
-    href: 'https://www.linkedin.com/feed/',
-    reason: 'Building pillar — back-and-forth replies signal real relationships.',
-  },
-};
-
-interface RecommendCardDto {
-  action: string;
-  pillar: Pillar;
-  title: string;
-  reason: string;
-  postId?: string;
-}
-interface RecommenderStateDto {
-  generatedAt: number;
-  cards: RecommendCardDto[];
-  source: 'ai' | 'rule';
-}
-
-function cardHrefFor(pillar: Pillar, postId?: string): string {
-  if (postId && postId.startsWith('urn:li:activity:')) {
-    const id = postId.replace('urn:li:activity:', '');
-    return `https://www.linkedin.com/feed/update/urn:li:activity:${id}/`;
-  }
-  return PILLAR_COPY[pillar].href;
-}
-
-function renderRecommendations(state: RecommenderStateDto): void {
-  if (!recommendCards) return;
-  if (cardsSource) {
-    cardsSource.textContent =
-      state.source === 'ai' ? 'AI · ' + relativeTime(state.generatedAt) : 'Rule-based';
-  }
-  recommendCards.innerHTML = '';
-  for (const c of state.cards) {
-    const card = document.createElement('div');
-    card.className = 'recommend-card';
-    const title = document.createElement('div');
-    title.className = 'recommend-card__title';
-    title.textContent = c.title;
-    const reason = document.createElement('div');
-    reason.className = 'recommend-card__reason';
-    reason.textContent = c.reason;
-    const btn = document.createElement('button');
-    btn.className = 'recommend-card__action';
-    btn.textContent = PILLAR_COPY[c.pillar].cta;
-    btn.addEventListener('click', () =>
-      chrome.tabs.create({ url: cardHrefFor(c.pillar, c.postId) })
-    );
-    card.append(title, reason, btn);
-    recommendCards.append(card);
-  }
-}
-
-function relativeTime(ts: number): string {
-  const mins = Math.round((Date.now() - ts) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
-}
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function loadPending(): Promise<void> {
@@ -1674,24 +1689,6 @@ async function handleRetroDismiss(): Promise<void> {
     chrome.runtime.sendMessage({ action: 'recommender.dismissRetro' }, () => resolve());
   });
   if (retroCard) retroCard.style.display = 'none';
-}
-
-async function handleCardsRefresh(): Promise<void> {
-  if (!cardsRefresh) return;
-  cardsRefresh.disabled = true;
-  const prev = cardsRefresh.innerHTML;
-  cardsRefresh.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i>';
-  try {
-    const resp = await new Promise<{ ok: boolean; state?: RecommenderStateDto }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'recommender.refresh' }, (r) =>
-        resolve(r ?? { ok: false })
-      );
-    });
-    if (resp.state) renderRecommendations(resp.state);
-  } finally {
-    cardsRefresh.disabled = false;
-    cardsRefresh.innerHTML = prev;
-  }
 }
 
 // ─── Suggest-a-post modal ─────────────────────────────────────────────────
@@ -1897,53 +1894,6 @@ function emptyProgress(): WeeklyProgressDto {
   };
 }
 
-// ─── Weekly targets form ──────────────────────────────────────────────────
-
-function showCadenceStatus(text: string, kind: 'success' | 'error'): void {
-  if (!cadenceStatus) return;
-  cadenceStatus.textContent = text;
-  cadenceStatus.className = `status-message ${kind}`;
-  cadenceStatus.style.display = '';
-  setTimeout(() => {
-    if (cadenceStatus) cadenceStatus.style.display = 'none';
-  }, 3000);
-}
-
-async function loadCadenceTargets(): Promise<void> {
-  const resp = await new Promise<{
-    ok: boolean;
-    targets: { brand: number; finding: number; engaging: number; building: number };
-  }>((resolve) => {
-    chrome.runtime.sendMessage({ action: 'cadence.getTargets' }, (r) =>
-      resolve(r ?? { ok: false, targets: { brand: 1, finding: 5, engaging: 3, building: 2 } })
-    );
-  });
-  const t = resp.targets;
-  if (targetBrand) targetBrand.value = String(t.brand);
-  if (targetFinding) targetFinding.value = String(t.finding);
-  if (targetEngaging) targetEngaging.value = String(t.engaging);
-  if (targetBuilding) targetBuilding.value = String(t.building);
-}
-
-async function handleCadenceSave(): Promise<void> {
-  const targets = {
-    brand: parseInt(targetBrand?.value ?? '1', 10),
-    finding: parseInt(targetFinding?.value ?? '5', 10),
-    engaging: parseInt(targetEngaging?.value ?? '3', 10),
-    building: parseInt(targetBuilding?.value ?? '2', 10),
-  };
-  const resp = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-    chrome.runtime.sendMessage({ action: 'cadence.setTargets', targets }, (r) =>
-      resolve(r ?? { ok: false, error: 'No response' })
-    );
-  });
-  if (resp.ok) {
-    showCadenceStatus('Saved.', 'success');
-    void loadToday();
-  } else {
-    showCadenceStatus(`Save failed: ${resp.error ?? 'unknown'}`, 'error');
-  }
-}
 
 // ─── Goals override (issue #18) ────────────────────────────────────────────
 
@@ -2034,11 +1984,9 @@ function wire(): void {
   resetParametersBtn?.addEventListener('click', () => void handleResetParameters());
   savePromptsBtn?.addEventListener('click', () => void handleSavePrompts());
   resetPromptsBtn?.addEventListener('click', () => void handleResetPrompts());
-  cadenceSaveBtn?.addEventListener('click', () => void handleCadenceSave());
   goalsOverrideInput?.addEventListener('input', updateGoalsCount);
   goalsOverrideSaveBtn?.addEventListener('click', () => void handleGoalsOverrideSave());
   retroDismiss?.addEventListener('click', () => void handleRetroDismiss());
-  cardsRefresh?.addEventListener('click', () => void handleCardsRefresh());
   suggestPostBtn?.addEventListener('click', () => void openPostModal());
   postModalClose?.addEventListener('click', closePostModal);
   postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
@@ -2079,7 +2027,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadSsiData(),
     loadAIParameters(),
     loadPrompts(),
-    loadCadenceTargets(),
     loadGoalsOverride(),
     loadToday(),
     loadProfileAudit(),

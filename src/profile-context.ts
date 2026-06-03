@@ -314,7 +314,10 @@ export class ProfileContextService {
       // recent-activity scrape can poll them. The main-profile inject below
       // intentionally does NOT use deep/cancel/progress — byte-for-byte v0.4.0.
       await setDeepScrapeCancel(false);
-      await setDeepScrapeProgress(null);
+      // Show the "profile" phase immediately (instead of clearing) so the popup
+      // bar is visible during the main-profile scrape too — otherwise there's a
+      // dead 1-2s gap before the first posts-phase progress event.
+      await setDeepScrapeProgress({ phase: 'profile', iter: 0, items: 0, height: 0, ts: Date.now() });
       let html: string | null = null;
       try {
         // INTENTIONAL: this inject is byte-for-byte the v0.4.0 main-profile
@@ -517,13 +520,17 @@ export class ProfileContextService {
       let providerKeyConfigured = true;
       try {
         const cfg = await getProviderConfig();
-        providerKeyConfigured = Boolean(cfg.openai?.apiKey?.trim());
+        // Managed mode needs no key; BYOK needs its key. Either enables the call.
+        providerKeyConfigured =
+          cfg.mode === 'managed' ||
+          Boolean(cfg.openai?.apiKey?.trim()) ||
+          Boolean(cfg.groq?.apiKey?.trim());
       } catch {
-        /* read failure → assume no key, skip the call */
+        /* read failure → assume no provider, skip the call */
         providerKeyConfigured = false;
       }
       if (!providerKeyConfigured) {
-        summaryError = 'No OpenAI API key configured — positioning summary skipped.';
+        summaryError = 'No AI provider configured — positioning summary skipped.';
       } else {
         try {
           const response = (await chrome.runtime.sendMessage({
