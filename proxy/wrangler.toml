@@ -1,0 +1,28 @@
+# LinkMate inference proxy — Cloudflare Worker config.
+#
+# Deploy:
+#   cd proxy
+#   npm install
+#   npx wrangler kv namespace create USAGE        # prints an id → paste below
+#   npx wrangler secret put OPENAI_API_KEY        # paste the real OpenAI key
+#   npx wrangler deploy
+#
+# Served on the default *.workers.dev URL. To switch to a custom domain later,
+# add a [[routes]] block with custom_domain = true (requires an active zone).
+
+name = "linkmate-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# Per-user spend allowance + production extension-ID allowlist.
+# Leave ALLOWED_EXTENSION_IDS empty during dev to accept any chrome-extension
+# origin; set it to the published Web Store ID before launch.
+[vars]
+QUOTA_USD = "2.00"
+ALLOWED_EXTENSION_IDS = ""
+
+# KV namespace for per-token cumulative spend + rate-limit counters.
+[[kv_namespaces]]
+binding = "USAGE"
+id = "7dd1851494fb4a6887b6178abfb0bf40"

@@ -19,11 +19,16 @@ import {
   GOALS_OVERRIDE_MAX_LEN,
   getGoalsOverride,
   setGoalsOverride,
+  DEFAULT_PROVIDER_CONFIG,
+  getProviderConfig,
+  getInstallToken,
+  ensureInstallToken,
 } from '../src/storage-schema';
 import type {
   ProfileContext,
   SsiSnapshot,
   EngagedPost,
+  ProviderConfig,
 } from '../src/storage-schema';
 
 // Minimal in-memory chrome.storage.local mock — replaces the bare jest.fn() in tests/setup.ts.
@@ -243,6 +248,65 @@ describe('storage-schema (T010)', () => {
       await migrateIfNeeded();
       const stored = (await chrome.storage.local.get(STORAGE_KEYS.schemaVersion) as unknown) as Record<string, unknown>;
       expect(stored[STORAGE_KEYS.schemaVersion]).toBe(SCHEMA_VERSION);
+    });
+  });
+
+  describe('managed mode + install token (v2)', () => {
+    it('defaults to managed mode with no key required', () => {
+      expect(DEFAULT_PROVIDER_CONFIG.mode).toBe('managed');
+      expect(DEFAULT_PROVIDER_CONFIG.managed?.model).toBeTruthy();
+    });
+
+    it('getProviderConfig returns managed default when nothing stored', async () => {
+      const cfg = await getProviderConfig();
+      expect(cfg.mode).toBe('managed');
+    });
+
+    it('ensureInstallToken generates a UUID once and is idempotent', async () => {
+      await expect(getInstallToken()).resolves.toBeNull();
+      const first = await ensureInstallToken();
+      expect(first).toMatch(/^[0-9a-f-]{36}$/i);
+      const second = await ensureInstallToken();
+      expect(second).toBe(first);
+      await expect(getInstallToken()).resolves.toBe(first);
+    });
+  });
+
+  describe('migrateIfNeeded v1 → v2', () => {
+    it('mints an install token during migration', async () => {
+      await chrome.storage.local.set({ [STORAGE_KEYS.schemaVersion]: 1 });
+      await migrateIfNeeded();
+      await expect(getInstallToken()).resolves.toMatch(/^[0-9a-f-]{36}$/i);
+    });
+
+    it('moves keyless users to managed mode', async () => {
+      const keyless: ProviderConfig = {
+        mode: 'openai',
+        openai: { apiKey: '', model: 'gpt-4o-mini' },
+      };
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.schemaVersion]: 1,
+        [STORAGE_KEYS.provider]: keyless,
+      });
+      await migrateIfNeeded();
+      const cfg = await getProviderConfig();
+      expect(cfg.mode).toBe('managed');
+      expect(cfg.managed?.model).toBeTruthy();
+    });
+
+    it('leaves existing BYOK users on their own key', async () => {
+      const byok: ProviderConfig = {
+        mode: 'openai',
+        openai: { apiKey: 'sk-existing', model: 'gpt-4o' },
+      };
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.schemaVersion]: 1,
+        [STORAGE_KEYS.provider]: byok,
+      });
+      await migrateIfNeeded();
+      const cfg = await getProviderConfig();
+      expect(cfg.mode).toBe('openai');
+      expect(cfg.openai?.apiKey).toBe('sk-existing');
     });
   });
 });

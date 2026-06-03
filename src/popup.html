@@ -18,64 +18,42 @@
       </header>
 
       <div id="settings-content" class="settings-main">
+        <!-- First-scrape progress — pinned to the top so it's obvious during capture. -->
+        <div id="deepScrapeProgress" class="deep-scrape-progress deep-scrape-progress--top" style="display: none">
+          <div class="deep-scrape-progress__head">
+            <i class="fa fa-circle-notch fa-spin deep-scrape-progress__spinner" aria-hidden="true"></i>
+            <span id="deepScrapeProgressText" class="deep-scrape-progress__title"
+              >Setting up your workspace…</span
+            >
+            <button id="deepScrapeCancelBtn" type="button" class="deep-scrape-progress__cancel">
+              Cancel
+            </button>
+          </div>
+          <div class="deep-scrape-progress__bar"><div class="deep-scrape-progress__fill"></div></div>
+          <div class="deep-scrape-progress__steps">
+            <span data-phase="profile">Profile</span>
+            <span data-phase="posts">Posts</span>
+            <span data-phase="comments">Comments</span>
+          </div>
+        </div>
+
         <!-- Onboarding banner: first-run guidance for API key / capture profile -->
         <div id="onboardingBanner" class="onboarding-banner" style="display: none">
           <i id="onboardingBannerIcon" class="fa fa-hand-point-down"></i>
           <span id="onboardingBannerText">Paste your OpenAI API key below to start.</span>
         </div>
 
-        <!-- AI Provider key + model — first action user must take -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-key"></i>
-            AI Provider
-          </h3>
-          <p class="settings-description">
-            LinkMate uses AI for all generation. Bring your own key — stored locally in this browser only, never synced.
-          </p>
-
-          <div class="provider-openai-config">
-            <label class="provider-field">
-              <span>Provider</span>
-              <select id="providerMode">
-                <option value="openai">OpenAI</option>
-                <option value="groq">Groq</option>
-              </select>
-            </label>
-
-            <label class="provider-field">
-              <span>API Key</span>
-              <input
-                type="password"
-                id="providerOpenAIKey"
-                placeholder="sk-..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <small class="provider-field__hint" id="providerKeyHint"> Get one at platform.openai.com/api-keys </small>
-            </label>
-
-            <label class="provider-field">
-              <span>Model</span>
-              <select id="providerOpenAIModel">
-                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
-                <option value="gpt-4o">gpt-4o (best quality)</option>
-                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                <option value="gpt-4.1">gpt-4.1</option>
-                <option value="o4-mini">o4-mini (reasoning)</option>
-              </select>
-            </label>
+        <!-- Quota-exhausted → switch to own key. Hidden unless free tier is spent. -->
+        <div id="byokBanner" class="byok-banner" style="display: none" role="alert">
+          <div class="byok-banner__text">
+            <strong>Free AI used up.</strong>
+            <span>Add your own OpenAI key to keep generating — unlimited.</span>
           </div>
-
-          <div class="provider-actions">
-            <button id="providerSave" class="btn btn-primary">
-              <i class="fa fa-save"></i>
-              Save
-            </button>
-          </div>
-
-          <div id="providerStatus" class="status-message" style="display: none"></div>
+          <button id="byokBannerSwitch" class="btn btn-primary">Use my own key</button>
         </div>
+
+        <!-- AI free-tier balance stays visible; full provider controls live in Advanced. -->
+        <div id="providerQuota" class="provider-quota provider-quota--top" style="display: none"></div>
 
         <!-- Capture Hero: status + stats. First thing the user sees. -->
         <section id="captureHero" class="capture-hero capture-hero--empty">
@@ -283,37 +261,6 @@
           <div id="goalsOverrideStatus" class="status-message" style="display: none"></div>
         </details>
 
-        <!-- Weekly cadence targets -->
-        <details class="settings-section settings-section--collapsible">
-          <summary>
-            <i class="fa fa-calendar-week"></i>
-            Weekly Targets
-          </summary>
-          <p class="settings-description">How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.</p>
-          <div class="cadence-targets-form">
-            <label class="provider-field">
-              <span>Posts (Brand)</span>
-              <input type="number" id="targetBrand" min="0" max="20" value="1" />
-            </label>
-            <label class="provider-field">
-              <span>Invites (Finding)</span>
-              <input type="number" id="targetFinding" min="0" max="50" value="5" />
-            </label>
-            <label class="provider-field">
-              <span>Comments (Engaging)</span>
-              <input type="number" id="targetEngaging" min="0" max="30" value="3" />
-            </label>
-            <label class="provider-field">
-              <span>Replies (Building)</span>
-              <input type="number" id="targetBuilding" min="0" max="20" value="2" />
-            </label>
-          </div>
-          <div class="provider-actions">
-            <button id="cadenceSaveBtn" class="btn btn-primary"><i class="fa fa-save"></i> Save targets</button>
-          </div>
-          <div id="cadenceStatus" class="status-message" style="display: none"></div>
-        </details>
-
         <!-- Profile Context (legacy AI summary view — also holds capture-full toggle) -->
         <details class="settings-section settings-section--collapsible">
           <summary>
@@ -353,16 +300,70 @@
             <span>Capture full LinkedIn profile and activity</span>
           </label>
 
-          <div id="deepScrapeProgress" class="deep-scrape-progress" style="display: none">
-            <span id="deepScrapeProgressText">Scraping…</span>
-            <button id="deepScrapeCancelBtn" type="button" class="btn btn-secondary btn-sm">Cancel</button>
-          </div>
-
           <div id="profileMessage" class="status-message" style="display: none"></div>
         </details>
 
-        <!-- AI Generation Parameters -->
-        <details class="settings-section settings-section--collapsible">
+        <!-- Advanced (developer) — technical knobs hidden by default -->
+        <details class="settings-section settings-section--collapsible advanced-group">
+          <summary>
+            <i class="fa fa-wrench"></i>
+            Advanced
+          </summary>
+          <p class="settings-description">Developer settings — most people never need these.</p>
+
+          <!-- AI Provider (managed free AI by default; switch to your own key here) -->
+          <details class="settings-section settings-section--collapsible">
+          <summary>
+            <i class="fa fa-key"></i>
+            AI Provider
+          </summary>
+          <p class="settings-description">
+            LinkMate includes free AI — no key needed. Switch to your own key for unlimited use. Keys are stored locally in this browser only, never synced.
+          </p>
+          <div class="provider-openai-config">
+            <label class="provider-field">
+              <span>Provider</span>
+              <select id="providerMode">
+                <option value="managed">LinkMate Free AI (no key)</option>
+                <option value="openai">My own OpenAI key (unlimited)</option>
+                <option value="groq">My own Groq key (unlimited)</option>
+              </select>
+            </label>
+
+            <label class="provider-field" id="providerKeyField">
+              <span>API Key</span>
+              <input
+                type="password"
+                id="providerOpenAIKey"
+                placeholder="sk-..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <small class="provider-field__hint" id="providerKeyHint"> Get one at platform.openai.com/api-keys </small>
+            </label>
+
+            <label class="provider-field">
+              <span>Model</span>
+              <select id="providerOpenAIModel">
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                <option value="gpt-4o">gpt-4o (best quality)</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="o4-mini">o4-mini (reasoning)</option>
+              </select>
+            </label>
+          </div>
+          <div class="provider-actions">
+            <button id="providerSave" class="btn btn-primary">
+              <i class="fa fa-save"></i>
+              Save
+            </button>
+          </div>
+          <div id="providerStatus" class="status-message" style="display: none"></div>
+          </details>
+
+          <!-- AI Generation Parameters -->
+          <details class="settings-section settings-section--collapsible">
           <summary>
             <i class="fa fa-sliders-h"></i>
             AI Generation Parameters
@@ -471,6 +472,7 @@
 
             <div id="settingsStatus" class="status-message" style="display: none"></div>
           </div>
+          </details>
         </details>
       </div>
     </div>

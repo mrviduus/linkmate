@@ -7,7 +7,11 @@
  * first-gesture on profile page, popup auto-fire) are gated behind that flag.
  */
 
-import { setCaptureFullProfile, setOnboardingCompleted } from './storage-schema';
+import {
+  ensureInstallToken,
+  setCaptureFullProfile,
+  setOnboardingCompleted,
+} from './storage-schema';
 
 const captureFull = document.getElementById('captureFull') as HTMLInputElement | null;
 const getStartedBtn = document.getElementById('getStarted') as HTMLButtonElement | null;
@@ -21,6 +25,8 @@ async function handleGetStarted(): Promise<void> {
   getStartedBtn.textContent = 'Opening LinkedIn…';
   await setCaptureFullProfile(captureFull?.checked ?? true);
   await setOnboardingCompleted(true);
+  // Mint the anonymous install token so the free managed tier works immediately.
+  await ensureInstallToken();
   // One-shot signal to the side panel: kick off a capture on the very next
   // open. Subsequent opens won't re-capture (the panel consumes this flag).
   await chrome.storage.local.set({ [PENDING_CAPTURE_KEY]: true });

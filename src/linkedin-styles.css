@@ -593,7 +593,9 @@
 .linkmate-fab-container {
   position: fixed;
   bottom: 24px;
-  right: 24px;
+  /* Bottom-left so we don't cover LinkedIn's right rail (News / puzzles).
+     Draggable; position persists in localStorage. */
+  left: 24px;
   z-index: 9999;
   display: flex;
   align-items: center;
@@ -728,6 +730,64 @@
     background: #2a2a2a;
     border-color: #70b5ff;
     box-shadow: 0 6px 16px rgba(112, 181, 255, 0.15);
+  }
+}
+
+/* Collapse toggle + collapsed (puck) state */
+.linkmate-fab-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.linkmate-fab-collapse:hover {
+  color: #0a66c2;
+  background: rgba(10, 102, 194, 0.08);
+}
+
+/* Collapsed: hide the bar's contents; the container becomes a small puck and
+   the collapse button (now a ⚡) is the only affordance to expand. */
+.linkmate-fab-container.linkmate-fab--collapsed {
+  padding: 0;
+  border-radius: 50%;
+  gap: 0;
+}
+
+.linkmate-fab-container.linkmate-fab--collapsed .linkmate-fab-drag-handle,
+.linkmate-fab-container.linkmate-fab--collapsed .linkmate-focus-fab,
+.linkmate-fab-container.linkmate-fab--collapsed .linkmate-skip-fab {
+  display: none;
+}
+
+.linkmate-fab-container.linkmate-fab--collapsed .linkmate-fab-collapse {
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+  color: #fff;
+  background: linear-gradient(135deg, #0a66c2 0%, #004182 100%);
+}
+
+.linkmate-fab-container.linkmate-fab--collapsed .linkmate-fab-collapse:hover {
+  filter: brightness(1.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .linkmate-fab-collapse {
+    color: rgba(255, 255, 255, 0.45);
+  }
+  .linkmate-fab-collapse:hover {
+    color: #70b5ff;
+    background: rgba(112, 181, 255, 0.08);
   }
 }
 

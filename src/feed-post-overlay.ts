@@ -73,6 +73,7 @@ export class FeedPostOverlay {
   private fabContainer: HTMLElement | null = null;
   private focusBtn: HTMLButtonElement | null = null;
   private skipBtn: HTMLButtonElement | null = null;
+  private collapseBtn: HTMLButtonElement | null = null;
   private skippedPostIds = new Set<string>();
   private lastFocusedPostId: string | null = null;
   private rescanTimer: ReturnType<typeof setTimeout> | null = null;
@@ -351,10 +352,11 @@ export class FeedPostOverlay {
       if (!span) continue;
       span.setAttribute('data-state', 'ready');
       span.textContent = `🤖 ${r.aiScore}/10`;
-      if (r.whyForYou) {
-        span.setAttribute('title', r.whyForYou);
-        span.setAttribute('data-tooltip', r.whyForYou);
-      }
+      // Prefer the AI's reason; otherwise a plain explainer so the score isn't
+      // a cryptic number floating on the post.
+      const tip = r.whyForYou || `Relevance ${r.aiScore}/10 — higher = more worth engaging`;
+      span.setAttribute('title', tip);
+      span.setAttribute('data-tooltip', tip);
     }
   }
 
@@ -429,14 +431,28 @@ export class FeedPostOverlay {
     `;
     skipBtn.addEventListener('click', () => this.handleSkipClick());
 
+    // Collapse toggle — shrinks the bar to a small puck so it never nags.
+    const collapseBtn = document.createElement('button');
+    collapseBtn.className = 'linkmate-fab-collapse';
+    collapseBtn.type = 'button';
+    collapseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleFabCollapsed();
+    });
+
     container.appendChild(dragHandle);
     container.appendChild(focusBtn);
     container.appendChild(skipBtn);
+    container.appendChild(collapseBtn);
     document.body.appendChild(container);
 
     this.fabContainer = container;
     this.focusBtn = focusBtn;
     this.skipBtn = skipBtn;
+    this.collapseBtn = collapseBtn;
+
+    // Restore collapsed state (persisted across reloads).
+    this.applyFabCollapsed(localStorage.getItem('linkmate-fab-collapsed') === '1');
 
     // Draggable functionality
     let isDragging = false;
@@ -521,6 +537,24 @@ export class FeedPostOverlay {
 
     dragHandle.addEventListener('mousedown', onMouseDown);
     dragHandle.addEventListener('touchstart', onTouchStart, { passive: true });
+  }
+
+  private toggleFabCollapsed(): void {
+    const next = !this.fabContainer?.classList.contains('linkmate-fab--collapsed');
+    this.applyFabCollapsed(next);
+    localStorage.setItem('linkmate-fab-collapsed', next ? '1' : '0');
+  }
+
+  /** Collapsed = a small puck (just the toggle); expanded = the full bar. */
+  private applyFabCollapsed(collapsed: boolean): void {
+    if (!this.fabContainer || !this.collapseBtn) return;
+    this.fabContainer.classList.toggle('linkmate-fab--collapsed', collapsed);
+    this.collapseBtn.setAttribute('aria-label', collapsed ? 'Expand LinkMate' : 'Collapse');
+    this.collapseBtn.title = collapsed ? 'Expand LinkMate' : 'Collapse';
+    // Bolt when collapsed (invites expand), chevron-right when expanded.
+    this.collapseBtn.innerHTML = collapsed
+      ? '<span aria-hidden="true">⚡</span>'
+      : `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>`;
   }
 
   private handleSkipClick(): void {
