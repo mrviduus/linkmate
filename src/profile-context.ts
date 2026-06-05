@@ -116,6 +116,13 @@ export type CaptureProgress =
 export interface CaptureOptions {
   /** Optional progress reporter; called as the capture moves through substeps. */
   onProgress?: (step: CaptureProgress) => void;
+  /**
+   * Scrape the user's CURRENT active tab (navigate it to the profile) instead of
+   * opening a dedicated capture tab. Keeps everything in ONE tab — no second tab
+   * appears. The tab is NOT closed afterwards (it's the user's). Trade-off: data
+   * can be slightly less complete than a clean dedicated tab.
+   */
+  useActiveTab?: boolean;
 }
 
 const HIDDEN_PROFILE_TAB_URL = 'https://www.linkedin.com/in/me/';
@@ -199,6 +206,52 @@ async function closeHiddenTab(tabId: number): Promise<void> {
   }
 }
 
+/**
+ * Single-tab capture: navigate the user's CURRENT active tab to /in/me and
+ * resolve with its tabId once LinkedIn lands on a real /in/<handle> URL. A
+ * top-level `tabs.update({url})` is a full document navigation (not an SPA
+ * route change), so it loads clean — no extra tab, the caller must NOT close it.
+ */
+async function navigateActiveTabToProfile(): Promise<number> {
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const tabId = active?.id;
+  if (tabId === undefined) {
+    throw new Error('No active tab available to capture from.');
+  }
+  await chrome.tabs.update(tabId, { url: HIDDEN_PROFILE_TAB_URL, active: true });
+
+  let listener: ((id: number, info: chrome.tabs.TabChangeInfo, t: chrome.tabs.Tab) => void) | null =
+    null;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      if (listener) chrome.tabs.onUpdated.removeListener(listener);
+      listener = null;
+    };
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Profile tab did not load within ${HIDDEN_TAB_LOAD_TIMEOUT_MS / 1000}s`));
+    }, HIDDEN_TAB_LOAD_TIMEOUT_MS);
+    listener = (id, info, t) => {
+      if (id !== tabId) return;
+      const u = info.url ?? t.url ?? '';
+      if (u && LOGIN_URL_FRAGMENTS.some((f) => u.includes(f))) {
+        clearTimeout(timeoutId);
+        cleanup();
+        reject(new Error('not-signed-in'));
+        return;
+      }
+      const stillOnAlias = /\/in\/me\/?(\?.*)?$/i.test(t.url ?? '');
+      if (info.status === 'complete' && PROFILE_URL_PATTERN.test(t.url ?? '') && !stillOnAlias) {
+        clearTimeout(timeoutId);
+        cleanup();
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+  return tabId;
+}
+
 interface ProfileCaptureResponse {
   ok: boolean;
   positioningSummary?: string;
@@ -257,10 +310,16 @@ export class ProfileContextService {
     }
     try {
       progress('opening-tab');
-      hiddenTabId = await openHiddenProfileTab();
+      if (opts.useActiveTab) {
+        // Single-tab mode: reuse the user's current tab. hiddenTabId stays
+        // undefined so the finally never closes it.
+        tabId = await navigateActiveTabToProfile();
+      } else {
+        hiddenTabId = await openHiddenProfileTab();
+        tabId = hiddenTabId;
+      }
       progress('waiting-profile-load');
-      const t = await chrome.tabs.get(hiddenTabId);
-      tabId = hiddenTabId;
+      const t = await chrome.tabs.get(tabId);
       url = t.url ?? '';
     } catch (err) {
       const message = String(err instanceof Error ? err.message : err);

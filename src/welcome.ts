@@ -56,7 +56,11 @@ async function handleGetStarted(): Promise<void> {
     console.warn('[LinkMate] welcome → sidePanel.open failed:', err);
   }
 
-  window.location.assign('https://www.linkedin.com/in/me/');
+  // Navigate to the feed (the dashboard's home), NOT /in/me — the capture opens
+  // its own fresh profile tab anyway, so sending the welcome tab to /in/me too
+  // just left a redundant duplicate profile tab. Now: one persistent feed tab +
+  // the capture's temporary scrape tab (which auto-closes).
+  window.location.assign('https://www.linkedin.com/feed/');
 }
 
 async function handleSkip(): Promise<void> {

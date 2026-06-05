@@ -21,7 +21,7 @@ import {
 import type { DeepScrapeProgress } from './storage-schema';
 import { getUserProfile } from './user-profile-store';
 import type { UserProfile } from './lib/idb';
-import type { ActivitySignal, ProfileContext, SsiSnapshot } from './storage-schema';
+import type { ActivitySignal, SsiSnapshot } from './storage-schema';
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
@@ -986,15 +986,7 @@ async function handleProfileAuditRerun(): Promise<void> {
 // ─── Profile Context ────────────────────────────────────────────────────────
 
 const captureProfileBtn = $<HTMLButtonElement>('captureProfile');
-const profileNoneState = $('profileNoneState');
-const profileCapturedState = $('profileCapturedState');
-const profileFullName = $('profileFullName');
-const profileHeadline = $('profileHeadline');
-const profilePositioning = $('profilePositioning');
-const profileCapturedAt = $('profileCapturedAt');
-const profileSkillsCount = $('profileSkillsCount');
-const profileStaleChip = $('profileStaleChip');
-const profileMessage = $('profileMessage');
+const profileMessageEl = $('captureHeroMessage');
 const captureFullProfileToggle = $<HTMLInputElement>('captureFullProfile');
 const deepScrapeProgressEl = $<HTMLDivElement>('deepScrapeProgress');
 const deepScrapeProgressText = $<HTMLSpanElement>('deepScrapeProgressText');
@@ -1011,38 +1003,18 @@ function formatRelativeTime(timestamp: number): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-function renderProfile(profile: ProfileContext | null, isStale: boolean): void {
-  if (!profile) {
-    if (profileNoneState) profileNoneState.style.display = '';
-    if (profileCapturedState) profileCapturedState.style.display = 'none';
-    return;
-  }
-  if (profileNoneState) profileNoneState.style.display = 'none';
-  if (profileCapturedState) profileCapturedState.style.display = '';
-  if (profileFullName) profileFullName.textContent = profile.fullName || '(no name)';
-  if (profileHeadline) profileHeadline.textContent = profile.headline || '(no headline)';
-  if (profilePositioning)
-    profilePositioning.textContent = profile.positioningSummary || '(no positioning summary)';
-  if (profileCapturedAt) profileCapturedAt.textContent = formatRelativeTime(profile.capturedAt);
-  if (profileSkillsCount) profileSkillsCount.textContent = String(profile.topSkills.length);
-  if (profileStaleChip) profileStaleChip.style.display = isStale ? '' : 'none';
-}
-
 function showProfileMessage(text: string, kind: 'success' | 'error' | 'info'): void {
-  if (!profileMessage) return;
-  profileMessage.textContent = text;
-  profileMessage.className = `status-message ${kind}`;
-  profileMessage.style.display = '';
+  if (!profileMessageEl) return;
+  profileMessageEl.textContent = text;
+  profileMessageEl.className = `capture-hero__message status-message ${kind}`;
+  profileMessageEl.style.display = '';
   setTimeout(() => {
-    if (profileMessage) profileMessage.style.display = 'none';
+    if (profileMessageEl) profileMessageEl.style.display = 'none';
   }, 6000);
 }
 
 async function refreshProfileDisplay(): Promise<void> {
-  const profile = await profileService.get();
-  const stale = await profileService.shouldRefresh();
-  renderProfile(profile, profile !== null && stale);
-  // Hero card uses IDB data (richer than chrome.storage ProfileContext) — keep them in sync.
+  // Hero card uses IDB data (richer than chrome.storage ProfileContext).
   await refreshCaptureHero();
 }
 
@@ -1110,6 +1082,9 @@ async function handleCaptureProfile(): Promise<void> {
   };
   try {
     const result = await profileService.capture({
+      // Single-tab capture: scrape the user's current LinkedIn tab instead of
+      // opening a second tab.
+      useActiveTab: true,
       onProgress: (step) => {
         const label = STEP_LABELS[step];
         if (label) setBtnLabel(label);
@@ -1550,123 +1525,11 @@ async function handleResetPrompts(): Promise<void> {
   showPromptsStatus('Reset to defaults.', 'success');
 }
 
-// ─── Today: cadence quotas + recommend cards + streak + pending chips ─────
 
-type Pillar = 'brand' | 'finding' | 'engaging' | 'building';
-type WeeklyProgressDto = Record<Pillar, { done: number; target: number; pct: number }>;
-interface ActionRowDto {
-  id: number;
-  type: string;
-  pillar: Pillar;
-  timestamp: number;
-  postId?: string;
-  draftText?: string;
-  submitted: boolean;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const streakCount = $('streakCount');
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const cadenceBars = $('cadenceBars');
-const pendingChips = $('pendingChips');
-const pendingChipsList = $('pendingChipsList');
-const topicsRow = $('topicsRow');
-const topicsChips = $('topicsChips');
-const retroCard = $('retroCard');
-const retroText = $('retroText');
-const retroDismiss = $<HTMLButtonElement>('retroDismiss');
 const suggestPostBtn = $<HTMLButtonElement>('suggestPostBtn');
 const postModal = $('postModal');
 const postModalClose = $<HTMLButtonElement>('postModalClose');
 const postModalBody = $('postModalBody');
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function loadPending(): Promise<void> {
-  const resp = await new Promise<{ ok: boolean; rows: ActionRowDto[] }>((resolve) => {
-    chrome.runtime.sendMessage({ action: 'action.log.pending' }, (r) =>
-      resolve(r ?? { ok: false, rows: [] })
-    );
-  });
-  const rows = resp.rows ?? [];
-  if (!pendingChips || !pendingChipsList) return;
-  if (rows.length === 0) {
-    pendingChips.style.display = 'none';
-    return;
-  }
-  pendingChips.style.display = '';
-  pendingChipsList.innerHTML = '';
-  for (const row of rows.slice(0, 5)) {
-    const chip = document.createElement('div');
-    chip.className = 'pending-chip';
-    const txt = document.createElement('span');
-    txt.className = 'pending-chip__text';
-    const when = new Date(row.timestamp).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-    });
-    txt.textContent = `${when} · ${row.type}${row.postId ? ' · ' + row.postId.slice(0, 12) : ''}`;
-    const up = document.createElement('button');
-    up.className = 'pending-chip__btn';
-    up.title = 'It worked';
-    up.textContent = '👍';
-    up.addEventListener('click', () => void recordOutcome(row.id, 'positive', chip));
-    const down = document.createElement('button');
-    down.className = 'pending-chip__btn';
-    down.title = "Didn't work";
-    down.textContent = '👎';
-    down.addEventListener('click', () => void recordOutcome(row.id, 'negative', chip));
-    chip.append(txt, up, down);
-    pendingChipsList.append(chip);
-  }
-}
-
-async function recordOutcome(
-  actionId: number,
-  verdict: 'positive' | 'negative',
-  chip: HTMLElement
-): Promise<void> {
-  await new Promise<void>((resolve) => {
-    chrome.runtime.sendMessage(
-      {
-        action: 'action.log.attachOutcome',
-        input: { actionId, source: 'manual', manualVerdict: verdict },
-      },
-      () => resolve()
-    );
-  });
-  chip.remove();
-  // Refresh cadence (no change to counts, but streak might shift on outcome boundaries later).
-}
-
-/**
- * Issue #16: the Today (cadence) section was removed from popup.html. The
- * background handlers it called (recommender.getCards, recommender.getRetro)
- * have side effects (AI calls, retroLastShown bookkeeping) — firing them
- * on every panel open with no UI to consume the result was wasted compute
- * + drifting state. Keeping the function as a no-op so existing callers
- * (DOMContentLoaded, handleSsiRefresh) don't need to know.
- */
-async function loadToday(): Promise<void> {
-  // Intentionally no-op. See block comment above.
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function renderRetro(text: string | null): void {
-  if (!retroCard || !retroText) return;
-  if (!text) {
-    retroCard.style.display = 'none';
-    return;
-  }
-  retroText.textContent = text;
-  retroCard.style.display = '';
-}
-
-async function handleRetroDismiss(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    chrome.runtime.sendMessage({ action: 'recommender.dismissRetro' }, () => resolve());
-  });
-  if (retroCard) retroCard.style.display = 'none';
-}
 
 // ─── Suggest-a-post modal ─────────────────────────────────────────────────
 
@@ -1832,46 +1695,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (next) renderPostDraftsState(next);
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function loadTopics(): Promise<void> {
-  const resp = await new Promise<{ ok: boolean; topics?: Array<{ topic: string; count: number }> }>(
-    (resolve) => {
-      chrome.runtime.sendMessage({ action: 'action.log.topTopics', days: 14, n: 6 }, (r) =>
-        resolve(r ?? { ok: false })
-      );
-    }
-  );
-  const topics = resp.topics ?? [];
-  if (!topicsRow || !topicsChips) return;
-  if (topics.length === 0) {
-    topicsRow.style.display = 'none';
-    return;
-  }
-  topicsRow.style.display = '';
-  topicsChips.innerHTML = '';
-  for (const t of topics) {
-    const chip = document.createElement('span');
-    chip.className = 'topic-chip';
-    const label = document.createTextNode(`${t.topic} `);
-    const count = document.createElement('span');
-    count.className = 'topic-chip__count';
-    count.textContent = String(t.count);
-    chip.append(label, count);
-    topicsChips.append(chip);
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function emptyProgress(): WeeklyProgressDto {
-  return {
-    brand: { done: 0, target: 1, pct: 0 },
-    finding: { done: 0, target: 5, pct: 0 },
-    engaging: { done: 0, target: 3, pct: 0 },
-    building: { done: 0, target: 2, pct: 0 },
-  };
-}
-
-
 // ─── Goals override (issue #18) ────────────────────────────────────────────
 
 const goalsOverrideInput = $<HTMLTextAreaElement>('goalsOverride');
@@ -1963,7 +1786,6 @@ function wire(): void {
   resetPromptsBtn?.addEventListener('click', () => void handleResetPrompts());
   goalsOverrideInput?.addEventListener('input', updateGoalsCount);
   goalsOverrideSaveBtn?.addEventListener('click', () => void handleGoalsOverrideSave());
-  retroDismiss?.addEventListener('click', () => void handleRetroDismiss());
   suggestPostBtn?.addEventListener('click', () => void openPostModal());
   postModalClose?.addEventListener('click', closePostModal);
   postModal?.querySelector('.post-modal__backdrop')?.addEventListener('click', closePostModal);
@@ -2006,7 +1828,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadAIParameters(),
     loadPrompts(),
     loadGoalsOverride(),
-    loadToday(),
     loadProfileAudit(),
   ]);
   chrome.runtime.sendMessage({ action: 'popupReady' });

@@ -167,12 +167,17 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   );
 });
 
-// On SW startup, sync EVERY existing tab (enable LinkedIn, disable the rest) so
-// tabs already open at startup — e.g. chrome://extensions — get the right state
-// immediately. We deliberately do NOT globally disable the panel: that would
-// briefly close it on freshly-opened LinkedIn tabs (like the profile-capture
-// tab) before the per-tab enable lands, hiding the dashboard mid-capture.
+// On SW startup: default the panel OFF globally (so the panel is hidden on
+// non-LinkedIn tabs and closes when the user switches to one), then enable it on
+// existing LinkedIn tabs. This is safe now that capture scrapes the user's
+// CURRENT tab (useActiveTab) instead of opening a fresh tab — there's no new tab
+// to race, so the global default can't hide the dashboard mid-capture.
 (async () => {
+  try {
+    await sidePanelApi.setOptions({ enabled: false });
+  } catch (err) {
+    console.warn('[LinkMate] sidePanel global disable failed:', err);
+  }
   try {
     const tabs = await chrome.tabs.query({});
     for (const t of tabs) {
