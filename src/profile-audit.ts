@@ -189,6 +189,7 @@ export function computeActivitySignals(
     profile.recentPosts ?? [],
     (p) => (p.isRepost ? null : p.timestamp),
     threshold,
+    now,
   );
   out.push({
     id: 'posts30d',
@@ -205,6 +206,7 @@ export function computeActivitySignals(
     profile.recentComments ?? [],
     (c) => c.timestamp,
     threshold,
+    now,
   );
   out.push({
     id: 'comments30d',
@@ -234,17 +236,46 @@ export function computeActivitySignals(
   return out;
 }
 
+/**
+ * Resolve a scraped LinkedIn timestamp to epoch ms. LinkedIn renders RELATIVE
+ * times ("3d", "1w", "7mo", "2h", "5m", "1y") — `Date.parse` returns NaN for
+ * those, which silently zeroed the posts/comments-in-30d counts. We parse the
+ * leading "<n><unit>" token relative to `now`, falling back to Date.parse for
+ * any absolute date strings.
+ */
+function resolveTimestampMs(raw: string, now: number): number | null {
+  const m = /^(\d+)\s*(mo|s|m|h|d|w|y)\b/i.exec(raw.trim());
+  if (m) {
+    const n = parseInt(m[1], 10);
+    const unit = m[2].toLowerCase();
+    const UNIT_MS: Record<string, number> = {
+      s: 1_000,
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+      w: 604_800_000,
+      mo: 2_592_000_000, // ~30d
+      y: 31_536_000_000, // ~365d
+    };
+    const ms = UNIT_MS[unit];
+    if (ms) return now - n * ms;
+  }
+  const abs = Date.parse(raw);
+  return Number.isFinite(abs) ? abs : null;
+}
+
 function countSinceTimestamp<T>(
   items: T[],
   getTs: (item: T) => string | null | undefined,
   thresholdMs: number,
+  now: number,
 ): number {
   let n = 0;
   for (const it of items) {
     const ts = getTs(it);
     if (!ts) continue;
-    const t = Date.parse(ts);
-    if (Number.isFinite(t) && t >= thresholdMs) n++;
+    const t = resolveTimestampMs(ts, now);
+    if (t !== null && t >= thresholdMs) n++;
   }
   return n;
 }

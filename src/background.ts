@@ -126,18 +126,18 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-// Action icon click → open the side panel automatically (instead of a popup).
-(
-  chrome.sidePanel as unknown as {
-    setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
-  }
-)
+// Side panel: opens on the toolbar icon click, but ONLY on LinkedIn (plus the
+// extension's own onboarding page). Everywhere else it's disabled so it neither
+// opens nor lingers when you switch tabs.
+const sidePanelApi = chrome.sidePanel as unknown as {
+  setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
+  setOptions: (o: { tabId?: number; enabled: boolean }) => Promise<void>;
+};
+
+sidePanelApi
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((err) => console.warn('[LinkMate] setPanelBehavior failed:', err));
 
-// Restrict the side panel to LinkedIn (plus the extension's own onboarding
-// page) — on every other tab the panel is disabled so the toolbar click does
-// nothing there. Enabled/disabled per-tab as the user navigates / switches.
 function sidePanelAllowed(url?: string): boolean {
   if (!url) return false;
   if (url.startsWith('chrome-extension://')) return true; // welcome / onboarding
@@ -149,11 +149,8 @@ function sidePanelAllowed(url?: string): boolean {
 }
 
 async function syncSidePanelForTab(tabId: number, url?: string): Promise<void> {
-  const sp = chrome.sidePanel as unknown as {
-    setOptions: (o: { tabId: number; enabled: boolean }) => Promise<void>;
-  };
   try {
-    await sp.setOptions({ tabId, enabled: sidePanelAllowed(url) });
+    await sidePanelApi.setOptions({ tabId, enabled: sidePanelAllowed(url) });
   } catch (err) {
     console.warn('[LinkMate] sidePanel.setOptions failed:', err);
   }
@@ -169,6 +166,27 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
     () => {},
   );
 });
+
+// On SW startup: default the panel OFF globally (so the panel is hidden on
+// non-LinkedIn tabs and closes when the user switches to one), then enable it on
+// existing LinkedIn tabs. This is safe now that capture scrapes the user's
+// CURRENT tab (useActiveTab) instead of opening a fresh tab — there's no new tab
+// to race, so the global default can't hide the dashboard mid-capture.
+(async () => {
+  try {
+    await sidePanelApi.setOptions({ enabled: false });
+  } catch (err) {
+    console.warn('[LinkMate] sidePanel global disable failed:', err);
+  }
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const t of tabs) {
+      if (t.id !== undefined) void syncSidePanelForTab(t.id, t.url);
+    }
+  } catch {
+    /* tabs query best-effort */
+  }
+})();
 
 // Issue #16 — content-script forwards the first user gesture on a LinkedIn
 // profile page so we can open the side panel without the user clicking the

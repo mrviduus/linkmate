@@ -5,6 +5,7 @@ import { FeedPostOverlay } from './feed-post-overlay';
 import { scanPostForOutcome } from './outcome-scanner';
 import type { AiScoreFeedResult, AiScoredPostDTO } from './feed-post-overlay';
 import type { ParsedPost } from './storage-schema';
+import { STORAGE_KEYS, getFeedScoringEnabled } from './storage-schema';
 
 console.log('LinkMate LinkedIn content script loaded');
 
@@ -53,9 +54,12 @@ class LinkedInLinkMate {
    * gets a chip showing the AI score. Drafts still happen via the in-post
    * Reply button — handled separately, and doesn't depend on this overlay.
    */
-  private mountEngagementQueueIfOnFeed(): void {
+  private async mountEngagementQueueIfOnFeed(): Promise<void> {
     const onFeed = location.pathname.startsWith('/feed');
-    if (onFeed && !this.feedPostOverlay) {
+    // AI post scoring is opt-in (spends free-tier quota). Only mount when the
+    // user has enabled it AND we're on the feed.
+    const enabled = await getFeedScoringEnabled();
+    if (onFeed && enabled && !this.feedPostOverlay) {
       this.feedPostOverlay = new FeedPostOverlay({
         aiScoreFeed: async (posts: ParsedPost[]): Promise<AiScoreFeedResult> => {
           const resp = await this.sendQueueMessage<{
@@ -74,7 +78,7 @@ class LinkedInLinkMate {
         },
       });
       this.feedPostOverlay.mount();
-    } else if (!onFeed && this.feedPostOverlay) {
+    } else if ((!onFeed || !enabled) && this.feedPostOverlay) {
       this.feedPostOverlay.unmount();
       this.feedPostOverlay = null;
     }
@@ -108,7 +112,7 @@ class LinkedInLinkMate {
     const checkAndRemount = () => {
       if (location.pathname !== this.currentPath) {
         this.currentPath = location.pathname;
-        this.mountEngagementQueueIfOnFeed();
+        void this.mountEngagementQueueIfOnFeed();
       }
     };
 
@@ -168,8 +172,15 @@ class LinkedInLinkMate {
     this.processVisiblePosts();
 
     // T123 — mount Engagement Queue if currently on /feed/ + watch SPA route changes.
-    this.mountEngagementQueueIfOnFeed();
+    void this.mountEngagementQueueIfOnFeed();
     this.watchRouteChanges();
+
+    // React live to the feed-scoring toggle (no page reload needed).
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && STORAGE_KEYS.feedScoring in changes) {
+        void this.mountEngagementQueueIfOnFeed();
+      }
+    });
 
     // Listen for messages from background/popup
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

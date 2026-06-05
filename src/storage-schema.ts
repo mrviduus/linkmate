@@ -31,6 +31,7 @@ export const STORAGE_KEYS = {
   retroLastShown: 'linkmate.retro.lastShown.v1',
   postDraftsState: 'linkmate.recommender.postDrafts.v1',
   captureFullProfile: 'linkmate.settings.captureFullProfile.v1',
+  feedScoring: 'linkmate.settings.feedScoring.v1',
   deepScrapeCancel: 'linkmate.deepScrape.cancel.v1',
   deepScrapeProgress: 'linkmate.deepScrape.progress.v1',
   onboardingCompleted: 'linkmate.settings.onboardingCompleted.v1',
@@ -474,6 +475,21 @@ export async function getCaptureFullProfile(): Promise<boolean> {
 
 export async function setCaptureFullProfile(value: boolean): Promise<void> {
   await writeKey(STORAGE_KEYS.captureFullProfile, value);
+}
+
+// ─── Settings: AI post scoring on the feed (opt-in) ─────────────────────────
+//
+// The per-post relevance chips ("🤖 X/10") + Focus Top Post FAB. Each batch of
+// visible posts is an AI call (spends the free-tier quota), so this is OFF by
+// default — the user opts in from the side-panel settings.
+
+export async function getFeedScoringEnabled(): Promise<boolean> {
+  const stored = await readKey<boolean>(STORAGE_KEYS.feedScoring);
+  return stored ?? false;
+}
+
+export async function setFeedScoringEnabled(value: boolean): Promise<void> {
+  await writeKey(STORAGE_KEYS.feedScoring, value);
 }
 
 // ─── Deep scrape live progress + cancel signal ──────────────────────────────
