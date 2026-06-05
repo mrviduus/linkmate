@@ -164,6 +164,22 @@ Click the LinkMate icon to open the **Side Panel**, paste your OpenAI API Key, a
 
 ---
 
+## 🛠️ Backend & Deployment (for contributors)
+
+LinkMate ships free AI via a tiny **Cloudflare Worker proxy** ([`proxy/`](proxy)) that
+holds the OpenAI key server-side and enforces a per-user spend quota.
+
+- **[docs/BACKEND.md](docs/BACKEND.md)** — how the proxy works, how to deploy it
+  (manually + via release), config, and one-time setup.
+- **[docs/RELEASE.md](docs/RELEASE.md)** — how to cut a release: a `vX.Y.Z` tag
+  builds + publishes the extension to the Chrome Web Store **and** redeploys the
+  proxy in one pipeline.
+
+> TL;DR: `scripts/release.sh X.Y.Z` (bump → commit → tag → push). The
+> `release` workflow does the rest.
+
+---
+
 ## 📸 Screenshots
 
 | SSI Dashboard | Profile Audit | Smart Reply |

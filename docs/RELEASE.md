@@ -13,6 +13,9 @@ How to cut a release and (optionally) auto-publish to the Chrome Web Store.
 4. The `release` workflow runs `type-check → lint → test → npm run zip`, creates a
    GitHub Release with `linkmate.zip` attached and auto-generated notes, and — if
    the four `CWS_*` secrets exist — uploads + submits the zip to the Chrome Web Store.
+5. **The same tag also redeploys the backend proxy** (Cloudflare Worker) when the
+   `CLOUDFLARE_API_TOKEN` secret is set. See [BACKEND.md](./BACKEND.md) for how the
+   backend works and how to deploy it standalone.
 
 The helper `scripts/release.sh X.Y.Z` does steps 1–3 (bump, commit, tag, push) in
 one command. The version must be plain semver with no leading `v`.
