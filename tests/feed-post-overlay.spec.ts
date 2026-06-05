@@ -105,8 +105,8 @@ describe('FeedPostOverlay', () => {
     const ai = chip!.querySelector('.linkmate-post-chip__ai');
     expect(chip!.querySelector('.linkmate-post-chip__heuristic')).toBeNull();
     expect(ai?.getAttribute('data-state')).toBe('ready');
-    expect(ai?.textContent).toBe('🤖 8/10');
-    expect(ai?.getAttribute('title')).toBe('matches your AI work');
+    expect(ai?.textContent).toBe('🎯 8/10');
+    expect(ai?.getAttribute('aria-label')).toBe('matches your AI work');
     overlay.unmount();
   });
 
@@ -123,7 +123,7 @@ describe('FeedPostOverlay', () => {
     expect(aiChips.length).toBe(2);
     aiChips.forEach((el) => {
       expect(el.getAttribute('data-state')).toBe('na');
-      expect(el.textContent).toBe('🤖 —');
+      expect(el.textContent).toBe('🎯 —');
     });
     overlay.unmount();
   });
@@ -165,12 +165,12 @@ describe('FeedPostOverlay', () => {
       .querySelector('.linkmate-post-chip[data-post-id="urn:li:component:LOW"]')
       ?.querySelector('.linkmate-post-chip__ai');
     expect(skipChipAi?.getAttribute('data-state')).toBe('ready');
-    expect(skipChipAi?.textContent).toBe('🤖 2/10');
+    expect(skipChipAi?.textContent).toBe('🎯 2/10');
     const okChipAi = document
       .querySelector('.linkmate-post-chip[data-post-id="urn:li:component:HIGH"]')
       ?.querySelector('.linkmate-post-chip__ai');
     expect(okChipAi?.getAttribute('data-state')).toBe('ready');
-    expect(okChipAi?.textContent).toBe('🤖 8/10');
+    expect(okChipAi?.textContent).toBe('🎯 8/10');
     overlay.unmount();
   });
 

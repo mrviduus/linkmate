@@ -10,9 +10,11 @@ import {
 } from './ssi-tracker';
 import {
   getCaptureFullProfile,
+  getFeedScoringEnabled,
   getProfile,
   getSsiLastError,
   setCaptureFullProfile,
+  setFeedScoringEnabled,
   setDeepScrapeCancel,
   STORAGE_KEYS,
 } from './storage-schema';
@@ -320,15 +322,7 @@ const heroSection = $('captureHero');
 const heroIcon = $('captureHeroIcon');
 const heroTitle = $('captureHeroTitle');
 const heroSubtitle = $('captureHeroSubtitle');
-const heroStats = $('captureHeroStats');
-const heroStatExp = $('statExp');
-const heroStatEdu = $('statEdu');
-const heroStatSkl = $('statSkl');
-const heroStatPst = $('statPst');
-const heroStatCmt = $('statCmt');
 const heroRefreshBtn = $<HTMLButtonElement>('heroRefresh');
-const heroCopyBtn = $<HTMLButtonElement>('heroCopyJson');
-const heroMessageEl = $('captureHeroMessage');
 
 type HeroState =
   | { kind: 'empty' }
@@ -347,20 +341,9 @@ function setHeroClass(variant: 'empty' | 'loading' | 'ok' | 'error'): void {
   heroSection.classList.add(`capture-hero--${variant}`);
 }
 
-function showHeroMessage(text: string): void {
-  if (!heroMessageEl) return;
-  heroMessageEl.textContent = text;
-  heroMessageEl.style.display = '';
-  setTimeout(() => {
-    if (heroMessageEl) heroMessageEl.style.display = 'none';
-  }, 4000);
-}
-
 function renderHero(state: HeroState): void {
   if (!heroSection) return;
   setHeroClass(state.kind);
-  if (heroStats) heroStats.style.display = state.kind === 'ok' ? '' : 'none';
-  if (heroCopyBtn) heroCopyBtn.style.display = state.kind === 'ok' ? '' : 'none';
   if (heroRefreshBtn) heroRefreshBtn.disabled = state.kind === 'loading';
 
   if (state.kind === 'empty') {
@@ -389,16 +372,8 @@ function renderHero(state: HeroState): void {
   // ok
   const p = state.profile;
   if (heroIcon) heroIcon.textContent = '✅';
-  if (heroTitle) heroTitle.textContent = p.name || 'Profile captured';
-  if (heroSubtitle)
-    heroSubtitle.textContent = `Captured ${formatRelativeIso(p.capturedAt)} · ${
-      p.location ?? 'no location'
-    }`;
-  if (heroStatExp) heroStatExp.textContent = String(p.experience.length);
-  if (heroStatEdu) heroStatEdu.textContent = String(p.education.length);
-  if (heroStatSkl) heroStatSkl.textContent = String(p.skills.length);
-  if (heroStatPst) heroStatPst.textContent = String(p.recentPosts.length);
-  if (heroStatCmt) heroStatCmt.textContent = String(p.recentComments.length);
+  if (heroTitle) heroTitle.textContent = 'Profile captured';
+  if (heroSubtitle) heroSubtitle.textContent = `Captured ${formatRelativeIso(p.capturedAt)}`;
   if (heroRefreshBtn) heroRefreshBtn.innerHTML = '<i class="fa fa-redo"></i> Refresh capture';
 }
 
@@ -453,16 +428,6 @@ async function handleHeroRefresh(): Promise<void> {
   await loadProfileAudit();
 }
 
-async function handleHeroCopyJson(): Promise<void> {
-  try {
-    const profile = await getUserProfile();
-    if (!profile) return;
-    await navigator.clipboard.writeText(JSON.stringify(profile, null, 2));
-    showHeroMessage('Copied JSON to clipboard.');
-  } catch (err) {
-    showHeroMessage(`Copy failed: ${String(err)}`);
-  }
-}
 
 // ─── Profile audit (issue #28) ──────────────────────────────────────────────
 
@@ -1161,9 +1126,9 @@ async function handleCaptureProfile(): Promise<void> {
       } else {
         showProfileMessage('✅ Profile captured successfully.', 'success');
       }
-      // Issue #16 follow-up: also kick off an SSI snapshot so both visuals
-      // light up together. Fire-and-forget; SSI refresh updates its own panel
-      // section via loadSsiData when it completes.
+      // Also capture the SSI snapshot so both the profile + SSI data land
+      // together (background tab; the progress bar + dashboard stay visible the
+      // whole time). Fire-and-forget; refreshes its panel via loadSsiData.
       if (!result.cached) {
         void (async () => {
           try {
@@ -1172,7 +1137,7 @@ async function handleCaptureProfile(): Promise<void> {
             });
             await loadSsiData();
           } catch {
-            /* SSI capture is best-effort; ignore failures */
+            /* SSI capture is best-effort */
           }
         })();
       }
@@ -1220,6 +1185,18 @@ async function loadCaptureFullProfileToggle(): Promise<void> {
 async function handleCaptureFullProfileToggle(): Promise<void> {
   if (!captureFullProfileToggle) return;
   await setCaptureFullProfile(captureFullProfileToggle.checked);
+}
+
+const feedScoringToggle = $<HTMLInputElement>('feedScoringToggle');
+
+async function loadFeedScoringToggle(): Promise<void> {
+  if (!feedScoringToggle) return;
+  feedScoringToggle.checked = await getFeedScoringEnabled();
+}
+
+async function handleFeedScoringToggle(): Promise<void> {
+  if (!feedScoringToggle) return;
+  await setFeedScoringEnabled(feedScoringToggle.checked);
 }
 
 const SCRAPE_PHASE_ORDER: Array<DeepScrapeProgress['phase']> = ['profile', 'posts', 'comments'];
@@ -1972,10 +1949,10 @@ function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
   captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
+  feedScoringToggle?.addEventListener('change', () => void handleFeedScoringToggle());
   deepScrapeCancelBtn?.addEventListener('click', () => void handleDeepScrapeCancel());
   wireDeepScrapeProgressListener();
   heroRefreshBtn?.addEventListener('click', () => void handleHeroRefresh());
-  heroCopyBtn?.addEventListener('click', () => void handleHeroCopyJson());
   ssiRefreshBtn?.addEventListener('click', () => void handleSsiRefresh());
   ssiOpenPageBtn?.addEventListener('click', handleSsiOpenPage);
   temperatureSlider?.addEventListener('input', handleTemperatureChange);
@@ -2024,6 +2001,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadProviderConfig(),
     refreshProfileDisplay(),
     loadCaptureFullProfileToggle(),
+    loadFeedScoringToggle(),
     loadSsiData(),
     loadAIParameters(),
     loadPrompts(),

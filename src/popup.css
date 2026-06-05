@@ -309,6 +309,40 @@ body {
   margin: 0 0 12px;
 }
 
+/* Feature toggle row (e.g. AI post scoring on feed) */
+.feature-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.feature-toggle input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.feature-toggle__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.feature-toggle__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.feature-toggle__hint {
+  font-size: 11px;
+  color: #8a8f98;
+}
+
 .byok-banner {
   display: flex;
   align-items: center;
@@ -1266,6 +1300,19 @@ body {
   background: #f6f8fa;
   border-radius: 6px;
   margin-bottom: 12px;
+  /* Gentle reveal when the snapshot lands (pairs with chart.js draw animation). */
+  animation: ssi-reveal 0.5s ease both;
+}
+
+@keyframes ssi-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .ssi-total-row {

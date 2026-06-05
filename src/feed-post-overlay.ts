@@ -3,7 +3,7 @@
  *
  * For EVERY post visible in the feed, injects a floating chip in the top-right
  * showing:
- *   - 🤖 <ai>/10 — batched OpenAI call, lazy, cached
+ *   - 🎯 <ai>/10 — batched OpenAI call, lazy, cached
  *   - Why for you — tooltip with the AI narrative
  *
  * Reuses the `queue.aiScoreFeed` background handler via deps, so it benefits
@@ -316,14 +316,14 @@ export class FeedPostOverlay {
     const chip = document.createElement('div');
     chip.className = CHIP_CLASS;
     chip.setAttribute('data-post-id', id);
-    // Use both `title` (a11y, screen readers, slow native tooltip) AND
-    // `data-tooltip` (used by our CSS ::after pseudo-tooltip that appears
-    // instantly on hover — see linkedin-styles.css).
+    // `data-tooltip` drives our styled CSS ::after tooltip; `aria-label` covers
+    // screen readers. We deliberately avoid `title` — it adds a SECOND native
+    // browser tooltip on hover (double tooltip bug).
     const initialAiTip = this.aiUnavailable
       ? 'AI score unavailable — check OpenAI key in Settings'
       : 'AI relevance — uses OpenAI + your profile + goals';
     chip.innerHTML = `
-      <span class="${CHIP_CLASS}__ai" data-state="${this.aiUnavailable ? 'na' : 'loading'}" data-tooltip="${esc(initialAiTip)}" title="${esc(initialAiTip)}">${this.aiUnavailable ? '🤖 —' : '🤖 …'}</span>
+      <span class="${CHIP_CLASS}__ai" data-state="${this.aiUnavailable ? 'na' : 'loading'}" data-tooltip="${esc(initialAiTip)}" aria-label="${esc(initialAiTip)}">${this.aiUnavailable ? '🎯 —' : '🎯 …'}</span>
     `;
     element.appendChild(chip);
   }
@@ -336,9 +336,9 @@ export class FeedPostOverlay {
       const ai = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__ai`);
       if (!ai) continue;
       ai.setAttribute('data-state', state);
-      ai.textContent = '🤖 —';
+      ai.textContent = '🎯 —';
       if (title) {
-        ai.setAttribute('title', title);
+        ai.setAttribute('aria-label', title);
         ai.setAttribute('data-tooltip', title);
       }
     }
@@ -351,11 +351,11 @@ export class FeedPostOverlay {
       const span = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__ai`);
       if (!span) continue;
       span.setAttribute('data-state', 'ready');
-      span.textContent = `🤖 ${r.aiScore}/10`;
+      span.textContent = `🎯 ${r.aiScore}/10`;
       // Prefer the AI's reason; otherwise a plain explainer so the score isn't
       // a cryptic number floating on the post.
       const tip = r.whyForYou || `Relevance ${r.aiScore}/10 — higher = more worth engaging`;
-      span.setAttribute('title', tip);
+      span.setAttribute('aria-label', tip);
       span.setAttribute('data-tooltip', tip);
     }
   }
@@ -364,8 +364,8 @@ export class FeedPostOverlay {
     const tip = 'AI score unavailable — check OpenAI key in Settings';
     document.querySelectorAll<HTMLElement>(`.${CHIP_CLASS}__ai`).forEach((el) => {
       el.setAttribute('data-state', 'na');
-      el.textContent = '🤖 —';
-      el.setAttribute('title', tip);
+      el.textContent = '🎯 —';
+      el.setAttribute('aria-label', tip);
       el.setAttribute('data-tooltip', tip);
     });
   }
