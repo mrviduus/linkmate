@@ -1816,7 +1816,47 @@ async function sanitizePostDraftsState(): Promise<void> {
   }
 }
 
+// ─── LinkedIn-only side panel guard (Approach 3) ────────────────────────────
+//
+// The side panel should only be visible while the user is on LinkedIn.
+// This guard runs at startup and also watches for tab switches / navigations
+// so the panel closes itself the moment the user leaves LinkedIn.
+
+function isLinkedInUrl(url?: string): boolean {
+  if (!url) return false;
+  if (url.startsWith('chrome-extension://')) return true; // allow onboarding page
+  try {
+    return /(^|\.)linkedin\.com$/.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function closeIfNotLinkedIn(): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!isLinkedInUrl(tab?.url)) {
+      window.close();
+    }
+  } catch {
+    // If we can't query tabs, leave the panel open (fail-safe).
+  }
+}
+
+// Watch for the user switching to a different tab.
+chrome.tabs.onActivated.addListener(() => void closeIfNotLinkedIn());
+
+// Watch for the active tab navigating to a non-LinkedIn URL.
+chrome.tabs.onUpdated.addListener((_tabId, info) => {
+  if (info.url || info.status === 'complete') void closeIfNotLinkedIn();
+});
+
+// ─── Bootstrap ───────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', async () => {
+  // Approach 3: close immediately if we're not on LinkedIn.
+  await closeIfNotLinkedIn();
+
   wire();
   await sanitizePostDraftsState();
   await Promise.all([
