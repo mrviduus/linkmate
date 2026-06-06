@@ -331,6 +331,29 @@ describe('profile-parser (v0.5.6 real-DOM)', () => {
       expect(out[0].originalAuthor).toBe('Post Author Name');
     });
 
+    it('recovers a self comment that lacks data-id via deterministic fallback id', () => {
+      // LinkedIn occasionally omits the comment URN. Old parser dropped these,
+      // undercounting comments30d. New parser derives a stable fallback id.
+      const html = `
+        <div data-urn="urn:li:activity:1">
+          <a href="/in/post-author/">Post Author Name</a>
+          <p dir="ltr">Parent post text long enough to be picked up by the parser</p>
+          <article class="comments-comment-entity">
+            <a href="/in/vasyl-vdovychenko/">Me</a>
+            <span dir="ltr">my comment without a urn</span>
+            <span>2w</span>
+          </article>
+        </div>
+      `;
+      const out1 = parseComments(html, 'vasyl-vdovychenko');
+      expect(out1).toHaveLength(1);
+      expect(out1[0].text).toBe('my comment without a urn');
+      expect(out1[0].id).toMatch(/^gen:comment:/);
+      // Deterministic: same DOM parsed again yields the same id (dedup works).
+      const out2 = parseComments(html, 'vasyl-vdovychenko');
+      expect(out2[0].id).toBe(out1[0].id);
+    });
+
     it('drops cards without comment articles', () => {
       const html = `<div data-urn="urn:li:activity:1"><p dir="ltr">just a post</p></div>`;
       const out = parseComments(html, 'vasyl-vdovychenko');

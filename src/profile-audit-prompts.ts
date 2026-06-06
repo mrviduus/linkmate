@@ -13,6 +13,7 @@
  */
 
 import type { UserProfile } from './lib/idb';
+import { resolveTimestampMs } from './lib/relative-time';
 import type { AuditReport } from './profile-audit';
 import type { AvoidEntry, SsiSnapshot } from './storage-schema';
 
@@ -276,11 +277,7 @@ function formatOwnPosts(profile: UserProfile): string {
 function formatOwnComments(profile: UserProfile): string {
   const cs = (profile.recentComments ?? [])
     .slice()
-    .sort((a, b) => {
-      const tb = Date.parse(b.timestamp);
-      const ta = Date.parse(a.timestamp);
-      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-    })
+    .sort((a, b) => (resolveTimestampMs(b.timestamp) ?? 0) - (resolveTimestampMs(a.timestamp) ?? 0))
     .slice(0, COMMENT_LIST_CAP);
   if (cs.length === 0) return '(no recent comments captured)';
   return cs

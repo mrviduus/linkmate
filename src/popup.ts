@@ -423,7 +423,7 @@ function updateOnboardingBanner(profile: UserProfile | null): void {
 
 async function handleHeroRefresh(): Promise<void> {
   renderHero({ kind: 'loading' });
-  await handleCaptureProfile();
+  await handleCaptureProfile(true);
   await refreshCaptureHero();
   await loadProfileAudit();
 }
@@ -1046,7 +1046,7 @@ async function maybeAutoCapture(): Promise<void> {
 // trash each other's state.
 let captureInFlight = false;
 
-async function handleCaptureProfile(): Promise<void> {
+async function handleCaptureProfile(force = false): Promise<void> {
   if (captureInFlight) {
     console.warn('[LinkMate] capture already in flight; ignoring duplicate trigger');
     return;
@@ -1085,6 +1085,8 @@ async function handleCaptureProfile(): Promise<void> {
       // Single-tab capture: scrape the user's current LinkedIn tab instead of
       // opening a second tab.
       useActiveTab: true,
+      // Manual refresh must bypass the <24h cache so the button actually re-scrapes.
+      force,
       onProgress: (step) => {
         const label = STEP_LABELS[step];
         if (label) setBtnLabel(label);
@@ -1770,7 +1772,7 @@ async function handleGoalsOverrideSave(): Promise<void> {
 
 function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
-  captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile());
+  captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile(true));
   captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
   feedScoringToggle?.addEventListener('change', () => void handleFeedScoringToggle());
   deepScrapeCancelBtn?.addEventListener('click', () => void handleDeepScrapeCancel());

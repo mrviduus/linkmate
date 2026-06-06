@@ -8,6 +8,7 @@
  */
 
 import type { UserProfile } from './lib/idb';
+import { resolveTimestampMs } from './lib/relative-time';
 import type { ParsedPost, ProfileContext } from './storage-schema';
 
 const POST_TEXT_CAP = 280;
@@ -89,11 +90,7 @@ export function formatUserBackground(userProfile: UserProfile | null | undefined
   // Parser order is not guaranteed to be chronological.
   const ownComments = (userProfile.recentComments ?? [])
     .slice()
-    .sort((a, b) => {
-      const tb = Date.parse(b.timestamp);
-      const ta = Date.parse(a.timestamp);
-      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-    })
+    .sort((a, b) => (resolveTimestampMs(b.timestamp) ?? 0) - (resolveTimestampMs(a.timestamp) ?? 0))
     .slice(0, RECENT_COMMENTS_CAP);
   if (ownComments.length > 0) {
     sections.push(
