@@ -1029,7 +1029,12 @@ async function handleProfileAuditGet(
       getSsiHistory().catch(() => []),
     ]);
     const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
-    const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
+    // Don't pair a freshly-captured profile with a stale SSI snapshot — a 2-week-old
+    // score next to today's activity reads as current and misleads the user. Suppress
+    // SSI older than 14d so the signal row drops out rather than showing wrong data.
+    const SSI_STALE_MS = 14 * 24 * 60 * 60 * 1000;
+    const ssiFresh = ssi && Date.now() - ssi.capturedAt <= SSI_STALE_MS ? ssi : null;
+    const activitySignals = computeActivitySignals(up, ssiFresh?.total ?? null);
     const recommendations =
       stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendations : null;
     const recommendationsAt =

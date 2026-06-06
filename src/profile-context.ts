@@ -123,6 +123,12 @@ export interface CaptureOptions {
    * can be slightly less complete than a clean dedicated tab.
    */
   useActiveTab?: boolean;
+  /**
+   * Skip the <24h IDB cache short-circuit and always do a fresh DOM grab. Set by
+   * the manual "Refresh capture" button so the user can force-update on demand;
+   * auto/onboarding captures leave it false to keep the cache fast-path.
+   */
+  force?: boolean;
 }
 
 const HIDDEN_PROFILE_TAB_URL = 'https://www.linkedin.com/in/me/';
@@ -268,7 +274,7 @@ export class ProfileContextService {
     // some service-worker contexts) we just proceed with the regular flow.
     progress('cache-check');
     const fullProfileEnabled = await getCaptureFullProfile();
-    if (fullProfileEnabled) {
+    if (fullProfileEnabled && !opts.force) {
       try {
         const cached = await getUserProfile();
         if (cached && isFresh(cached)) {

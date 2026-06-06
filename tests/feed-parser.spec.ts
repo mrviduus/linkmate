@@ -33,6 +33,12 @@ describe('parseFollowerTier', () => {
     ['99,999 followers', '10k_100k'],
     ['100,000 followers', 'gt_100k'],
     ['1,234,567 followers', 'gt_100k'],
+    // Abbreviated K/M forms — previously parsed as "1"/"3" and undercounted 1000×.
+    ['1.2K followers', '1k_10k'],
+    ['5K+ followers', '1k_10k'],
+    ['999 followers', 'lt_1k'],
+    ['12K followers', '10k_100k'],
+    ['3.4M followers', 'gt_100k'],
     ['no followers text', 'unknown'],
     ['', 'unknown'],
   ])('classifies "%s" → %s', (input, expected) => {
@@ -52,6 +58,12 @@ describe('parseAgoToTimestamp', () => {
   });
   it('2w → now - 14 days', () => {
     expect(parseAgoToTimestamp('2w', FIXED_NOW)).toBe(FIXED_NOW - 14 * 24 * 60 * 60 * 1000);
+  });
+  it('7mo → now - 7 months (was wrongly read as 7 minutes)', () => {
+    expect(parseAgoToTimestamp('7mo', FIXED_NOW)).toBe(FIXED_NOW - 7 * 2_592_000_000);
+  });
+  it('2y → now - 2 years (was wrongly read as "now")', () => {
+    expect(parseAgoToTimestamp('2y', FIXED_NOW)).toBe(FIXED_NOW - 2 * 31_536_000_000);
   });
   it('falls back to now when unparseable', () => {
     expect(parseAgoToTimestamp('???', FIXED_NOW)).toBe(FIXED_NOW);
