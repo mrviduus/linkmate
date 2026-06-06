@@ -709,11 +709,17 @@ export function parseRecentComments(
       if (normalizedSelfHandle && authorHandle.toLowerCase() !== normalizedSelfHandle.toLowerCase())
         continue;
 
-      const id = art.getAttribute('data-id') ?? art.getAttribute('data-urn') ?? '';
-      if (!id || seenIds.has(id)) continue;
-
       const text = pickLongestDirLtr(art);
       if (!text) continue;
+
+      // Prefer the real comment URN; if LinkedIn omits it, derive a DETERMINISTIC
+      // id from author+text instead of dropping the comment. Dropping silently
+      // undercounted comments30d (the activity signal the user relies on).
+      const id =
+        art.getAttribute('data-id') ??
+        art.getAttribute('data-urn') ??
+        `gen:comment:${hashString((originalAuthor + '|' + text).slice(0, 200))}`;
+      if (seenIds.has(id)) continue;
 
       seenIds.add(id);
       out.push({
