@@ -134,8 +134,11 @@ const sidePanelApi = chrome.sidePanel as unknown as {
   setOptions: (o: { tabId?: number; enabled: boolean }) => Promise<void>;
 };
 
+// Disable the default "click toolbar icon → open panel everywhere" behaviour.
+// We manually open it in the action.onClicked handler below, but only when
+// the active tab is actually a LinkedIn page.
 sidePanelApi
-  .setPanelBehavior({ openPanelOnActionClick: true })
+  .setPanelBehavior({ openPanelOnActionClick: false })
   .catch((err) => console.warn('[LinkMate] setPanelBehavior failed:', err));
 
 function sidePanelAllowed(url?: string): boolean {
@@ -165,6 +168,24 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
     (tab) => void syncSidePanelForTab(tabId, tab.url),
     () => {},
   );
+});
+
+// Toolbar icon click: open the side panel only when the active tab is LinkedIn.
+// On non-LinkedIn tabs the click is intentionally a no-op for the side panel
+// (the user sees nothing happen, which is the desired UX).
+//
+// IMPORTANT: sidePanel.open() must be called synchronously within the user
+// gesture context that onClicked provides. Awaiting any Promise before calling
+// open() causes Chrome to reject it ("not in response to a user gesture").
+// syncSidePanelForTab already set enabled:true for this LinkedIn tab, so we
+// can call open() directly without an async setOptions() first.
+chrome.action.onClicked.addListener((tab) => {
+  if (!tab.id || !sidePanelAllowed(tab.url)) return;
+  const sp = chrome.sidePanel as unknown as {
+    open: (o: { tabId?: number }) => Promise<void>;
+  };
+  sp.open({ tabId: tab.id })
+    .catch((err) => console.warn('[LinkMate] action.onClicked open failed:', err));
 });
 
 // On SW startup: default the panel OFF globally (so the panel is hidden on
