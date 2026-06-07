@@ -1000,52 +1000,84 @@ class LinkedInLinkMate {
       });
   }
 
-  private insertIntoCommentBox(post: LinkedInPost, reply: string): void {
-    // First, try to find and click the comment button to open the comment box
-    const commentButton = post.element.querySelector(
-      'button[aria-label*="Comment"], button[aria-label*="comment"]'
-    ) as HTMLButtonElement;
+  /**
+   * Find the Comment action button. In 2026 LinkedIn this button has NO
+   * aria-label — only inner text "Comment" (same finding as findActionContainer).
+   * The old `aria-label*="Comment"` selector matched nothing here, which is why
+   * Insert reported "Could not find comment button". Fall back to legacy
+   * aria-label forms, but exclude per-comment kebab menus ("View more options…").
+   */
+  private findCommentButton(post: HTMLElement): HTMLButtonElement | null {
+    const buttons = Array.from(post.querySelectorAll('button'));
+    const byText = buttons.find((b) => (b.textContent ?? '').trim() === 'Comment');
+    if (byText) return byText as HTMLButtonElement;
+    const byAria = buttons.find((b) => {
+      const label = (b.getAttribute('aria-label') ?? '').toLowerCase();
+      return label.includes('comment') && !/(more|options|view|delete|edit|report)/.test(label);
+    });
+    return (byAria as HTMLButtonElement) ?? null;
+  }
 
-    if (commentButton) {
-      commentButton.click();
-
-      // Wait for comment box to appear and then insert text
-      setTimeout(() => {
-        const commentSelectors = [
-          '.ql-editor[contenteditable="true"]',
-          '[contenteditable="true"][role="textbox"]',
-          'textarea[placeholder*="comment"]',
-          'textarea[placeholder*="Comment"]',
-          '.mentions-texteditor__contenteditable',
-        ];
-
-        let commentBox: HTMLElement | null = null;
-        for (const selector of commentSelectors) {
-          commentBox = post.element.querySelector(selector) as HTMLElement;
-          if (commentBox) break;
-        }
-
-        if (commentBox) {
-          if (commentBox.tagName === 'TEXTAREA') {
-            (commentBox as HTMLTextAreaElement).value = reply;
-            commentBox.dispatchEvent(new Event('input', { bubbles: true }));
-            commentBox.dispatchEvent(new Event('change', { bubbles: true }));
-          } else {
-            commentBox.textContent = reply;
-            commentBox.dispatchEvent(new Event('input', { bubbles: true }));
-            commentBox.dispatchEvent(new Event('blur', { bubbles: true }));
-          }
-
-          // Focus the comment box
-          commentBox.focus();
-          this.showToast('Reply inserted! You can edit before posting.', 'success');
-        } else {
-          this.showToast('Could not find comment box. Try clicking comment first.', 'error');
-        }
-      }, 800); // Wait a bit longer for LinkedIn's UI to load
-    } else {
-      this.showToast('Could not find comment button', 'error');
+  private findCommentBox(post: HTMLElement): HTMLElement | null {
+    const commentSelectors = [
+      '.ql-editor[contenteditable="true"]',
+      '[contenteditable="true"][role="textbox"]',
+      '.comments-comment-box__form [contenteditable="true"]',
+      '.mentions-texteditor__contenteditable',
+      'textarea[placeholder*="omment" i]',
+    ];
+    for (const selector of commentSelectors) {
+      const el = post.querySelector(selector) as HTMLElement | null;
+      if (el) return el;
     }
+    return null;
+  }
+
+  private fillCommentBox(box: HTMLElement, reply: string): void {
+    if (box.tagName === 'TEXTAREA') {
+      (box as HTMLTextAreaElement).value = reply;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      box.focus();
+      box.textContent = reply;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      box.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
+    box.focus();
+    this.showToast('Reply inserted! You can edit before posting.', 'success');
+  }
+
+  private insertIntoCommentBox(post: LinkedInPost, reply: string): void {
+    // If the comment box is already open, fill it directly — re-clicking the
+    // Comment button would toggle it closed.
+    const existing = this.findCommentBox(post.element);
+    if (existing) {
+      this.fillCommentBox(existing, reply);
+      return;
+    }
+
+    const commentButton = this.findCommentButton(post.element);
+    if (!commentButton) {
+      this.showToast('Could not find comment button', 'error');
+      return;
+    }
+    commentButton.click();
+
+    // LinkedIn mounts the editor asynchronously — poll for it instead of a
+    // single fixed timeout that raced on slower loads.
+    let tries = 0;
+    const maxTries = 20; // ~3s at 150ms
+    const poll = window.setInterval(() => {
+      const box = this.findCommentBox(post.element);
+      if (box) {
+        window.clearInterval(poll);
+        this.fillCommentBox(box, reply);
+      } else if (++tries >= maxTries) {
+        window.clearInterval(poll);
+        this.showToast('Could not find comment box. Try clicking comment first.', 'error');
+      }
+    }, 150);
   }
 
   private showToast(message: string, type: 'success' | 'error' = 'success'): void {
