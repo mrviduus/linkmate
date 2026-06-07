@@ -10,6 +10,7 @@ import { keepAlive } from './keep-alive';
 import { buildPositioningPrompt, buildCommentPrompt } from './prompt-builder';
 import type { RawProfileFields } from './profile-parser';
 import { scoreRelevance } from './relevance-scorer';
+import { runCommentGates } from './comment-gates';
 import { getActiveProvider, MANAGED_BASE_URL, QuotaExceededError } from './providers';
 import {
   getProfile,
@@ -1166,7 +1167,13 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
   });
   const firstReply = trimToTwoSentences(cleanReply(raw));
   const firstValidation = validateReplyQuality(firstReply);
-  if (firstValidation.valid || (firstValidation.score ?? 0) >= 60) return firstReply;
+  const firstGates = runCommentGates(firstReply);
+  const firstOk =
+    (firstValidation.valid || (firstValidation.score ?? 0) >= 60) && firstGates.passed;
+  if (firstOk) return firstReply;
+  if (!firstGates.passed) {
+    console.log('[LinkMate] comment gates failed, retrying:', firstGates.failures.join(', '));
+  }
 
   const retry = await provider.generate({
     system: systemPrompt,
@@ -1178,6 +1185,12 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
   });
   const retryReply = trimToTwoSentences(cleanReply(retry));
   const retryValidation = validateReplyQuality(retryReply);
+  const retryGates = runCommentGates(retryReply);
+
+  // Prefer the candidate that passes the deterministic gates; if both or neither
+  // pass, fall back to the higher validation score.
+  if (retryGates.passed && !firstGates.passed) return retryReply;
+  if (firstGates.passed && !retryGates.passed) return firstReply;
   return retryValidation.valid || (retryValidation.score ?? 0) > (firstValidation.score ?? 0)
     ? retryReply
     : firstReply;
