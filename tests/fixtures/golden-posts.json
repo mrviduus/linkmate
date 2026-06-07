@@ -1,0 +1,187 @@
+{
+  "_comment": "Issue #64 golden scoring dataset. Consumed by tests/relevance-scorer-evals.spec.ts. Profile interests are fixed in the spec. ageHours -> postedAt = NOW - ageHours*3600e3. expectMin/expectMax are 0..100 bounds asserted on scoreRelevance().score. Labels document the intent.",
+  "profile": {
+    "topSkills": ["TypeScript", "RAG", "Agents", "Databases", "LLM", "Vector Search", "Inference", "Evals"],
+    "recentPostThemes": ["ai agents", "rag", "databases", "context engines", "local llms", "evals", "latency", "incremental compute"]
+  },
+  "posts": [
+    {
+      "id": "feldera-context-engines",
+      "text": "Databases are becoming the context engines for AI agents. Incremental view maintenance keeps agent context fresh without recomputing everything. No one does this better than Feldera — see the demo: https://feldera.com/demo",
+      "ageHours": 168,
+      "followerTier": "10k_100k",
+      "degree": "2nd",
+      "likeCount": 120,
+      "commentCount": 30,
+      "labels": { "topicalRelevance": "high", "commentWorthy": false, "failureMode": "stale_promo" },
+      "expectMax": 50
+    },
+    {
+      "id": "fresh-topical-insight",
+      "text": "After a month wiring RAG into our agents pipeline, the real latency cost was not vector search — it was databases doing redundant context recompute on every turn. Incremental compute over local llms changed the numbers.",
+      "ageHours": 2,
+      "followerTier": "10k_100k",
+      "degree": "2nd",
+      "likeCount": 90,
+      "commentCount": 18,
+      "labels": { "topicalRelevance": "high", "commentWorthy": true, "failureMode": "none" },
+      "expectMin": 50
+    },
+    {
+      "id": "fresh-topical-question",
+      "text": "How are teams handling evals for rag agents over changing databases? Our context engines drift and latency creeps. Curious what local llms folks measure.",
+      "ageHours": 5,
+      "followerTier": "1k_10k",
+      "degree": "1st",
+      "likeCount": 40,
+      "commentCount": 12,
+      "labels": { "topicalRelevance": "high", "commentWorthy": true, "failureMode": "none" },
+      "expectMin": 50
+    },
+    {
+      "id": "promo-fresh-topical-announce",
+      "text": "Excited to announce our new rag platform for ai agents and databases! Incremental context engines, built-in evals. Sign up now: https://example.com/signup",
+      "ageHours": 3,
+      "followerTier": "10k_100k",
+      "degree": "2nd",
+      "likeCount": 80,
+      "commentCount": 10,
+      "labels": { "topicalRelevance": "high", "commentWorthy": false, "failureMode": "promo" },
+      "expectMax": 50
+    },
+    {
+      "id": "stale-topical-nonpromo",
+      "text": "Reflection on incremental compute for rag agents: keeping context engines exact under deltas beats recomputing the whole view. Latency and databases evals matter.",
+      "ageHours": 72,
+      "followerTier": "10k_100k",
+      "degree": "2nd",
+      "likeCount": 60,
+      "commentCount": 9,
+      "labels": { "topicalRelevance": "high", "commentWorthy": false, "failureMode": "stale" },
+      "expectMax": 50
+    },
+    {
+      "id": "offtopic-fresh-gardening",
+      "text": "Spent the weekend rebuilding the raised garden beds and planting tomatoes. Compost finally paying off after three seasons of patience.",
+      "ageHours": 4,
+      "followerTier": "1k_10k",
+      "degree": "3rd",
+      "likeCount": 30,
+      "commentCount": 4,
+      "labels": { "topicalRelevance": "low", "commentWorthy": false, "failureMode": "off_topic" },
+      "expectMax": 45
+    },
+    {
+      "id": "ai-content-takeaways",
+      "text": "Here are 5 key takeaways about rag agents and databases that will transform your context engines. Leverage these cutting-edge synergies to unlock potential.",
+      "ageHours": 6,
+      "followerTier": "10k_100k",
+      "degree": "2nd",
+      "likeCount": 50,
+      "commentCount": 8,
+      "labels": { "topicalRelevance": "high", "commentWorthy": false, "failureMode": "ai_generated" },
+      "expectMax": 55
+    },
+    {
+      "id": "own-post-topical",
+      "text": "My take on incremental compute for rag agents and context engines over databases — sharing what worked for our evals and latency.",
+      "ageHours": 3,
+      "followerTier": "1k_10k",
+      "degree": "1st",
+      "likeCount": 20,
+      "commentCount": 5,
+      "isOwn": true,
+      "labels": { "topicalRelevance": "high", "commentWorthy": false, "failureMode": "own_post" },
+      "expectMax": 1
+    },
+    {
+      "id": "fresh-topical-high-engagement",
+      "text": "Benchmarked rag agents across three databases for context engines: incremental compute cut latency 4x. Full evals over local llms attached.",
+      "ageHours": 2,
+      "followerTier": "gt_100k",
+      "degree": "2nd",
+      "likeCount": 1200,
+      "commentCount": 240,
+      "labels": { "topicalRelevance": "high", "commentWorthy": true, "failureMode": "none" },
+      "expectMin": 55
+    },
+    {
+      "id": "fresh-topical-low-engagement",
+      "text": "Quick note on rag agents and databases: context engines need incremental compute or your evals lie about latency over local llms.",
+      "ageHours": 8,
+      "followerTier": "lt_1k",
+      "degree": "2nd",
+      "likeCount": 3,
+      "commentCount": 0,
+      "labels": { "topicalRelevance": "high", "commentWorthy": true, "failureMode": "none" },
+      "expectMin": 35
+    },
+    {
+      "id": "first-degree-topical-fresh",
+      "text": "Pairing rag agents with incremental databases for context engines made our evals trustworthy. Latency over local llms dropped noticeably.",
+      "ageHours": 1,
+      "followerTier": "1k_10k",
+      "degree": "1st",
+      "likeCount": 70,
+      "commentCount": 14,
+      "labels": { "topicalRelevance": "high", "commentWorthy": true, "failureMode": "none" },
+      "expectMin": 55
+    },
+    {
+      "id": "third-degree-topical-fresh",
+      "text": "Notes on rag agents over databases: context engines plus incremental compute keep latency and evals honest for local llms.",
+      "ageHours": 4,
+      "followerTier": "10k_100k",
+      "degree": "3rd",
+      "likeCount": 55,
+      "commentCount": 9,
+      "labels": { "topicalRelevance": "high", "commentWorthy": true, "failureMode": "none" },
+      "expectMin": 40
+    },
+    {
+      "id": "promo-check-it-out-link",
+      "text": "Our rag agents and databases context engines tooling is live. Check it out here: https://example.com/demo — incremental compute and evals included.",
+      "ageHours": 5,
+      "followerTier": "10k_100k",
+      "degree": "2nd",
+      "likeCount": 65,
+      "commentCount": 7,
+      "labels": { "topicalRelevance": "high", "commentWorthy": false, "failureMode": "promo" },
+      "expectMax": 50
+    },
+    {
+      "id": "stale-promo-offtopic",
+      "text": "Excited to announce our new gardening subscription box! Fresh seeds monthly. Sign up now: https://example.com/garden",
+      "ageHours": 200,
+      "followerTier": "1k_10k",
+      "degree": "3rd",
+      "likeCount": 25,
+      "commentCount": 3,
+      "labels": { "topicalRelevance": "low", "commentWorthy": false, "failureMode": "stale_promo_offtopic" },
+      "expectMax": 30
+    },
+    {
+      "id": "fresh-strong-topical-highauthor",
+      "text": "Deep dive: rag agents treat databases as context engines; incremental compute is the unlock. We measured latency, evals, and local llms tradeoffs across a real workload.",
+      "ageHours": 1,
+      "followerTier": "gt_100k",
+      "degree": "2nd",
+      "likeCount": 600,
+      "commentCount": 120,
+      "labels": { "topicalRelevance": "high", "commentWorthy": true, "failureMode": "none" },
+      "expectMin": 60
+    },
+    {
+      "id": "dismissed-topical",
+      "text": "Another solid thread on rag agents, databases, context engines, incremental compute, evals and latency for local llms.",
+      "ageHours": 2,
+      "followerTier": "10k_100k",
+      "degree": "2nd",
+      "likeCount": 40,
+      "commentCount": 6,
+      "dismissed": true,
+      "labels": { "topicalRelevance": "high", "commentWorthy": false, "failureMode": "dismissed" },
+      "expectMax": 1
+    }
+  ]
+}
