@@ -10,6 +10,7 @@ import { keepAlive } from './keep-alive';
 import { buildPositioningPrompt, buildCommentPrompt } from './prompt-builder';
 import type { RawProfileFields } from './profile-parser';
 import { scoreRelevance } from './relevance-scorer';
+import { runCommentGates } from './comment-gates';
 import { getActiveProvider, MANAGED_BASE_URL, QuotaExceededError } from './providers';
 import {
   getProfile,
@@ -1166,7 +1167,13 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
   });
   const firstReply = trimToTwoSentences(cleanReply(raw));
   const firstValidation = validateReplyQuality(firstReply);
-  if (firstValidation.valid || (firstValidation.score ?? 0) >= 60) return firstReply;
+  const firstGates = runCommentGates(firstReply);
+  const firstOk =
+    (firstValidation.valid || (firstValidation.score ?? 0) >= 60) && firstGates.passed;
+  if (firstOk) return firstReply;
+  if (!firstGates.passed) {
+    console.log('[LinkMate] comment gates failed, retrying:', firstGates.failures.join(', '));
+  }
 
   const retry = await provider.generate({
     system: systemPrompt,
@@ -1178,9 +1185,102 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
   });
   const retryReply = trimToTwoSentences(cleanReply(retry));
   const retryValidation = validateReplyQuality(retryReply);
+  const retryGates = runCommentGates(retryReply);
+
+  // Prefer the candidate that passes the deterministic gates; if both or neither
+  // pass, fall back to the higher validation score.
+  if (retryGates.passed && !firstGates.passed) return retryReply;
+  if (firstGates.passed && !retryGates.passed) return firstReply;
   return retryValidation.valid || (retryValidation.score ?? 0) > (firstValidation.score ?? 0)
     ? retryReply
     : firstReply;
+}
+
+// ─── Self-check gate (issue #64 step 3) ─────────────────────────────────────
+//
+// After generating, ask the provider which SPECIFIC claim in the post the
+// comment addresses. If it can't point to one (NONE / not actually in the post),
+// the comment is keyword-matching, not understanding — regenerate once, then
+// surface with a warning flag. Behind a sync pref, default ON. Never auto-submits.
+
+const SELF_CHECK_DEFAULT = true;
+
+async function getCommentSelfCheckEnabled(): Promise<boolean> {
+  try {
+    const r = await chrome.storage.sync.get(['commentSelfCheck']);
+    return r.commentSelfCheck === undefined ? SELF_CHECK_DEFAULT : !!r.commentSelfCheck;
+  } catch {
+    return SELF_CHECK_DEFAULT;
+  }
+}
+
+/** True if at least `min` consecutive words of `quote` appear in `post`. */
+function quoteGroundedInPost(quote: string, post: string, min = 3): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const p = norm(post);
+  const words = norm(quote).split(' ').filter(Boolean);
+  if (words.length === 0) return false;
+  if (words.length <= min) return p.includes(words.join(' '));
+  for (let i = 0; i + min <= words.length; i++) {
+    if (p.includes(words.slice(i, i + min).join(' '))) return true;
+  }
+  return false;
+}
+
+async function selfCheckSpecificity(
+  postContent: string,
+  comment: string
+): Promise<{ addressed: boolean; evidence: string }> {
+  const provider = await getActiveProvider();
+  const raw = await provider.generate({
+    system:
+      'You verify whether a LinkedIn comment engages a specific claim in a post. ' +
+      'Reply with a SHORT exact quote (max 15 words) copied from the POST that the COMMENT directly addresses. ' +
+      'If the comment is generic and addresses no specific claim, reply with the single word NONE. ' +
+      'Output the quote or NONE only — no other text.',
+    user: `POST:\n"""\n${postContent}\n"""\n\nCOMMENT:\n"""\n${comment}\n"""\n\nWhich specific claim from the POST does the COMMENT address?`,
+    maxTokens: 40,
+    temperature: 0,
+    topP: 1,
+  });
+  const ans = raw.trim().replace(/^["']|["']$/g, '');
+  const isNone = ans.length === 0 || /^none\b/i.test(ans);
+  const addressed = !isNone && quoteGroundedInPost(ans, postContent);
+  return { addressed, evidence: ans };
+}
+
+/**
+ * Generate a comment, then run the optional self-check. Regenerates once if the
+ * comment doesn't address a specific claim; if it still can't be verified,
+ * returns a `warning` flag so the UI can mark it (no blocking, no auto-submit).
+ */
+async function generateComment(
+  systemPrompt: string,
+  userPrompt: string,
+  postContent: string
+): Promise<{ reply: string; warning?: string }> {
+  const reply = await generateWithRetry(systemPrompt, userPrompt);
+  let enabled = false;
+  try {
+    enabled = await getCommentSelfCheckEnabled();
+  } catch {
+    enabled = false;
+  }
+  if (!enabled) return { reply };
+
+  try {
+    const first = await selfCheckSpecificity(postContent, reply);
+    if (first.addressed) return { reply };
+
+    const reply2 = await generateWithRetry(systemPrompt, userPrompt);
+    const second = await selfCheckSpecificity(postContent, reply2);
+    if (second.addressed) return { reply: reply2 };
+    return { reply: reply2, warning: 'unverified_specificity' };
+  } catch (err) {
+    // Self-check failures must never block the draft — return the first reply.
+    console.warn('[LinkMate] self-check skipped:', err);
+    return { reply };
+  }
 }
 
 /**
@@ -1269,11 +1369,16 @@ CRITICAL REQUIREMENTS:
 
 Write your reply directly (no preambles):`;
 
-    const finalReply = await generateWithRetry(systemPrompt, userPrompt);
+    const { reply: finalReply, warning } = await generateComment(
+      systemPrompt,
+      userPrompt,
+      postContent
+    );
     sendResponse({
       reply: finalReply,
       basedOnComments: true,
       commentCount: topComments.length,
+      ...(warning ? { warning } : {}),
     });
   } catch (error) {
     console.error('handleLinkedInReplyWithComments failed:', error);
@@ -1310,8 +1415,12 @@ CRITICAL REQUIREMENTS:
 
 Write your reply directly (no preambles):`;
 
-    const finalReply = await generateWithRetry(systemPrompt, userPrompt);
-    sendResponse({ reply: finalReply });
+    const { reply: finalReply, warning } = await generateComment(
+      systemPrompt,
+      userPrompt,
+      postContent
+    );
+    sendResponse({ reply: finalReply, ...(warning ? { warning } : {}) });
   } catch (error) {
     console.error('handleLinkedInReply failed:', error);
     const fallbackReplies = [

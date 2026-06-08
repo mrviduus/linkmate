@@ -18,6 +18,7 @@
 import { buildAiScoreBatchPrompt } from './ai-feed-prompts';
 import type { UserProfile } from './lib/idb';
 import type { InferenceProvider } from './providers/inference-provider';
+import { isPromoContent, STALE_AGE_MS } from './relevance-scorer';
 import type { ParsedPost, ProfileContext } from './storage-schema';
 
 export interface AiScoredPost {
@@ -30,6 +31,41 @@ export const AI_CACHE_TTL_MS = 60 * 60 * 1000; // 1h
 export const WHY_FOR_YOU_MAX_LEN = 240;
 const SCORE_BATCH_MAX_TOKENS = 900;
 const SCORE_BATCH_TIMEOUT_MS = 45_000;
+
+/** 0..10 cap applied to stale posts in the overlay (mirrors the relevance-scorer floor). */
+export const STALE_AI_SCORE_CAP = 3;
+/** Promo multiplier for the 0..10 overlay score (mirrors PROMO_PENALTY_FACTOR). */
+export const PROMO_AI_PENALTY_FACTOR = 0.4;
+
+/**
+ * Deterministic age/promo penalty for the AI overlay score, mirroring
+ * relevance-scorer (issue #64). Applied as post-processing so the LLM can't
+ * hand a 1-week-old product promo an 8/10.
+ */
+export function applyFeedPenalties(aiScore: number, post: ParsedPost, now: number): number {
+  let score = aiScore;
+  if (isPromoContent(post.text)) {
+    score = Math.round(score * PROMO_AI_PENALTY_FACTOR);
+  }
+  if (now - post.postedAt > STALE_AGE_MS) {
+    score = Math.min(score, STALE_AI_SCORE_CAP);
+  }
+  return Math.max(0, Math.min(10, score));
+}
+
+/** Apply penalties across a batch given the originating posts (by id). */
+function penalizeScores(
+  scores: AiScoredPost[],
+  posts: ParsedPost[],
+  now: number
+): AiScoredPost[] {
+  const byId = new Map(posts.map((p) => [p.id, p]));
+  return scores.map((s) => {
+    const post = byId.get(s.postId);
+    if (!post) return s;
+    return { ...s, aiScore: applyFeedPenalties(s.aiScore, post, now) };
+  });
+}
 
 // ─── Cache (module-scope, in-memory) ───────────────────────────────────────
 
@@ -112,7 +148,7 @@ export async function aiScoreBatch(input: AiScoreBatchInput): Promise<AiScoredPo
     }
   }
 
-  if (uncached.length === 0) return fromCache;
+  if (uncached.length === 0) return penalizeScores(fromCache, posts, now);
 
   const { system, user } = buildAiScoreBatchPrompt({
     profile,
@@ -146,7 +182,7 @@ export async function aiScoreBatch(input: AiScoreBatchInput): Promise<AiScoredPo
       expiresAt,
     });
   }
-  return [...fromCache, ...parsed];
+  return penalizeScores([...fromCache, ...parsed], posts, now);
 }
 
 export class AiParseError extends Error {
