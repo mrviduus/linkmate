@@ -904,6 +904,7 @@ async function handleProfileAuditRewrite(): Promise<void> {
       state?: ProfileAuditDTO;
       reason?: string;
       error?: string;
+      paused?: boolean;
     }>((resolve) => {
       chrome.runtime.sendMessage(
         { action: 'profile.audit.rewrite', regenerate: isRegenerate },
@@ -914,7 +915,9 @@ async function handleProfileAuditRewrite(): Promise<void> {
       profileAuditRewriteBtn.disabled = false;
       profileAuditRewriteBtn.dataset.state = 'idle';
       profileAuditRewriteLabel.textContent = prevLabel ?? 'Get AI rewrites';
-      if (isQuotaError(resp)) {
+      if (resp.paused) {
+        showAuditStatus('LinkMate is paused — press Resume to get AI rewrites.', 'info');
+      } else if (isQuotaError(resp)) {
         showAuditStatus('Free AI used up — switch to your own key to continue.', 'info');
         showByokSwitchBanner();
       } else if (resp.reason === 'no_key') {
@@ -1374,14 +1377,18 @@ async function handleSsiRefresh(): Promise<void> {
   const prevHtml = ssiRefreshBtn.innerHTML;
   ssiRefreshBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
   try {
-    const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'ssi.captureNow' }, (resp) => {
-        resolve(resp ?? { ok: false, error: 'No response from background' });
-      });
-    });
+    const result = await new Promise<{ ok: boolean; error?: string; paused?: boolean }>(
+      (resolve) => {
+        chrome.runtime.sendMessage({ action: 'ssi.captureNow' }, (resp) => {
+          resolve(resp ?? { ok: false, error: 'No response from background' });
+        });
+      },
+    );
     if (result.ok) {
       showSsiMessage('SSI snapshot captured.', 'success');
       await loadSsiData();
+    } else if (result.paused) {
+      showSsiMessage('LinkMate is paused — press Resume to capture.', 'info');
     } else {
       showSsiMessage(`Capture failed: ${result.error ?? 'unknown'}`, 'error');
       await loadSsiData();

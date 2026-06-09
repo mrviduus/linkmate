@@ -11,7 +11,8 @@ import { buildPositioningPrompt, buildCommentPrompt } from './prompt-builder';
 import type { RawProfileFields } from './profile-parser';
 import { scoreRelevance } from './relevance-scorer';
 import { runCommentGates } from './comment-gates';
-import { getActiveProvider, MANAGED_BASE_URL, QuotaExceededError } from './providers';
+import { getActiveProvider, buildProvider, MANAGED_BASE_URL, QuotaExceededError } from './providers';
+import type { InferenceProvider } from './providers';
 import {
   getProfile,
   getEngagedPosts,
@@ -1158,21 +1159,27 @@ function dedupeEntriesKeepLast<T extends { stem: string }>(entries: T[]): T[] {
 
 // ─── Reply generation (standard + with comments) ────────────────────────────
 
-// Comments get gpt-4.1-mini (OpenAI/managed) — a big step up from the
-// gpt-4o-mini used for batch feed scoring, but ~10× cheaper than gpt-4o so it
-// doesn't drain the free-tier budget (especially with the draft+refine double
-// call). Already on the proxy whitelist. Groq keeps its configured model.
-async function commentModel(): Promise<string | undefined> {
-  try {
-    const cfg = await getProviderConfig();
-    return cfg.mode === 'groq' ? undefined : 'gpt-4.1-mini';
-  } catch {
-    return undefined;
-  }
+// Managed (free) tier bumps comments to gpt-4.1-mini — a big step up from the
+// gpt-4o-mini default used for batch feed scoring, but ~10× cheaper than gpt-4o
+// so it doesn't drain the free-tier budget (whitelisted on the proxy). BYOK
+// (openai/groq) keeps the model the user chose in their own config — we don't
+// silently override their selection (and never force a model their key may
+// lack). Returns a model id, or undefined to keep the provider's configured one.
+function commentModelFor(mode: ProviderConfig['mode']): string | undefined {
+  return mode === 'managed' ? 'gpt-4.1-mini' : undefined;
+}
+
+// Build the provider AND pick the comment model from ONE config read (the old
+// Promise.all([getActiveProvider(), commentModel()]) read provider config twice
+// per call — up to ~6 reads per comment across draft+retry+refine).
+async function getCommentProvider(): Promise<{ provider: InferenceProvider; model?: string }> {
+  const cfg = await getProviderConfig();
+  const installToken = cfg.mode === 'managed' ? await ensureInstallToken() : undefined;
+  return { provider: buildProvider(cfg, installToken), model: commentModelFor(cfg.mode) };
 }
 
 async function generateWithRetry(systemPrompt: string, userPrompt: string): Promise<string> {
-  const [provider, model] = await Promise.all([getActiveProvider(), commentModel()]);
+  const { provider, model } = await getCommentProvider();
   const raw = await provider.generate({
     system: systemPrompt,
     user: userPrompt,
@@ -1276,7 +1283,7 @@ async function selfCheckSpecificity(
  */
 async function refineComment(postContent: string, draft: string): Promise<string> {
   try {
-    const [provider, model] = await Promise.all([getActiveProvider(), commentModel()]);
+    const { provider, model } = await getCommentProvider();
     const raw = await provider.generate({
       model,
       system: `You are a ruthless LinkedIn comment editor. You sharpen a draft so it reads like a domain expert thinking out loud, not a bot.
