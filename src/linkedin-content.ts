@@ -32,6 +32,7 @@ class LinkedInLinkMate {
   private currentPath: string = '';
   private routePollIntervalId: ReturnType<typeof setInterval> | null = null;
   private paused = false;
+  private lastDismissPing = 0;
 
   constructor() {
     this.showComplianceWarning();
@@ -181,6 +182,7 @@ class LinkedInLinkMate {
 
     this.paused = await getPaused();
     this.watchRouteChanges();
+    this.watchForPanelDismiss();
 
     // Global pause is the master switch — flip all on-page features live.
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -238,6 +240,40 @@ class LinkedInLinkMate {
     // Each AI-reply button sits in a wrapper created solely for it.
     document.querySelectorAll('.linkmate-generate-btn').forEach((b) => b.parentElement?.remove());
     document.querySelectorAll('.linkmate-panel, .linkmate-toast').forEach((el) => el.remove());
+  }
+
+  /**
+   * When the user starts working with the LinkedIn page (a real click that
+   * isn't on LinkMate's own injected UI), ping the side panel so it fades out.
+   * Throttled; harmless no-op when the panel isn't open. The panel ignores
+   * pings within its open grace window so the gesture that opened it doesn't
+   * immediately close it.
+   */
+  private watchForPanelDismiss(): void {
+    document.addEventListener(
+      'click',
+      (e) => {
+        const target = e.target as HTMLElement | null;
+        if (
+          target?.closest?.(
+            '.linkmate-fab-container, .linkmate-generate-btn, .linkmate-panel, .linkmate-post-chip, .linkmate-toast'
+          )
+        ) {
+          return; // clicks on our own UI shouldn't dismiss the panel
+        }
+        const now = Date.now();
+        if (now - this.lastDismissPing < 800) return; // throttle bursts
+        this.lastDismissPing = now;
+        try {
+          chrome.runtime.sendMessage({ action: 'sidepanel.dismiss' }, () => {
+            void chrome.runtime.lastError; // swallow "no receiver" when panel is closed
+          });
+        } catch {
+          /* extension context reloaded — ignore */
+        }
+      },
+      true
+    );
   }
 
   private observePosts(): void {
