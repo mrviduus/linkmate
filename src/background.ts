@@ -185,10 +185,19 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 chrome.action.onClicked.addListener((tab) => {
   if (!tab.id || !sidePanelAllowed(tab.url)) return;
   const sp = chrome.sidePanel as unknown as {
+    setOptions: (o: { tabId?: number; enabled: boolean }) => Promise<void>;
     open: (o: { tabId?: number }) => Promise<void>;
   };
-  sp.open({ tabId: tab.id })
-    .catch((err) => console.warn('[LinkMate] action.onClicked open failed:', err));
+  // Re-enable this tab inside the gesture before opening. After a SW cold start
+  // the global startup-disable may still apply and the async per-tab re-enable
+  // may not have run for a tab that loaded while the worker was asleep (those
+  // tabs.onUpdated events were never delivered) — so the first click would
+  // otherwise silently no-op. Fire setOptions WITHOUT awaiting (awaiting breaks
+  // the user-gesture requirement); the browser processes it before open().
+  void sp.setOptions({ tabId: tab.id, enabled: true });
+  sp.open({ tabId: tab.id }).catch((err) =>
+    console.warn('[LinkMate] action.onClicked open failed:', err)
+  );
 });
 
 // On SW startup: default the panel OFF globally (so the panel is hidden on
