@@ -1156,19 +1156,14 @@ function dedupeEntriesKeepLast<T extends { stem: string }>(entries: T[]): T[] {
 
 // ─── Reply generation (standard + with comments) ────────────────────────────
 
-// Comments are low-volume + high-value, so they get a stronger model than the
-// cheap default used for batch feed scoring — but matched to the tier:
-//   - openai (BYOK): gpt-4o — user's own key, best quality, no budget limit.
-//   - managed (free): gpt-4.1-mini — strongest model whitelisted on the proxy,
-//     a big step up from gpt-4o-mini without gpt-4o's ~16× cost draining the
-//     shared free-tier budget (and gpt-4o isn't on the free-tier whitelist).
-//   - groq: no gpt-4o, keep the configured model.
+// Comments are low-volume + high-value, so they get gpt-4o (OpenAI/managed) —
+// far sharper than the gpt-4o-mini used for batch feed scoring. Requires gpt-4o
+// in the proxy whitelist for the managed/free tier (it is). Groq has no gpt-4o,
+// so keep its configured model there.
 async function commentModel(): Promise<string | undefined> {
   try {
     const cfg = await getProviderConfig();
-    if (cfg.mode === 'openai') return 'gpt-4o';
-    if (cfg.mode === 'managed') return 'gpt-4.1-mini';
-    return undefined;
+    return cfg.mode === 'groq' ? undefined : 'gpt-4o';
   } catch {
     return undefined;
   }
