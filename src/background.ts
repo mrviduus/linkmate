@@ -1265,16 +1265,57 @@ async function selfCheckSpecificity(
 }
 
 /**
- * Generate a comment, then run the optional self-check. Regenerates once if the
- * comment doesn't address a specific claim; if it still can't be verified,
- * returns a `warning` flag so the UI can mark it (no blocking, no auto-submit).
+ * Self-refine pass — the biggest quality lever. Models critique far better than
+ * they one-shot generate, so we hand the draft back and ask for a sharper,
+ * more specific rewrite (grounding folded in: it must react to a real claim in
+ * the post). Accept the rewrite only if it still passes the gates + quality
+ * floor — never regress below the draft. One extra LLM call.
+ */
+async function refineComment(postContent: string, draft: string): Promise<string> {
+  try {
+    const [provider, model] = await Promise.all([getActiveProvider(), commentModel()]);
+    const raw = await provider.generate({
+      model,
+      system: `You are a ruthless LinkedIn comment editor. You sharpen a draft so it reads like a domain expert thinking out loud, not a bot.
+
+${COMMENT_RULES}
+
+Improve the draft:
+- Cut anything generic — a line that's true of almost any post adds nothing.
+- Add ONE concrete detail, mechanism, number, or counter-example.
+- Make sure it reacts to a SPECIFIC claim in the post, not the post in general.
+- Keep whatever already works; if the draft is already excellent, return it unchanged.
+Output ONLY the improved comment — no critique, no preamble, no quotes.`,
+      user: `POST:\n"""\n${postContent}\n"""\n\nDRAFT COMMENT:\n"""\n${draft}\n"""\n\nReturn the improved comment.`,
+      maxTokens: aiMaxTokens,
+      temperature: aiTemperature,
+      topP: 0.9,
+      stop: ['\n\n', '\n\n\n'],
+    });
+    const improved = enforceCommentShape(cleanReply(raw));
+    const gates = runCommentGates(improved);
+    const val = validateReplyQuality(improved);
+    if (improved && gates.passed && (val.valid || (val.score ?? 0) >= 60)) return improved;
+    return draft; // rewrite regressed — keep the draft
+  } catch (err) {
+    console.warn('[LinkMate] refine skipped:', err);
+    return draft;
+  }
+}
+
+/**
+ * Generate a comment: draft → self-refine → optional specificity self-check.
+ * The refine pass already targets grounding, so an unverified result is just
+ * flagged (no blind regen). Nothing blocks or auto-submits.
  */
 async function generateComment(
   systemPrompt: string,
   userPrompt: string,
   postContent: string
 ): Promise<{ reply: string; warning?: string }> {
-  const reply = await generateWithRetry(systemPrompt, userPrompt);
+  const draft = await generateWithRetry(systemPrompt, userPrompt);
+  const reply = await refineComment(postContent, draft);
+
   let enabled = false;
   try {
     enabled = await getCommentSelfCheckEnabled();
@@ -1284,15 +1325,11 @@ async function generateComment(
   if (!enabled) return { reply };
 
   try {
-    const first = await selfCheckSpecificity(postContent, reply);
-    if (first.addressed) return { reply };
-
-    const reply2 = await generateWithRetry(systemPrompt, userPrompt);
-    const second = await selfCheckSpecificity(postContent, reply2);
-    if (second.addressed) return { reply: reply2 };
-    return { reply: reply2, warning: 'unverified_specificity' };
+    const check = await selfCheckSpecificity(postContent, reply);
+    if (check.addressed) return { reply };
+    return { reply, warning: 'unverified_specificity' };
   } catch (err) {
-    // Self-check failures must never block the draft — return the first reply.
+    // Self-check failures must never block the draft.
     console.warn('[LinkMate] self-check skipped:', err);
     return { reply };
   }
