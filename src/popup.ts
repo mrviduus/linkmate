@@ -1840,30 +1840,6 @@ chrome.tabs.onUpdated.addListener((_tabId, info) => {
   if (info.url || info.status === 'complete') void closeIfNotLinkedIn();
 });
 
-// ─── Auto-dismiss on page interaction ────────────────────────────────────────
-// When the user starts working with the LinkedIn page (a genuine click that
-// isn't on LinkMate's own injected UI) the content script pings us and we fade
-// the panel out. A grace window after open swallows the very gesture that
-// opened the panel (sidepanel.openFromGesture), so it never opens-then-closes.
-
-const PANEL_DISMISS_GRACE_MS = 1500;
-const panelOpenedAt = Date.now();
-
-function dismissPanel(): void {
-  document.querySelector('.card')?.classList.add('card--dismissing');
-  // Let the fade-out play before the panel actually closes.
-  setTimeout(() => window.close(), 220);
-}
-
-chrome.runtime.onMessage.addListener((msg) => {
-  if (
-    msg?.action === 'sidepanel.dismiss' &&
-    Date.now() - panelOpenedAt >= PANEL_DISMISS_GRACE_MS
-  ) {
-    dismissPanel();
-  }
-  return false;
-});
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 

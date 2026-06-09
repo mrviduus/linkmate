@@ -32,16 +32,6 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
-  transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
-}
-
-/* Auto-dismiss: fade + slide out just before window.close() (see popup.ts). */
-.card--dismissing {
-  opacity: 0;
-  transform: translateX(12px);
-  pointer-events: none;
 }
 
 /* ── Header ───────────────────────────────────────────────────────────── */

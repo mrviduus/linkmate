@@ -174,37 +174,23 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 
 // Toolbar icon click: open the side panel only when the active tab is LinkedIn.
-// On non-LinkedIn tabs the click is intentionally a no-op for the side panel
-// (the user sees nothing happen, which is the desired UX).
+// On non-LinkedIn tabs the click is intentionally a no-op for the side panel.
 //
 // IMPORTANT: sidePanel.open() must be called synchronously within the user
 // gesture context that onClicked provides. Awaiting any Promise before calling
 // open() causes Chrome to reject it ("not in response to a user gesture").
-// syncSidePanelForTab already set enabled:true for this LinkedIn tab, so we
-// can call open() directly without an async setOptions() first.
 chrome.action.onClicked.addListener((tab) => {
   if (!tab.id || !sidePanelAllowed(tab.url)) return;
   const sp = chrome.sidePanel as unknown as {
-    setOptions: (o: { tabId?: number; enabled: boolean }) => Promise<void>;
     open: (o: { tabId?: number }) => Promise<void>;
   };
-  // Re-enable this tab inside the gesture before opening. After a SW cold start
-  // the global startup-disable may still apply and the async per-tab re-enable
-  // may not have run for a tab that loaded while the worker was asleep (those
-  // tabs.onUpdated events were never delivered) — so the first click would
-  // otherwise silently no-op. Fire setOptions WITHOUT awaiting (awaiting breaks
-  // the user-gesture requirement); the browser processes it before open().
-  void sp.setOptions({ tabId: tab.id, enabled: true });
   sp.open({ tabId: tab.id }).catch((err) =>
     console.warn('[LinkMate] action.onClicked open failed:', err)
   );
 });
 
-// On SW startup: default the panel OFF globally (so the panel is hidden on
-// non-LinkedIn tabs and closes when the user switches to one), then enable it on
-// existing LinkedIn tabs. This is safe now that capture scrapes the user's
-// CURRENT tab (useActiveTab) instead of opening a fresh tab — there's no new tab
-// to race, so the global default can't hide the dashboard mid-capture.
+// On SW startup: default the panel OFF globally, then enable it on existing
+// LinkedIn tabs.
 (async () => {
   try {
     await sidePanelApi.setOptions({ enabled: false });
