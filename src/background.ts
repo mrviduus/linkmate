@@ -1156,14 +1156,14 @@ function dedupeEntriesKeepLast<T extends { stem: string }>(entries: T[]): T[] {
 
 // ─── Reply generation (standard + with comments) ────────────────────────────
 
-// Comments are low-volume + high-value, so they get gpt-4o (OpenAI/managed) —
-// far sharper than the gpt-4o-mini used for batch feed scoring. Requires gpt-4o
-// in the proxy whitelist for the managed/free tier (it is). Groq has no gpt-4o,
-// so keep its configured model there.
+// Comments get gpt-4.1-mini (OpenAI/managed) — a big step up from the
+// gpt-4o-mini used for batch feed scoring, but ~10× cheaper than gpt-4o so it
+// doesn't drain the free-tier budget (especially with the draft+refine double
+// call). Already on the proxy whitelist. Groq keeps its configured model.
 async function commentModel(): Promise<string | undefined> {
   try {
     const cfg = await getProviderConfig();
-    return cfg.mode === 'groq' ? undefined : 'gpt-4o';
+    return cfg.mode === 'groq' ? undefined : 'gpt-4.1-mini';
   } catch {
     return undefined;
   }
