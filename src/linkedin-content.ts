@@ -57,11 +57,15 @@ class LinkedInLinkMate {
    * Reply button — handled separately, and doesn't depend on this overlay.
    */
   private async mountEngagementQueueIfOnFeed(): Promise<void> {
-    const onFeed = location.pathname.startsWith('/feed');
-    // Global pause is the master switch. Mount only when on the feed AND not
+    // Score posts on the feed AND on profile pages (/in/<handle>/…, incl.
+    // recent-activity) — that's where the user's own posts live, so they get
+    // chips too. The AI path doesn't skip own posts; only the surface gated it.
+    const onScoredSurface =
+      location.pathname.startsWith('/feed') || /^\/in\//.test(location.pathname);
+    // Global pause is the master switch. Mount only on a scored surface AND not
     // paused; otherwise tear the overlay down.
     const paused = await getPaused();
-    if (onFeed && !paused && !this.feedPostOverlay) {
+    if (onScoredSurface && !paused && !this.feedPostOverlay) {
       this.feedPostOverlay = new FeedPostOverlay({
         aiScoreFeed: async (posts: ParsedPost[]): Promise<AiScoreFeedResult> => {
           const resp = await this.sendQueueMessage<{
@@ -80,7 +84,7 @@ class LinkedInLinkMate {
         },
       });
       this.feedPostOverlay.mount();
-    } else if ((!onFeed || paused) && this.feedPostOverlay) {
+    } else if ((!onScoredSurface || paused) && this.feedPostOverlay) {
       this.feedPostOverlay.unmount();
       this.feedPostOverlay = null;
     }
