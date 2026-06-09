@@ -1427,16 +1427,14 @@ ${COMMENT_TASK_LINE}`;
     sendResponse({ reply: finalReply, ...(warning ? { warning } : {}) });
   } catch (error) {
     console.error('handleLinkedInReply failed:', error);
-    const fallbackReplies = [
-      "Insightful perspective! What's been your experience with this approach?",
-      "This resonates strongly with what we're seeing in the field.",
-      'Excellent points - particularly about the implementation challenges.',
-      'Appreciate you sharing this data-driven analysis!',
-      'Interesting take - how do you see this evolving in the next year?',
-    ];
+    // Never fabricate a comment on failure. The old fallback returned a canned
+    // platitude as `reply`, which the content script showed as a successful
+    // draft — the user could then post a generic "This resonates…" line, the
+    // exact thing the gates exist to prevent. Surface a real error instead so
+    // the in-page handler shows a retry toast.
     sendResponse({
-      reply: fallbackReplies[Math.floor(Math.random() * fallbackReplies.length)],
       error: error instanceof Error ? error.message : String(error),
+      fallback: true,
     });
   }
 }
