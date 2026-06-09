@@ -214,8 +214,11 @@ function validateReplyQuality(reply: string): ValidationResult {
   const trimmedReply = reply.trim();
   const wordCount = trimmedReply.split(/\s+/).length;
 
-  if (wordCount < 10) return { valid: false, reason: 'too_short', score: 20 };
-  if (wordCount > 80) return { valid: false, reason: 'too_long', score: 40 };
+  // Bounds match the comment target (~220-450 chars = ~35-80 words) and the
+  // 200-600 char comment gate. The old 10/80-word window rejected substantive
+  // comments that the gate actually wants.
+  if (wordCount < 25) return { valid: false, reason: 'too_short', score: 20 };
+  if (wordCount > 110) return { valid: false, reason: 'too_long', score: 40 };
   if (!/[.!?]$/.test(trimmedReply)) return { valid: false, reason: 'no_punctuation', score: 50 };
 
   const preamblePatterns = [
@@ -242,87 +245,65 @@ function validateReplyQuality(reply: string): ValidationResult {
   let score = 70;
   if (trimmedReply.includes('?')) score += 10;
   if (/\d+(%|x|\s+(percent|times|increase|decrease))/i.test(trimmedReply)) score += 10;
-  if (wordCount >= 15 && wordCount <= 40) score += 10;
+  if (wordCount >= 35 && wordCount <= 90) score += 10;
   return { valid: true, score: Math.min(100, score) };
 }
 
 // ─── Prompts ────────────────────────────────────────────────────────────────
 
+// Calibration examples — these ARE the quality bar. Every one opens on the
+// substance (no praise), reacts to a single specific point, adds an expert
+// mechanism/number/counter-example, stays 220-450 chars, and punctuates any
+// question. The model should match this depth, not these exact topics.
 const FEW_SHOT_EXAMPLES = `
-EXAMPLE 1:
-Post: "Just launched our new product after 6 months of development!"
-Reply: "The timing couldn't be better given the Q4 market trends. What was the biggest technical challenge your team overcame during development?"
+EXAMPLES OF THE BAR (match the depth and shape, not the topic):
 
-EXAMPLE 2:
+Post: "We cut our CI pipeline from 40 minutes to 9 minutes."
+Comment: Nine minutes is the threshold where behavior actually changes — under ten, people stop context-switching away and wait for the result, which quietly tightens the whole review loop. We hit the same cliff and it's what finally made trunk-based development stick. Did you get there by parallelizing jobs or by cutting test scope?
+
+Post: "AI will replace most junior developers within two years."
+Comment: The hard part of junior work was never typing code — it was judging which problem is worth solving and noticing when an answer is subtly wrong, which is exactly where today's models are weakest. On the teams I see, AI is raising the floor for juniors faster than it raises the ceiling for seniors. The real exposure sits with narrow mid-level roles, not either end.
+
 Post: "Remote work is killing company culture."
-Reply: "Interesting perspective. We've actually seen the opposite—our async standups improved transparency by 40%. What specific cultural elements are you seeing decline?"
-
-EXAMPLE 3:
-Post: "AI will replace 80% of jobs in the next 5 years."
-Reply: "That timeline seems aggressive based on current adoption curves. I've found AI augments rather than replaces roles—what industries are you seeing this happen fastest?"
-
-EXAMPLE 4:
-Post: "Finally hit our Q3 revenue target! Team effort pays off."
-Reply: "Congrats on the milestone! Were there any unexpected strategies that moved the needle more than anticipated?"
-
-EXAMPLE 5:
-Post: "The key to successful leadership is transparency and communication."
-Reply: "This resonates strongly. How do you balance transparency with keeping strategic plans confidential during competitive periods?"
+Comment: Culture didn't leave with the office — the cheap proxies for it did: hallway osmosis, reading the room, overhearing how a decision got made. The remote teams that kept it rebuilt those signals on purpose, with written decisions and default-on recordings. Which signal broke first for you, trust or information flow?
 `;
 
+// Single source of truth for what a strong comment is. Both prompt variants
+// share it so the two generation paths can't drift apart. Mirrors the
+// deterministic comment-gates (length, no agreement opener, no hashtag/emoji/
+// sign-off, punctuated questions) so the model self-complies instead of failing
+// gates and burning a retry.
+const COMMENT_RULES = `WHAT A COMMENT THAT EARNS A REPLY DOES:
+- Reacts to the single most interesting or debatable point in the post — not the whole post.
+- Adds ONE specific, non-obvious idea only someone with your background would surface: a mechanism, a concrete number, a counter-example, or a sharp implication.
+- Reads like a sharp peer thinking out loud — never a fan, never a marketer.
+
+HARD RULES (a comment is rejected if it breaks these):
+- 2 to 4 sentences, between 220 and 450 characters.
+- Open with the substance. NEVER open with praise or agreement — banned openers include "Great post", "Love this", "Spot on", "So true", "This resonates", "Couldn't agree more", "Well said", "Thanks for sharing", "Absolutely".
+- Be concrete: anchor to a real detail from the post; use a number, example, or mechanism when you can.
+- At most ONE question, and only if it genuinely moves the conversation forward. If you ask one, end that sentence with "?".
+- Do not restate or summarize the post — assume the author just wrote it.
+- No hashtags, no emojis, no sign-off, no "—Name".
+- No buzzwords: leverage, synergy, unlock, game-changer, deep dive, circle back.
+- Do not start with "I".`;
+
 const DEFAULT_PROMPTS = {
-  withComments: `You are a LinkedIn engagement expert. Respond DIRECTLY with the reply text only - no preambles, no explanations.
+  withComments: `You write LinkedIn comments in your own professional voice. Output the comment text only — no preamble, no quotes, no explanation.
 
-CRITICAL: Output 1-2 impactful sentences (maximum 40 words total). Start immediately with your response.
+${COMMENT_RULES}
 
-${FEW_SHOT_EXAMPLES}
+THE DISCUSSION SO FAR:
+- The top comments below are what's ALREADY been said. Say something none of them said — find the angle they left open.
+- Do not echo their take or repeat their question.
 
-SMART ANALYSIS:
-- Study the top-performing comments' tone, style, and engagement patterns
-- Identify what makes them successful: specific insights, relatable experiences, thought-provoking questions, or timely perspectives
-- Notice if they use data, personal anecdotes, industry insights, or call-to-action phrases
+${FEW_SHOT_EXAMPLES}`,
 
-YOUR REPLY STRATEGY:
-- Match the energy level of top comments while adding your unique perspective
-- If top comments ask questions → ask a related but different question
-- If top comments share experiences → reference a contrasting or complementary experience
-- If top comments provide insights → add supporting data or a fresh angle
-- Use power words that drive engagement: "Actually...", "Interestingly...", "What if...", "I've found..."
+  standard: `You write LinkedIn comments in your own professional voice. Output the comment text only — no preamble, no quotes, no explanation.
 
-ENGAGEMENT MULTIPLIERS:
-- End with a question when possible (drives responses)
-- Reference specific details from the original post
-- Use "we" language to create community feeling
-- Be conversational but professional`,
+${COMMENT_RULES}
 
-  standard: `You are a LinkedIn expert. Respond DIRECTLY with the reply text only - no preambles, no explanations.
-
-CRITICAL: Output 1-2 impactful sentences (maximum 40 words total). Start immediately with your response.
-
-${FEW_SHOT_EXAMPLES}
-
-HIGH-IMPACT REPLY FORMULA:
-1. Hook: Start with something attention-grabbing ("Actually...", "This reminds me...", "What's interesting...")
-2. Value: Add genuine insight, experience, or perspective
-3. Connection: End with a question or call-to-action when appropriate
-
-PROVEN ENGAGEMENT PATTERNS:
-- Share a micro-insight: "I've seen this approach increase results by 40% in my experience."
-- Ask a strategic question: "What's been your biggest challenge implementing this strategy?"
-- Provide a contrasting view: "While I agree, I'd add that timing is equally crucial here."
-- Reference specific data/experience: "This aligns with the 70% increase we saw after..."
-
-PROFESSIONAL TONE GUIDE:
-- Confident but not arrogant
-- Helpful but not promotional
-- Personal but not oversharing
-- Engaging but not casual
-
-AVOID:
-- Generic praise ("Great post!", "Thanks for sharing!")
-- Multiple sentences or explanations
-- Obvious statements everyone would agree with
-- Self-promotional content`,
+${FEW_SHOT_EXAMPLES}`,
 };
 
 async function getUserPrompt(type: 'withComments' | 'standard'): Promise<string> {
@@ -366,10 +347,29 @@ function cleanReply(text: string): string {
   return contentLines.join(' ').trim();
 }
 
-function trimToTwoSentences(reply: string): string {
-  const sentences = reply.split(/[.!?]+/).filter((s) => s.trim().length > 0);
-  const max = sentences.slice(0, 2).join('. ').trim();
-  return max + (reply.endsWith('?') ? '' : '.');
+/**
+ * Cap a comment to a substantive-but-tight shape: at most 4 sentences and 520
+ * characters (kept under the 600-char comment gate), trimming WHOLE sentences
+ * from the end if it runs long. Sentence split requires whitespace after the
+ * terminator so it never breaks on decimals ("3.5x") or abbreviations ("U.S.").
+ * Unlike the old 2-sentence hard cap, this lets a comment carry real substance.
+ */
+function enforceCommentShape(reply: string): string {
+  const text = reply.trim();
+  const MAX_SENTENCES = 4;
+  const MAX_CHARS = 520;
+  const parts = (text.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) ?? [text])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  let out = '';
+  for (const part of parts.slice(0, MAX_SENTENCES)) {
+    const next = out ? `${out} ${part}` : part;
+    if (next.length > MAX_CHARS && out) break;
+    out = next;
+  }
+  out = (out || parts[0] || text).trim();
+  if (!/[.!?]$/.test(out)) out += '.';
+  return out;
 }
 
 // ─── SSI alarm constant (hoisted; install listener references it below) ────
@@ -1166,7 +1166,7 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
     topP: 0.9,
     stop: ['\n\n', '\n\n\n'],
   });
-  const firstReply = trimToTwoSentences(cleanReply(raw));
+  const firstReply = enforceCommentShape(cleanReply(raw));
   const firstValidation = validateReplyQuality(firstReply);
   const firstGates = runCommentGates(firstReply);
   const firstOk =
@@ -1184,7 +1184,7 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
     topP: 0.9,
     stop: ['\n\n', '\n\n\n'],
   });
-  const retryReply = trimToTwoSentences(cleanReply(retry));
+  const retryReply = enforceCommentShape(cleanReply(retry));
   const retryValidation = validateReplyQuality(retryReply);
   const retryGates = runCommentGates(retryReply);
 
@@ -1326,49 +1326,52 @@ async function handleQuotaGet(sendResponse: (response: unknown) => void): Promis
   }
 }
 
+/**
+ * Voice header injected into every comment user-prompt so the draft sounds like
+ * the user's actual expertise, not a generic engagement bot. Empty when no
+ * profile is captured yet (the comment still works, just without the voice).
+ */
+async function buildVoiceHeader(): Promise<string> {
+  const { profile } = await getProfileOrDerive().catch(() => ({ profile: null }));
+  if (!profile) return '';
+  const lines: string[] = [];
+  if (profile.fullName?.trim()) lines.push(`You are ${profile.fullName.trim()}.`);
+  if (profile.positioningSummary?.trim()) {
+    lines.push(`Your expertise and positioning: ${profile.positioningSummary.trim()}`);
+  }
+  if (lines.length === 0) return '';
+  lines.push('Comment from that expertise, in your own voice.');
+  return `${lines.join('\n')}\n\n`;
+}
+
+const COMMENT_TASK_LINE =
+  'Write ONE comment that follows every rule above: 2-4 sentences, 220-450 characters, open on the substance (no praise), anchor to a specific point in the post, at most one question. Output the comment text only.';
+
 async function handleLinkedInReplyWithComments(
   postContent: string,
   topComments: Array<{ text: string; likeCount: number }>,
   sendResponse: (response: unknown) => void
 ) {
   try {
-    const systemPrompt = await getUserPrompt('withComments');
+    const [systemPrompt, voice] = await Promise.all([
+      getUserPrompt('withComments'),
+      buildVoiceHeader(),
+    ]);
     const topCommentsContext =
       topComments.length > 0
-        ? `\n\nTOP PERFORMING COMMENTS (study these patterns):\n${topComments
+        ? `\n\nWHAT'S ALREADY BEEN SAID (say something none of these did — find the angle they left open, don't repeat their take or their question):\n${topComments
             .slice(0, 5)
-            .map(
-              (c, i) =>
-                `Comment ${i + 1} (${c.likeCount} likes):\n"${c.text}"\nEngagement factor: ${
-                  c.likeCount > 100
-                    ? 'Viral'
-                    : c.likeCount > 50
-                      ? 'High'
-                      : c.likeCount > 20
-                        ? 'Medium'
-                        : 'Standard'
-                }\n`
-            )
-            .join(
-              '\n'
-            )}\nKEY PATTERN: Notice what makes these comments successful and apply similar strategies.`
-        : '\n\nNo high-engagement comments available. Focus on adding unique value and asking thoughtful questions.';
+            .map((c, i) => `${i + 1}. "${c.text}"`)
+            .join('\n')}`
+        : '';
 
-    const userPrompt = `Generate a professional LinkedIn reply to this post:
+    const userPrompt = `${voice}You're commenting on this LinkedIn post:
 
-POST CONTENT:
-"${postContent}"
-${topCommentsContext}
+"""
+${postContent}
+"""${topCommentsContext}
 
-CRITICAL REQUIREMENTS:
-- 1-2 impactful sentences (maximum 40 words total)
-- No introductory phrases like "Great post!"
-- Add genuine value or ask a thoughtful question
-- Be conversational and engaging
-- DO NOT include any preambles like "Here's a reply:" or explanations
-- Start your response immediately with the actual content
-
-Write your reply directly (no preambles):`;
+${COMMENT_TASK_LINE}`;
 
     const { reply: finalReply, warning } = await generateComment(
       systemPrompt,
@@ -1389,32 +1392,18 @@ Write your reply directly (no preambles):`;
 
 async function handleLinkedInReply(postContent: string, sendResponse: (response: unknown) => void) {
   try {
-    const systemPrompt = await getUserPrompt('standard');
+    const [systemPrompt, voice] = await Promise.all([
+      getUserPrompt('standard'),
+      buildVoiceHeader(),
+    ]);
 
-    const postLength = postContent.length;
-    const hasQuestion = postContent.includes('?');
-    const hasData = /\d+%|\d+\s*(million|billion|thousand)|\$\d+/i.test(postContent);
+    const userPrompt = `${voice}You're commenting on this LinkedIn post:
 
-    const contextHints = `
-POST ANALYSIS:
-- Length: ${postLength < 100 ? 'Brief' : postLength < 300 ? 'Medium' : 'Detailed'}
-- Type: ${hasQuestion ? 'Question/Discussion' : hasData ? 'Data/Insights' : 'Thought/Opinion'}
-- Engagement opportunity: ${hasQuestion ? 'Answer the question' : 'Add perspective'}`;
+"""
+${postContent}
+"""
 
-    const userPrompt = `Generate a professional LinkedIn reply to this post:
-
-"${postContent}"
-${contextHints}
-
-CRITICAL REQUIREMENTS:
-- 1-2 impactful sentences (maximum 40 words total)
-- No introductory phrases like "Great post!"
-- Add genuine value or ask a thoughtful question
-- Be conversational and engaging
-- DO NOT include any preambles like "Here's a reply:" or explanations
-- Start your response immediately with the actual content
-
-Write your reply directly (no preambles):`;
+${COMMENT_TASK_LINE}`;
 
     const { reply: finalReply, warning } = await generateComment(
       systemPrompt,
