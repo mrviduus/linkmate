@@ -1089,10 +1089,13 @@ async function handleCaptureProfile(force = false): Promise<void> {
         // replace each other (Chrome treats same id as an update).
         chrome.notifications?.create?.(`linkmate-capture-${Date.now()}`, {
           type: 'basic',
-          // Parcel rewrites this to the hashed asset URL at build time; the old
-          // getURL('icons/icon-128.png') pointed at a path that doesn't exist in
-          // the bundle (ERR_FILE_NOT_FOUND → notification failed to create).
-          iconUrl: new URL('./icons/icon-128.png', import.meta.url).href,
+          // Read the hashed icon path from the (Parcel-rewritten) manifest at
+          // runtime. Avoids both the dead literal 'icons/icon-128.png' path
+          // (ERR_FILE_NOT_FOUND) and the `new URL(import.meta.url)` form, which
+          // makes Parcel emit an inline importmap that MV3 CSP blocks.
+          iconUrl: chrome.runtime.getURL(
+            chrome.runtime.getManifest().icons?.['128'] ?? 'icon-128.png'
+          ),
           title: 'LinkMate — profile captured',
           message: `${exp} experiences · ${edu} education · ${sk} skills saved.`,
           priority: 1,
