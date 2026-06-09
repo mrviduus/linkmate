@@ -52,11 +52,12 @@ class LinkedInLinkMate {
   }
 
   /**
-   * Mount the per-post inline relevance overlay on /feed/. Each visible post
-   * gets a chip showing the AI score. Drafts still happen via the in-post
-   * Reply button — handled separately, and doesn't depend on this overlay.
+   * Mount the per-post inline relevance overlay on eligible surfaces (the feed
+   * and profile/recent-activity pages). Each visible post gets a chip showing
+   * the AI score. Drafts still happen via the in-post Reply button — handled
+   * separately, and doesn't depend on this overlay.
    */
-  private async mountEngagementQueueIfOnFeed(): Promise<void> {
+  private async mountOverlayIfEligible(): Promise<void> {
     // Score posts on the feed AND on profile pages (/in/<handle>/…, incl.
     // recent-activity) — that's where the user's own posts live, so they get
     // chips too. The AI path doesn't skip own posts; only the surface gated it.
@@ -118,7 +119,7 @@ class LinkedInLinkMate {
     const checkAndRemount = () => {
       if (location.pathname !== this.currentPath) {
         this.currentPath = location.pathname;
-        void this.mountEngagementQueueIfOnFeed();
+        void this.mountOverlayIfEligible();
       }
     };
 
@@ -206,7 +207,7 @@ class LinkedInLinkMate {
   private activateFeatures(): void {
     this.observePosts();
     this.processVisiblePosts();
-    void this.mountEngagementQueueIfOnFeed();
+    void this.mountOverlayIfEligible();
   }
 
   /** Master switch handler: pause tears every injected UI down; resume rebuilds it. */
