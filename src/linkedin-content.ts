@@ -41,6 +41,14 @@ class LinkedInLinkMate {
 
   private showComplianceWarning(): void {
     // T130 — extended for SSI Growth Mode (Phase B, US1).
+    // Print once per tab: the content script re-inits across LinkedIn's frames
+    // / reloads, which otherwise floods the console with this same notice.
+    try {
+      if (sessionStorage.getItem('linkmate.complianceWarned') === '1') return;
+      sessionStorage.setItem('linkmate.complianceWarned', '1');
+    } catch {
+      /* sessionStorage unavailable (sandboxed frame) — fall through and warn */
+    }
     console.warn(
       '⚠️ LinkMate Extension Notice (SSI Growth Mode):\n' +
         '• AI-drafted comments are SUGGESTIONS only — you must edit, paste, and submit them yourself.\n' +
