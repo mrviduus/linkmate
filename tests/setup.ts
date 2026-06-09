@@ -3,6 +3,10 @@ import '@testing-library/jest-dom';
 // Mock Chrome APIs
 const mockChrome = {
   runtime: {
+    // Real content scripts always carry an id; it only goes undefined once the
+    // extension context is invalidated. Overlay's contextInvalidated() guard
+    // relies on this, so the mock must provide one.
+    id: 'test-extension-id',
     onMessage: {
       addListener: jest.fn(),
       removeListener: jest.fn(),

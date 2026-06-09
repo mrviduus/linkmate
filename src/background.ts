@@ -33,6 +33,8 @@ import {
   getOnboardingCompleted,
   getGoalsOverride,
   setGoalsOverride,
+  getPaused,
+  STORAGE_KEYS,
 } from './storage-schema';
 import { aiScoreBatch, clearAiCache, AiParseError } from './ai-feed-analyzer';
 import { getUserProfile, profileContextFromUserProfile } from './user-profile-store';
@@ -458,11 +460,65 @@ migrateIfNeeded()
   .then(() => ensureInstallToken())
   .catch((err) => console.warn('[LinkMate] migration/install-token init failed:', err));
 
+// ─── Global pause (master killswitch) ───────────────────────────────────────
+//
+// When paused we block every *active* feature (LLM calls, SSI capture, profile
+// scraping) at this single choke point — content scripts have already torn
+// their UI down, this guards popup-triggered + stray actions too. Pure reads
+// (history/config/audit) stay open so the side panel still shows cached data.
+
+let isPaused = false;
+getPaused()
+  .then((v) => {
+    isPaused = v;
+  })
+  .catch(() => {});
+
+const PAUSED_BLOCKED_ACTIONS = new Set([
+  'generateLinkedInReply',
+  'generateLinkedInReplyWithComments',
+  'queue.scoreFeed',
+  'queue.draftComment',
+  'queue.aiScoreFeed',
+  'profile.audit.rewrite',
+  'recommender.refresh',
+  'recommender.suggestPosts',
+  'ssi.captureNow',
+  'profile.capture',
+]);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !(STORAGE_KEYS.paused in changes)) return;
+  const next = Boolean(changes[STORAGE_KEYS.paused].newValue);
+  const wasPaused = isPaused;
+  isPaused = next;
+  // Resume → auto-refresh: pull a fresh SSI snapshot and re-rank recommendations
+  // immediately so the panel reflects current state without waiting for alarms.
+  if (wasPaused && !next) {
+    startSsiCapture()
+      .then(async (snap) => {
+        await appendSsiSnapshot(snap);
+        await clearSsiLastError();
+        rankDaily().catch((err) => console.warn('Resume recommender refresh failed:', err));
+      })
+      .catch(async (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        await setSsiLastError({ message: msg, capturedAt: Date.now() });
+      });
+  }
+});
+
 // ─── Message router ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.action === 'linkedinContentScriptReady') {
     sendResponse({ engineReady: true, cloudMode: true });
+    return false;
+  }
+
+  // Master killswitch — short-circuit active features while paused.
+  if (isPaused && PAUSED_BLOCKED_ACTIONS.has(request.action)) {
+    sendResponse({ ok: false, paused: true, error: 'LinkMate is paused.' });
     return false;
   }
 
@@ -832,6 +888,11 @@ async function startSsiCapture(): Promise<SsiSnapshot> {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  // Paused = no background work either.
+  if (isPaused) {
+    console.log('⏸ LinkMate paused — skipping alarm', alarm.name);
+    return;
+  }
   if (alarm.name === SSI_ALARM_NAME) {
     console.log('⏰ SSI daily alarm fired');
     startSsiCapture()

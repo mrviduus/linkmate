@@ -23,7 +23,7 @@ export interface Env {
   OPENAI_API_KEY: string;
   /** KV namespace holding per-token cumulative spend + rate-limit counters. */
   USAGE: KVNamespace;
-  /** Optional override of the free allowance in USD (string). Default "2.00". */
+  /** Optional override of the free allowance in USD (string). Default "1.00". */
   QUOTA_USD?: string;
   /** Comma-separated allowed chrome-extension IDs. Empty = allow any (dev). */
   ALLOWED_EXTENSION_IDS?: string;
@@ -31,7 +31,8 @@ export interface Env {
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_QUOTA_USD = 2.0;
+// $1.00 free allowance → reads as 10 tokens in the UI ($0.10 = 1 token).
+const DEFAULT_QUOTA_USD = 1.0;
 
 /** Models the proxy will forward. Anything else is rejected so a user can't
  *  ask for an expensive model and drain the shared key. Prices are USD per

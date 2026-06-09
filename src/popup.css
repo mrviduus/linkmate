@@ -32,6 +32,16 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+/* Auto-dismiss: fade + slide out just before window.close() (see popup.ts). */
+.card--dismissing {
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
 }
 
 /* ── Header ───────────────────────────────────────────────────────────── */
@@ -59,30 +69,6 @@ body {
 
 .settings-main {
   padding: 16px 24px 20px;
-}
-
-.onboarding-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  margin: 0 0 16px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #eaf2ff 0%, #f0e7ff 100%);
-  border: 1px solid #cfd9ff;
-  color: #1d4ed8;
-  font-size: 13.5px;
-  font-weight: 500;
-  line-height: 1.4;
-}
-.onboarding-banner i {
-  font-size: 16px;
-  flex-shrink: 0;
-}
-.onboarding-banner.onboarding-banner--profile {
-  background: linear-gradient(135deg, #fff7e6 0%, #fff0f5 100%);
-  border-color: #f5d7c2;
-  color: #b45309;
 }
 
 .settings-section {
@@ -319,6 +305,43 @@ body {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   cursor: pointer;
+}
+
+/* AdBlock-style minimal pause switch — compact pill in the header (right edge). */
+.lm-pause {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #44474f;
+  background: #f5f5f7;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.lm-pause:hover {
+  background: #ececef;
+}
+
+.lm-pause__icon {
+  flex-shrink: 0;
+}
+
+/* Paused: amber tint signals "currently off", label flips to Resume. */
+.lm-pause--paused {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.lm-pause--paused:hover {
+  background: #fde68a;
 }
 
 .feature-toggle input {
@@ -1514,23 +1537,6 @@ body {
 }
 
 /* ── Streak badge in header ───────────────────────────────────────────── */
-
-.streak-badge {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: #fff3cd;
-  color: #856404;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.streak-badge i {
-  color: #e25b00;
-}
 
 /* ── Cadence bars (Today) ─────────────────────────────────────────────── */
 

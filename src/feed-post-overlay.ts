@@ -201,8 +201,26 @@ export class FeedPostOverlay {
     }, effectiveDelay);
   }
 
+  /**
+   * True once the extension has been reloaded/updated under us — `chrome.runtime`
+   * loses its `id`. Any further runtime call from this orphaned content script
+   * resolves resources to `chrome-extension://invalid/` and floods the console
+   * with ERR_FAILED. We tear ourselves down on the first detection instead.
+   */
+  private contextInvalidated(): boolean {
+    try {
+      return !chrome.runtime?.id;
+    } catch {
+      return true;
+    }
+  }
+
   private async scanAndScore(): Promise<void> {
     if (this.inFlight) return;
+    if (this.contextInvalidated()) {
+      this.unmount();
+      return;
+    }
     // Phase 1 — inject placeholder chips for every visible post we don't know about.
     const roots = findFeedPostRoots();
     let injectedNew = false;

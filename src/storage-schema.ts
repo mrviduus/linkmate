@@ -12,7 +12,7 @@
  *                       always send a message to background which writes
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const STORAGE_KEYS = {
   profile: 'linkmate.profile.v1',
@@ -31,7 +31,7 @@ export const STORAGE_KEYS = {
   retroLastShown: 'linkmate.retro.lastShown.v1',
   postDraftsState: 'linkmate.recommender.postDrafts.v1',
   captureFullProfile: 'linkmate.settings.captureFullProfile.v1',
-  feedScoring: 'linkmate.settings.feedScoring.v1',
+  paused: 'linkmate.settings.paused.v1',
   deepScrapeCancel: 'linkmate.deepScrape.cancel.v1',
   deepScrapeProgress: 'linkmate.deepScrape.progress.v1',
   onboardingCompleted: 'linkmate.settings.onboardingCompleted.v1',
@@ -354,6 +354,12 @@ export async function migrateIfNeeded(): Promise<void> {
     // No stored config → getProviderConfig() already returns the managed default.
   }
 
+  // v2 → v3: drop the retired AI-feed-scoring opt-in key (superseded by the
+  // global pause switch). Leftover value is harmless but we clean it up.
+  if (currentStored < 3) {
+    await chrome.storage.local.remove('linkmate.settings.feedScoring.v1');
+  }
+
   await writeKey(STORAGE_KEYS.schemaVersion, SCHEMA_VERSION);
 }
 
@@ -477,19 +483,19 @@ export async function setCaptureFullProfile(value: boolean): Promise<void> {
   await writeKey(STORAGE_KEYS.captureFullProfile, value);
 }
 
-// ─── Settings: AI post scoring on the feed (opt-in) ─────────────────────────
+// ─── Settings: global pause ─────────────────────────────────────────────────
 //
-// The per-post relevance chips ("🤖 X/10") + Focus Top Post FAB. Each batch of
-// visible posts is an AI call (spends the free-tier quota), so this is OFF by
-// default — the user opts in from the side-panel settings.
+// Master killswitch. When paused, the content script tears down all feed
+// overlays/chips/scoring on LinkedIn until the user flips it back from the
+// side-panel settings. Default OFF (= not paused = LinkMate active).
 
-export async function getFeedScoringEnabled(): Promise<boolean> {
-  const stored = await readKey<boolean>(STORAGE_KEYS.feedScoring);
+export async function getPaused(): Promise<boolean> {
+  const stored = await readKey<boolean>(STORAGE_KEYS.paused);
   return stored ?? false;
 }
 
-export async function setFeedScoringEnabled(value: boolean): Promise<void> {
-  await writeKey(STORAGE_KEYS.feedScoring, value);
+export async function setPaused(value: boolean): Promise<void> {
+  await writeKey(STORAGE_KEYS.paused, value);
 }
 
 // ─── Deep scrape live progress + cancel signal ──────────────────────────────

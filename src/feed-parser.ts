@@ -252,6 +252,22 @@ function parseSduiPost(el: Element, now: number): ParsedPost | null {
     profileLink = candidateLinks[0];
     authorName = readText(profileLink);
   }
+  // 2026 SDUI: the actor link text is now empty — the human/company name only
+  // survives in the avatar's alt, in one of two shapes:
+  //   "View <Name>'s profile"   (person)
+  //   "View company: <Name>"    (company)
+  if (!authorName || /^\d/.test(authorName)) {
+    const avatar = el.querySelector('img[alt^="View " i]');
+    const avatarAlt = avatar?.getAttribute('alt') ?? '';
+    const name =
+      avatarAlt.match(/^View\s+(.+?)[’'`]s\s+profile/i)?.[1] ??
+      avatarAlt.match(/^View company:\s*(.+)$/i)?.[1];
+    if (name) authorName = name.trim();
+    // Tie the handle to the avatar's own link — candidateLinks[0] can be a body
+    // @mention rather than the actual author (e.g. on company posts).
+    const avatarLink = avatar?.closest('a[href*="/in/"], a[href*="/company/"]');
+    if (avatarLink) profileLink = avatarLink;
+  }
   const authorHref = profileLink?.getAttribute('href') ?? '';
   const authorUrn = authorUrnFromHref(authorHref);
 
@@ -314,6 +330,18 @@ function parseSduiPost(el: Element, now: number): ParsedPost | null {
       if (m) commentCount = parseCount(m[1]);
     }
     if (likeCount && commentCount) break;
+  }
+
+  // 2026 SDUI fallback: the old "X reactions / X comments" count spans are gone;
+  // the counts now render as the action buttons' own text (Like→"40",
+  // Comment→"63", Repost→"1"). Zero-count buttons hold a zero-width space → 0.
+  if (likeCount === 0) {
+    likeCount = parseCount(
+      readText(el.querySelector('button[aria-label^="Reaction button state" i]'))
+    );
+  }
+  if (commentCount === 0) {
+    commentCount = parseCount(readText(el.querySelector('button[aria-label="Comment" i]')));
   }
 
   const isOwn = degree === 'unknown' && /\byou\b/i.test(readText(el).slice(0, 200));

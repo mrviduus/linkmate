@@ -19,7 +19,7 @@ workers_dev = true
 # Leave ALLOWED_EXTENSION_IDS empty during dev to accept any chrome-extension
 # origin; set it to the published Web Store ID before launch.
 [vars]
-QUOTA_USD = "2.00"
+QUOTA_USD = "1.00"
 ALLOWED_EXTENSION_IDS = ""
 
 # KV namespace for per-token cumulative spend + rate-limit counters.
