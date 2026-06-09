@@ -244,7 +244,9 @@ function validateReplyQuality(reply: string): ValidationResult {
 
   let score = 70;
   if (trimmedReply.includes('?')) score += 10;
-  if (/\d+(%|x|\s+(percent|times|increase|decrease))/i.test(trimmedReply)) score += 10;
+  // No bonus for numbers/percentages: the scorer can't tell a real figure from
+  // a hallucinated one, and rewarding "X%" biased candidate selection toward
+  // fabricated stats. Credibility of numbers is handled in the prompt instead.
   if (wordCount >= 35 && wordCount <= 90) score += 10;
   return { valid: true, score: Math.min(100, score) };
 }
@@ -281,7 +283,7 @@ const COMMENT_RULES = `WHAT A COMMENT THAT EARNS A REPLY DOES:
 HARD RULES (a comment is rejected if it breaks these):
 - 2 to 4 sentences, between 220 and 450 characters.
 - Open with the substance. NEVER open with praise or agreement — banned openers include "Great post", "Love this", "Spot on", "So true", "This resonates", "Couldn't agree more", "Well said", "Thanks for sharing", "Absolutely".
-- Be concrete: anchor to a real detail from the post; use a number, example, or mechanism when you can.
+- Be concrete: anchor to a real detail from the post; add a mechanism, example, or counter-example. Use a number ONLY if you actually know it is true — NEVER invent statistics, percentages, or "X%" figures. A made-up number destroys credibility with an expert audience.
 - At most ONE question, and only if it genuinely moves the conversation forward. If you ask one, end that sentence with "?".
 - Do not restate or summarize the post — assume the author just wrote it.
 - No hashtags, no emojis, no sign-off, no "—Name".
@@ -1282,9 +1284,10 @@ async function refineComment(postContent: string, draft: string): Promise<string
 ${COMMENT_RULES}
 
 Improve the draft:
+- If the opening sentence just restates or paraphrases the post, cut it and open on a fresh point — the author already knows what they wrote.
 - Cut anything generic — a line that's true of almost any post adds nothing.
-- Add ONE concrete detail, mechanism, number, or counter-example.
-- Make sure it reacts to a SPECIFIC claim in the post, not the post in general.
+- Add ONE concrete mechanism, counter-example, or specific detail. Do NOT invent statistics or "X%" numbers; remove any fabricated figure from the draft.
+- Make sure it reacts to a SPECIFIC claim in the post, and that any question pushes BEYOND what the post already says (don't ask whether they did the thing they just described).
 - Keep whatever already works; if the draft is already excellent, return it unchanged.
 Output ONLY the improved comment — no critique, no preamble, no quotes.`,
       user: `POST:\n"""\n${postContent}\n"""\n\nDRAFT COMMENT:\n"""\n${draft}\n"""\n\nReturn the improved comment.`,
