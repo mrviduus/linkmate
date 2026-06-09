@@ -1824,7 +1824,10 @@ function isLinkedInUrl(url?: string): boolean {
 async function closeIfNotLinkedIn(): Promise<void> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!isLinkedInUrl(tab?.url)) {
+    // Only close when we have a DEFINITIVE non-LinkedIn URL. From the side-panel
+    // context the query can resolve to an empty result / no url; treating that
+    // as "not LinkedIn" used to close the panel the instant it opened. Fail open.
+    if (tab?.url && !isLinkedInUrl(tab.url)) {
       window.close();
     }
   } catch {

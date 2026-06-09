@@ -187,9 +187,20 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 // global default; only non-LinkedIn tabs are explicitly disabled.
 (async () => {
   try {
+    // Explicitly clear any globally-persisted enabled:false from earlier builds
+    // (sidePanel global state survives extension reloads). Without this a tab
+    // loaded while the SW was idle stays disabled → toolbar click opens nothing.
+    await sidePanelApi.setOptions({ enabled: true });
+  } catch (err) {
+    console.warn('[LinkMate] sidePanel global enable failed:', err);
+  }
+  try {
     const tabs = await chrome.tabs.query({});
     for (const t of tabs) {
-      if (t.id !== undefined) void syncSidePanelForTab(t.id, t.url);
+      // Disable only non-LinkedIn tabs; LinkedIn tabs stay enabled (global default).
+      if (t.id !== undefined && !sidePanelAllowed(t.url)) {
+        void sidePanelApi.setOptions({ tabId: t.id, enabled: false });
+      }
     }
   } catch {
     /* tabs query best-effort */
