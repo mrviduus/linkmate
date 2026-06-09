@@ -10,11 +10,11 @@ import {
 } from './ssi-tracker';
 import {
   getCaptureFullProfile,
-  getFeedScoringEnabled,
+  getPaused,
   getProfile,
   getSsiLastError,
   setCaptureFullProfile,
-  setFeedScoringEnabled,
+  setPaused,
   setDeepScrapeCancel,
   STORAGE_KEYS,
 } from './storage-schema';
@@ -207,7 +207,7 @@ async function loadQuota(): Promise<void> {
   const limit = resp.limitUSD ?? 0;
   const remaining = resp.remainingUSD ?? Math.max(0, limit - used);
   // Show a friendly "tokens" credit instead of raw dollars ($0.10 = 1 token,
-  // so the $2 free tier reads as 20 tokens).
+  // so the $1 free tier reads as 10 tokens).
   const USD_PER_TOKEN = 0.1;
   const remainingTokens = Math.round(remaining / USD_PER_TOKEN);
   const limitTokens = Math.round(limit / USD_PER_TOKEN);
@@ -252,12 +252,6 @@ async function loadProviderConfig(): Promise<void> {
   const cfg = resp.config ?? { ...DEFAULT_PROVIDER_DTO };
   renderProviderForm(cfg);
   void loadQuota();
-  try {
-    const profile = await getUserProfile();
-    updateOnboardingBanner(profile);
-  } catch {
-    updateOnboardingBanner(null);
-  }
 }
 
 async function handleProviderSave(): Promise<void> {
@@ -301,12 +295,6 @@ async function handleProviderSave(): Promise<void> {
       // (if visible) flashes a hint so the user knows where to retry.
       await loadProfileAudit();
       showAuditStatus('AI provider saved — click Get AI rewrites for suggestions.', 'info');
-      try {
-        const profile = await getUserProfile();
-        updateOnboardingBanner(profile);
-      } catch {
-        updateOnboardingBanner(null);
-      }
     } else {
       showProviderMessage(`Save failed: ${resp.error ?? 'unknown'}`, 'error');
     }
@@ -387,38 +375,9 @@ async function refreshCaptureHero(): Promise<void> {
   try {
     const profile = await getUserProfile();
     renderHero(profile ? { kind: 'ok', profile } : { kind: 'empty' });
-    updateOnboardingBanner(profile);
   } catch {
     renderHero({ kind: 'empty' });
-    updateOnboardingBanner(null);
   }
-}
-
-function updateOnboardingBanner(profile: UserProfile | null): void {
-  const banner = document.getElementById('onboardingBanner');
-  const text = document.getElementById('onboardingBannerText');
-  const icon = document.getElementById('onboardingBannerIcon');
-  if (!banner || !text || !icon) return;
-  const cfg = currentProviderConfig;
-  // Managed mode always has AI (no key needed) → only the profile gate applies.
-  const hasAI =
-    cfg.mode === 'managed' ||
-    !!(cfg.mode === 'openai' ? cfg.openai?.apiKey?.trim() : cfg.groq?.apiKey?.trim());
-  if (!hasAI) {
-    banner.style.display = '';
-    banner.classList.remove('onboarding-banner--profile');
-    icon.className = 'fa fa-hand-point-down';
-    text.textContent = '👋 Paste your OpenAI API key below to start.';
-    return;
-  }
-  if (!profile) {
-    banner.style.display = '';
-    banner.classList.add('onboarding-banner--profile');
-    icon.className = 'fa fa-camera';
-    text.textContent = "👋 Click 'Capture profile' to scan your LinkedIn.";
-    return;
-  }
-  banner.style.display = 'none';
 }
 
 async function handleHeroRefresh(): Promise<void> {
@@ -899,10 +858,13 @@ function renderProfileAudit(state: ProfileAuditDTO | null): void {
   if (profileAuditRewriteBtn && profileAuditRewriteLabel) {
     const failedCount = state.audit.failed.length;
     if (state.recommendations) {
+      profileAuditRewriteBtn.style.display = '';
       profileAuditRewriteLabel.textContent = 'Regenerate AI rewrites';
     } else if (failedCount === 0) {
-      profileAuditRewriteLabel.textContent = 'Get advice anyway';
+      // No gaps to rewrite — hide the action entirely (no "Get advice anyway").
+      profileAuditRewriteBtn.style.display = 'none';
     } else {
+      profileAuditRewriteBtn.style.display = '';
       profileAuditRewriteLabel.textContent = `Get AI rewrites for ${failedCount} gap${failedCount === 1 ? '' : 's'}`;
     }
     profileAuditRewriteBtn.dataset.state = 'idle';
@@ -942,6 +904,7 @@ async function handleProfileAuditRewrite(): Promise<void> {
       state?: ProfileAuditDTO;
       reason?: string;
       error?: string;
+      paused?: boolean;
     }>((resolve) => {
       chrome.runtime.sendMessage(
         { action: 'profile.audit.rewrite', regenerate: isRegenerate },
@@ -952,7 +915,9 @@ async function handleProfileAuditRewrite(): Promise<void> {
       profileAuditRewriteBtn.disabled = false;
       profileAuditRewriteBtn.dataset.state = 'idle';
       profileAuditRewriteLabel.textContent = prevLabel ?? 'Get AI rewrites';
-      if (isQuotaError(resp)) {
+      if (resp.paused) {
+        showAuditStatus('LinkMate is paused — press Resume to get AI rewrites.', 'info');
+      } else if (isQuotaError(resp)) {
         showAuditStatus('Free AI used up — switch to your own key to continue.', 'info');
         showByokSwitchBanner();
       } else if (resp.reason === 'no_key') {
@@ -1127,7 +1092,13 @@ async function handleCaptureProfile(force = false): Promise<void> {
         // replace each other (Chrome treats same id as an update).
         chrome.notifications?.create?.(`linkmate-capture-${Date.now()}`, {
           type: 'basic',
-          iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+          // Read the hashed icon path from the (Parcel-rewritten) manifest at
+          // runtime. Avoids both the dead literal 'icons/icon-128.png' path
+          // (ERR_FILE_NOT_FOUND) and the `new URL(import.meta.url)` form, which
+          // makes Parcel emit an inline importmap that MV3 CSP blocks.
+          iconUrl: chrome.runtime.getURL(
+            chrome.runtime.getManifest().icons?.['128'] ?? 'icon-128.png'
+          ),
           title: 'LinkMate — profile captured',
           message: `${exp} experiences · ${edu} education · ${sk} skills saved.`,
           priority: 1,
@@ -1164,16 +1135,35 @@ async function handleCaptureFullProfileToggle(): Promise<void> {
   await setCaptureFullProfile(captureFullProfileToggle.checked);
 }
 
-const feedScoringToggle = $<HTMLInputElement>('feedScoringToggle');
+const pauseToggle = $<HTMLButtonElement>('pauseToggle');
 
-async function loadFeedScoringToggle(): Promise<void> {
-  if (!feedScoringToggle) return;
-  feedScoringToggle.checked = await getFeedScoringEnabled();
+const PAUSE_ICON =
+  '<svg class="lm-pause__icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 5h3v14H8zM13 5h3v14h-3z"/></svg>';
+const PLAY_ICON =
+  '<svg class="lm-pause__icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+
+function renderPauseButton(paused: boolean): void {
+  if (!pauseToggle) return;
+  pauseToggle.classList.toggle('lm-pause--paused', paused);
+  pauseToggle.setAttribute('aria-pressed', String(paused));
+  const full = paused ? 'Resume LinkMate' : 'Pause LinkMate';
+  pauseToggle.setAttribute('aria-label', full);
+  pauseToggle.title = full;
+  // Short label fits the header; icon flips pause↔play. Constant strings — safe HTML.
+  const label = paused ? 'Resume' : 'Pause';
+  pauseToggle.innerHTML = `${paused ? PLAY_ICON : PAUSE_ICON}<span class="lm-pause__label">${label}</span>`;
 }
 
-async function handleFeedScoringToggle(): Promise<void> {
-  if (!feedScoringToggle) return;
-  await setFeedScoringEnabled(feedScoringToggle.checked);
+async function loadPauseToggle(): Promise<void> {
+  if (!pauseToggle) return;
+  renderPauseButton(await getPaused());
+}
+
+async function handlePauseToggle(): Promise<void> {
+  if (!pauseToggle) return;
+  const next = pauseToggle.getAttribute('aria-pressed') !== 'true';
+  renderPauseButton(next); // optimistic — instant feedback
+  await setPaused(next);
 }
 
 const SCRAPE_PHASE_ORDER: Array<DeepScrapeProgress['phase']> = ['profile', 'posts', 'comments'];
@@ -1387,14 +1377,18 @@ async function handleSsiRefresh(): Promise<void> {
   const prevHtml = ssiRefreshBtn.innerHTML;
   ssiRefreshBtn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Capturing…';
   try {
-    const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'ssi.captureNow' }, (resp) => {
-        resolve(resp ?? { ok: false, error: 'No response from background' });
-      });
-    });
+    const result = await new Promise<{ ok: boolean; error?: string; paused?: boolean }>(
+      (resolve) => {
+        chrome.runtime.sendMessage({ action: 'ssi.captureNow' }, (resp) => {
+          resolve(resp ?? { ok: false, error: 'No response from background' });
+        });
+      },
+    );
     if (result.ok) {
       showSsiMessage('SSI snapshot captured.', 'success');
       await loadSsiData();
+    } else if (result.paused) {
+      showSsiMessage('LinkMate is paused — press Resume to capture.', 'info');
     } else {
       showSsiMessage(`Capture failed: ${result.error ?? 'unknown'}`, 'error');
       await loadSsiData();
@@ -1774,7 +1768,7 @@ function wire(): void {
   providerSaveBtn?.addEventListener('click', () => void handleProviderSave());
   captureProfileBtn?.addEventListener('click', () => void handleCaptureProfile(true));
   captureFullProfileToggle?.addEventListener('change', () => void handleCaptureFullProfileToggle());
-  feedScoringToggle?.addEventListener('change', () => void handleFeedScoringToggle());
+  pauseToggle?.addEventListener('click', () => void handlePauseToggle());
   deepScrapeCancelBtn?.addEventListener('click', () => void handleDeepScrapeCancel());
   wireDeepScrapeProgressListener();
   heroRefreshBtn?.addEventListener('click', () => void handleHeroRefresh());
@@ -1837,7 +1831,10 @@ function isLinkedInUrl(url?: string): boolean {
 async function closeIfNotLinkedIn(): Promise<void> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!isLinkedInUrl(tab?.url)) {
+    // Only close when we have a DEFINITIVE non-LinkedIn URL. From the side-panel
+    // context the query can resolve to an empty result / no url; treating that
+    // as "not LinkedIn" used to close the panel the instant it opened. Fail open.
+    if (tab?.url && !isLinkedInUrl(tab.url)) {
       window.close();
     }
   } catch {
@@ -1853,6 +1850,30 @@ chrome.tabs.onUpdated.addListener((_tabId, info) => {
   if (info.url || info.status === 'complete') void closeIfNotLinkedIn();
 });
 
+// ─── Auto-dismiss on page interaction ────────────────────────────────────────
+// When the user starts working with the LinkedIn page (a genuine click that
+// isn't on LinkMate's own injected UI) the content script pings us and we fade
+// the panel out. A grace window after open swallows the gesture that opened the
+// panel, so it never opens-then-closes.
+const PANEL_DISMISS_GRACE_MS = 1500;
+const panelOpenedAt = Date.now();
+
+function dismissPanel(): void {
+  document.querySelector('.card')?.classList.add('card--dismissing');
+  setTimeout(() => window.close(), 220); // let the fade-out play
+}
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (
+    msg?.action === 'sidepanel.dismiss' &&
+    Date.now() - panelOpenedAt >= PANEL_DISMISS_GRACE_MS
+  ) {
+    dismissPanel();
+  }
+  return false;
+});
+
+
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1861,16 +1882,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   wire();
   await sanitizePostDraftsState();
-  await Promise.all([
-    loadProviderConfig(),
-    refreshProfileDisplay(),
-    loadCaptureFullProfileToggle(),
-    loadFeedScoringToggle(),
-    loadSsiData(),
-    loadAIParameters(),
-    loadPrompts(),
-    loadGoalsOverride(),
-    loadProfileAudit(),
+  // Each loader awaits a chrome.runtime.sendMessage callback that NEVER fires if
+  // the MV3 service worker is asleep/crashing — that used to hang the whole
+  // panel on a blank screen. Cap the bootstrap so the UI always paints; loaders
+  // that miss the window simply leave their section empty until the next open.
+  const BOOTSTRAP_TIMEOUT_MS = 6_000;
+  await Promise.race([
+    Promise.allSettled([
+      loadProviderConfig(),
+      refreshProfileDisplay(),
+      loadCaptureFullProfileToggle(),
+      loadPauseToggle(),
+      loadSsiData(),
+      loadAIParameters(),
+      loadPrompts(),
+      loadGoalsOverride(),
+      loadProfileAudit(),
+    ]),
+    new Promise<void>((resolve) => setTimeout(resolve, BOOTSTRAP_TIMEOUT_MS)),
   ]);
   chrome.runtime.sendMessage({ action: 'popupReady' });
   // Fire-and-forget: don't block the popup paint on a 10–20s capture.

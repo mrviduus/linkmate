@@ -201,8 +201,26 @@ export class FeedPostOverlay {
     }, effectiveDelay);
   }
 
+  /**
+   * True once the extension has been reloaded/updated under us — `chrome.runtime`
+   * loses its `id`. Any further runtime call from this orphaned content script
+   * resolves resources to `chrome-extension://invalid/` and floods the console
+   * with ERR_FAILED. We tear ourselves down on the first detection instead.
+   */
+  private contextInvalidated(): boolean {
+    try {
+      return !chrome.runtime?.id;
+    } catch {
+      return true;
+    }
+  }
+
   private async scanAndScore(): Promise<void> {
     if (this.inFlight) return;
+    if (this.contextInvalidated()) {
+      this.unmount();
+      return;
+    }
     // Phase 1 — inject placeholder chips for every visible post we don't know about.
     const roots = findFeedPostRoots();
     let injectedNew = false;
@@ -672,12 +690,31 @@ export class FeedPostOverlay {
 }
 
 /**
- * Mirrors feed-parser.ts Strategy B but returns the DOM element alongside the
- * synthesized post id, so the overlay can attach chips to real elements.
+ * Mirrors feed-parser.ts post detection (both strategies) and returns the DOM
+ * element alongside the post id, so the overlay can attach chips to real
+ * elements. IDs must match parseFeedDom so chip scores line up:
+ *   - SDUI feed:        id = `urn:li:component:<componentkey>`
+ *   - legacy / profile: id = the post's `data-urn`
  */
 export function findFeedPostRoots(): Array<{ element: HTMLElement; id: string }> {
   const out: Array<{ element: HTMLElement; id: string }> = [];
   const seen = new Set<Element>();
+
+  // Strategy A — legacy / profile-activity DOM: posts are
+  // `.feed-shared-update-v2[data-urn]` (no componentkey, Like = "React Like").
+  // This is what /in/<handle>/recent-activity renders, where own posts live.
+  const legacyPosts = document.querySelectorAll<HTMLElement>(
+    '[data-urn^="urn:li:activity"], .feed-shared-update-v2[data-urn]'
+  );
+  for (const el of Array.from(legacyPosts)) {
+    if (seen.has(el)) continue;
+    seen.add(el);
+    const urn = el.getAttribute('data-urn');
+    if (urn) out.push({ element: el, id: urn });
+  }
+
+  // Strategy B — SDUI feed: anchor on the Reaction button, walk up to the
+  // `<div componentkey="…">` post.
   const reactionButtons = document.querySelectorAll(
     'button[aria-label^="Reaction button state" i]'
   );

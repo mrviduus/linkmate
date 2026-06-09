@@ -5,7 +5,7 @@ import { FeedPostOverlay } from './feed-post-overlay';
 import { scanPostForOutcome } from './outcome-scanner';
 import type { AiScoreFeedResult, AiScoredPostDTO } from './feed-post-overlay';
 import type { ParsedPost } from './storage-schema';
-import { STORAGE_KEYS, getFeedScoringEnabled } from './storage-schema';
+import { STORAGE_KEYS, getPaused } from './storage-schema';
 
 console.log('LinkMate LinkedIn content script loaded');
 
@@ -31,6 +31,8 @@ class LinkedInLinkMate {
   private feedPostOverlay: FeedPostOverlay | null = null;
   private currentPath: string = '';
   private routePollIntervalId: ReturnType<typeof setInterval> | null = null;
+  private paused = false;
+  private lastDismissPing = 0;
 
   constructor() {
     this.showComplianceWarning();
@@ -39,6 +41,14 @@ class LinkedInLinkMate {
 
   private showComplianceWarning(): void {
     // T130 — extended for SSI Growth Mode (Phase B, US1).
+    // Print once per tab: the content script re-inits across LinkedIn's frames
+    // / reloads, which otherwise floods the console with this same notice.
+    try {
+      if (sessionStorage.getItem('linkmate.complianceWarned') === '1') return;
+      sessionStorage.setItem('linkmate.complianceWarned', '1');
+    } catch {
+      /* sessionStorage unavailable (sandboxed frame) — fall through and warn */
+    }
     console.warn(
       '⚠️ LinkMate Extension Notice (SSI Growth Mode):\n' +
         '• AI-drafted comments are SUGGESTIONS only — you must edit, paste, and submit them yourself.\n' +
@@ -50,16 +60,21 @@ class LinkedInLinkMate {
   }
 
   /**
-   * Mount the per-post inline relevance overlay on /feed/. Each visible post
-   * gets a chip showing the AI score. Drafts still happen via the in-post
-   * Reply button — handled separately, and doesn't depend on this overlay.
+   * Mount the per-post inline relevance overlay on eligible surfaces (the feed
+   * and profile/recent-activity pages). Each visible post gets a chip showing
+   * the AI score. Drafts still happen via the in-post Reply button — handled
+   * separately, and doesn't depend on this overlay.
    */
-  private async mountEngagementQueueIfOnFeed(): Promise<void> {
-    const onFeed = location.pathname.startsWith('/feed');
-    // AI post scoring is opt-in (spends free-tier quota). Only mount when the
-    // user has enabled it AND we're on the feed.
-    const enabled = await getFeedScoringEnabled();
-    if (onFeed && enabled && !this.feedPostOverlay) {
+  private async mountOverlayIfEligible(): Promise<void> {
+    // Score posts on the feed AND on profile pages (/in/<handle>/…, incl.
+    // recent-activity) — that's where the user's own posts live, so they get
+    // chips too. The AI path doesn't skip own posts; only the surface gated it.
+    const onScoredSurface =
+      location.pathname.startsWith('/feed') || /^\/in\//.test(location.pathname);
+    // Global pause is the master switch. Mount only on a scored surface AND not
+    // paused; otherwise tear the overlay down.
+    const paused = await getPaused();
+    if (onScoredSurface && !paused && !this.feedPostOverlay) {
       this.feedPostOverlay = new FeedPostOverlay({
         aiScoreFeed: async (posts: ParsedPost[]): Promise<AiScoreFeedResult> => {
           const resp = await this.sendQueueMessage<{
@@ -78,7 +93,7 @@ class LinkedInLinkMate {
         },
       });
       this.feedPostOverlay.mount();
-    } else if ((!onFeed || !enabled) && this.feedPostOverlay) {
+    } else if ((!onScoredSurface || paused) && this.feedPostOverlay) {
       this.feedPostOverlay.unmount();
       this.feedPostOverlay = null;
     }
@@ -112,7 +127,7 @@ class LinkedInLinkMate {
     const checkAndRemount = () => {
       if (location.pathname !== this.currentPath) {
         this.currentPath = location.pathname;
-        void this.mountEngagementQueueIfOnFeed();
+        void this.mountOverlayIfEligible();
       }
     };
 
@@ -155,30 +170,24 @@ class LinkedInLinkMate {
   private init(): void {
     // Initialize when DOM is ready
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => this.setup());
+      document.addEventListener('DOMContentLoaded', () => void this.setup());
     } else {
-      this.setup();
+      void this.setup();
     }
   }
 
-  private setup(): void {
+  private async setup(): Promise<void> {
     // Notify background that LinkedIn content script is ready
     this.notifyBackgroundReady();
 
-    // Start observing for posts
-    this.observePosts();
-
-    // Process existing posts
-    this.processVisiblePosts();
-
-    // T123 — mount Engagement Queue if currently on /feed/ + watch SPA route changes.
-    void this.mountEngagementQueueIfOnFeed();
+    this.paused = await getPaused();
     this.watchRouteChanges();
+    this.watchForPanelDismiss();
 
-    // React live to the feed-scoring toggle (no page reload needed).
+    // Global pause is the master switch — flip all on-page features live.
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && STORAGE_KEYS.feedScoring in changes) {
-        void this.mountEngagementQueueIfOnFeed();
+      if (area === 'local' && STORAGE_KEYS.paused in changes) {
+        this.applyPaused(Boolean(changes[STORAGE_KEYS.paused].newValue));
       }
     });
 
@@ -197,6 +206,74 @@ class LinkedInLinkMate {
         port.postMessage({ contents: document.body.innerText });
       });
     });
+
+    // Only spin up the feature machinery when not paused.
+    if (!this.paused) this.activateFeatures();
+  }
+
+  /** Start post detection + the feed overlay. Idempotent-ish via observePosts guard. */
+  private activateFeatures(): void {
+    this.observePosts();
+    this.processVisiblePosts();
+    void this.mountOverlayIfEligible();
+  }
+
+  /** Master switch handler: pause tears every injected UI down; resume rebuilds it. */
+  private applyPaused(paused: boolean): void {
+    if (paused === this.paused) return;
+    this.paused = paused;
+    if (paused) {
+      this.observer?.disconnect();
+      this.observer = null;
+      this.feedPostOverlay?.unmount();
+      this.feedPostOverlay = null;
+      this.removeInjectedUi();
+      this.posts.clear();
+    } else {
+      this.activateFeatures();
+    }
+  }
+
+  /** Remove every LinkMate element we injected into the page (reply buttons,
+   *  panels, toasts). Chips + FAB are handled by FeedPostOverlay.unmount(). */
+  private removeInjectedUi(): void {
+    // Each AI-reply button sits in a wrapper created solely for it.
+    document.querySelectorAll('.linkmate-generate-btn').forEach((b) => b.parentElement?.remove());
+    document.querySelectorAll('.linkmate-panel, .linkmate-toast').forEach((el) => el.remove());
+  }
+
+  /**
+   * When the user starts working with the LinkedIn page (a real click that
+   * isn't on LinkMate's own injected UI), ping the side panel so it fades out.
+   * Throttled; harmless no-op when the panel isn't open. The panel ignores
+   * pings within its open grace window so the gesture that opened it doesn't
+   * immediately close it.
+   */
+  private watchForPanelDismiss(): void {
+    document.addEventListener(
+      'click',
+      (e) => {
+        const target = e.target as HTMLElement | null;
+        if (
+          target?.closest?.(
+            '.linkmate-fab-container, .linkmate-generate-btn, .linkmate-panel, .linkmate-post-chip, .linkmate-toast'
+          )
+        ) {
+          return; // clicks on our own UI shouldn't dismiss the panel
+        }
+        const now = Date.now();
+        if (now - this.lastDismissPing < 800) return; // throttle bursts
+        this.lastDismissPing = now;
+        try {
+          chrome.runtime.sendMessage({ action: 'sidepanel.dismiss' }, () => {
+            void chrome.runtime.lastError; // swallow "no receiver" when panel is closed
+          });
+        } catch {
+          /* extension context reloaded — ignore */
+        }
+      },
+      true
+    );
   }
 
   private observePosts(): void {
@@ -497,23 +574,24 @@ class LinkedInLinkMate {
   /**
    * v0.5.8 — Find the action bar (Like/Comment/Repost/Send toolbar) inside a post.
    *
-   * REAL DOM findings — verified via Chrome MCP on live linkedin.com/feed/:
-   *   - Like button:    aria-label="Reaction button state: <state>"  +  text="Like"
+   * REAL DOM findings — re-verified via Chrome MCP on live linkedin.com/feed/
+   * after the 2026 SDUI redesign:
+   *   - Like button:    aria-label="Reaction button state: <state>"  +  text=COUNT ("40")
    *   - Reactions menu: aria-label="Open reactions menu"             +  text=""
-   *   - Comment button: aria-label=NULL                              +  text="Comment"  ← !
-   *   - Repost button:  aria-label=NULL                              +  text="Repost"
+   *   - Comment button: aria-label="Comment"                         +  text=COUNT ("63")
+   *   - Repost button:  aria-label="Repost"                          +  text=COUNT ("1")
    *
-   * That's why v0.5.7's `aria-label*="omment"` matched only kebab menus on
-   * existing comments ("View more options for X's comment"), NOT the actual
-   * Comment action button — Comment has NO aria-label in 2026, only inner text.
+   * Note the flip from earlier builds: Comment/Repost now DO carry aria-labels,
+   * and the buttons' inner text is the engagement count, not the word
+   * "Comment"/"Repost". So a textContent==="Comment" match no longer works —
+   * we anchor on aria-labels instead.
    *
    * Strategy:
    *   1. Anchor on the Reaction button via its stable a11y label
    *      `aria-label^="Reaction button state"` (LinkedIn ships per-state labels
    *      so screen readers can announce "Like", "Celebrate", etc.)
    *   2. Walk up to the parent containing 3-8 sibling buttons (action bar)
-   *   3. Fallback: find a button whose textContent === "Comment" (exact),
-   *      walk up the same way.
+   *   3. Fallback: anchor on the Comment button via aria-label="Comment".
    */
   private findActionContainer(post: HTMLElement): Element | null {
     // Legacy class selectors — cheap to check, harmless if absent
@@ -551,15 +629,13 @@ class LinkedInLinkMate {
       if (bar) return bar;
     }
 
-    // Strategy B: button with exact textContent === "Comment" (Comment button
-    // has no aria-label in 2026 LinkedIn).
-    const allButtons = post.querySelectorAll('button');
-    for (const btn of Array.from(allButtons)) {
-      if ((btn.textContent ?? '').trim() === 'Comment') {
-        const bar = walkUpToActionBar(btn as HTMLElement);
-        if (bar) return bar;
-        return btn.parentElement;
-      }
+    // Strategy B: anchor on the Comment button. 2026 SDUI gives it
+    // aria-label="Comment" (its text is the count now, not the word).
+    const commentBtn = post.querySelector('button[aria-label="Comment" i]');
+    if (commentBtn) {
+      const bar = walkUpToActionBar(commentBtn as HTMLElement);
+      if (bar) return bar;
+      return commentBtn.parentElement;
     }
 
     return null;

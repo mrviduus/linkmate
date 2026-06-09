@@ -174,9 +174,11 @@ describe('FeedPostOverlay', () => {
     overlay.unmount();
   });
 
-  it('AI-scores only posts that have visible overlay chips', async () => {
+  it('decorates + scores both SDUI (componentkey) and legacy/profile (data-urn) posts', async () => {
     buildPostFixture('VISIBLE');
 
+    // Profile-activity pages render the legacy shape (data-urn, no componentkey).
+    // The overlay must decorate these too so the user's own posts get chips.
     const legacy = document.createElement('div');
     legacy.setAttribute('data-urn', 'urn:li:activity:LEGACY');
     legacy.className = 'feed-shared-update-v2';
@@ -185,7 +187,7 @@ describe('FeedPostOverlay', () => {
       <span class="update-components-actor__title">Legacy Author</span>
       <span class="update-components-actor__description">Builder</span>
       <span class="update-components-actor__sub-description">1h</span>
-      <div class="feed-shared-text">This parsed legacy post is not decorated by the overlay.</div>
+      <div class="feed-shared-text">This legacy/profile post is now decorated by the overlay.</div>
     `;
     document.body.appendChild(legacy);
 
@@ -202,8 +204,8 @@ describe('FeedPostOverlay', () => {
 
     expect(aiScoreFeed).toHaveBeenCalledTimes(1);
     const aiInputIds = aiScoreFeed.mock.calls[0][0].map((p: { id: string }) => p.id);
-    expect(aiInputIds).toEqual(['urn:li:component:VISIBLE']);
-    expect(document.querySelectorAll('.linkmate-post-chip')).toHaveLength(1);
+    expect(aiInputIds.sort()).toEqual(['urn:li:activity:LEGACY', 'urn:li:component:VISIBLE']);
+    expect(document.querySelectorAll('.linkmate-post-chip')).toHaveLength(2);
 
     overlay.unmount();
   });

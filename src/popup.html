@@ -11,10 +11,13 @@
       <header class="popup-hdr">
         <img id="logo" src="icons/icon-32.png" width="32" height="32" />
         <h1 class="brand">LinkMate</h1>
-        <div id="streakBadge" class="streak-badge" title="Consecutive weeks all quotas hit">
-          <i class="fa fa-fire"></i>
-          <span id="streakCount">0</span>
-        </div>
+        <!-- Compact pause/resume switch — label + icon synced by renderPauseButton(). -->
+        <button type="button" id="pauseToggle" class="lm-pause" aria-pressed="false" title="Pause LinkMate">
+          <svg class="lm-pause__icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+            <path d="M8 5h3v14H8zM13 5h3v14h-3z" />
+          </svg>
+          <span class="lm-pause__label">Pause</span>
+        </button>
       </header>
 
       <div id="settings-content" class="settings-main">
@@ -37,12 +40,6 @@
           </div>
         </div>
 
-        <!-- Onboarding banner: first-run guidance for API key / capture profile -->
-        <div id="onboardingBanner" class="onboarding-banner" style="display: none">
-          <i id="onboardingBannerIcon" class="fa fa-hand-point-down"></i>
-          <span id="onboardingBannerText">Paste your OpenAI API key below to start.</span>
-        </div>
-
         <!-- Quota-exhausted → switch to own key. Hidden unless free tier is spent. -->
         <div id="byokBanner" class="byok-banner" style="display: none" role="alert">
           <div class="byok-banner__text">
@@ -55,8 +52,8 @@
         <!-- AI free-tier balance stays visible; full provider controls live in Advanced. -->
         <div id="providerQuota" class="provider-quota provider-quota--top" style="display: none"></div>
 
-        <!-- SSI Tracker — collapsible (open by default), pinned near the top after tokens. -->
-        <details class="settings-section settings-section--collapsible" open>
+        <!-- SSI Tracker — collapsible, collapsed by default, pinned near the top after tokens. -->
+        <details class="settings-section settings-section--collapsible">
           <summary>
             <i class="fa fa-chart-line"></i>
             SSI Tracker
@@ -120,17 +117,6 @@
 
           <div id="ssiMessage" class="status-message" style="display: none"></div>
         </details>
-
-        <!-- Feature toggle: AI post scoring on the feed (opt-in; spends free AI). -->
-        <label class="feature-toggle" for="feedScoringToggle">
-          <input type="checkbox" id="feedScoringToggle" />
-          <span class="feature-toggle__text">
-            <span class="feature-toggle__label">AI post scoring on feed</span>
-            <span class="feature-toggle__hint"
-              >Show 🤖 relevance scores + Focus Top Post. Uses free AI.</span
-            >
-          </span>
-        </label>
 
         <!-- Profile Improvement Plan: 6 essentials + 4 activity signals + AI rewrites -->
         <details id="profileAudit" class="profile-audit" open style="display: none">
@@ -229,8 +215,10 @@
         </details>
 
 
-        <!-- Advanced (developer) — technical knobs hidden by default -->
-        <details class="settings-section settings-section--collapsible advanced-group">
+        <!-- Advanced (developer) — hidden from end users. Markup stays so the
+             loaders/defaults (provider=managed free AI, auto profile capture,
+             AI params) keep working under the hood; flip display to re-expose. -->
+        <details class="settings-section settings-section--collapsible advanced-group" style="display: none">
           <summary>
             <i class="fa fa-wrench"></i>
             Advanced
