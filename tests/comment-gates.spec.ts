@@ -12,9 +12,15 @@ import {
   hasEmoji,
   hasSignOff,
   hasUnmarkedQuestion,
+  hasMultipleQuestions,
   COMMENT_MIN_CHARS,
   COMMENT_MAX_CHARS,
 } from '../src/comment-gates';
+
+// Real two-question output — passes every other gate but stacks questions,
+// which reads as an interrogation. The multiple_questions gate catches it.
+const TWO_QUESTIONS =
+  'Calibration of LLM judges is often the bottleneck in evaluation—too loose inflates iteration noise, too strict stalls valid progress. Did your framework measure how calibration drift affected the tradeoff over months? Also, how does GEPA manage exploration versus exploitation at 100M-user scale?';
 
 // A substantive, gate-passing comment (200–600 chars, no opener/hashtag/emoji,
 // question ends with "?").
@@ -104,11 +110,29 @@ describe('hasUnmarkedQuestion', () => {
   });
 });
 
+describe('hasMultipleQuestions', () => {
+  it('rejects two stacked questions', () => {
+    expect(hasMultipleQuestions(TWO_QUESTIONS)).toBe(true);
+  });
+  it('passes a single question', () => {
+    expect(hasMultipleQuestions(GOOD)).toBe(false);
+  });
+  it('passes a purely declarative comment', () => {
+    expect(hasMultipleQuestions('Incremental view maintenance keeps results exact.')).toBe(false);
+  });
+});
+
 describe('runCommentGates', () => {
   it('passes the substantive comment', () => {
     const r = runCommentGates(GOOD);
     expect(r.passed).toBe(true);
     expect(r.failures).toEqual([]);
+  });
+
+  it('rejects a comment that stacks two questions', () => {
+    const r = runCommentGates(TWO_QUESTIONS);
+    expect(r.passed).toBe(false);
+    expect(r.failures).toContain('multiple_questions');
   });
 
   it('rejects the Feldera comment from issue #64 (opener + length + question mark)', () => {

@@ -19,7 +19,8 @@ export type CommentGateId =
   | 'hashtag'
   | 'emoji'
   | 'sign_off'
-  | 'missing_question_mark';
+  | 'missing_question_mark'
+  | 'multiple_questions';
 
 export interface CommentGateResult {
   passed: boolean;
@@ -124,6 +125,15 @@ export function hasSignOff(reply: string): boolean {
   return SIGN_OFF_RE.test(reply.trim());
 }
 
+/**
+ * True if the comment stacks more than one question. Two+ questions read as an
+ * interrogation/checklist — a LinkedIn anti-pattern. One sharp question lands
+ * better, so we cap at one.
+ */
+export function hasMultipleQuestions(reply: string): boolean {
+  return sentences(reply).filter((s) => s.endsWith('?')).length > 1;
+}
+
 /** True if any interrogative-led sentence does not end with "?". */
 export function hasUnmarkedQuestion(reply: string): boolean {
   for (const s of sentences(reply)) {
@@ -147,5 +157,6 @@ export function runCommentGates(reply: string): CommentGateResult {
   if (hasEmoji(reply)) failures.push('emoji');
   if (hasSignOff(reply)) failures.push('sign_off');
   if (hasUnmarkedQuestion(reply)) failures.push('missing_question_mark');
+  if (hasMultipleQuestions(reply)) failures.push('multiple_questions');
   return { passed: failures.length === 0, failures };
 }
