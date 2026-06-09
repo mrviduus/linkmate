@@ -41,6 +41,9 @@ const PRICING: Record<string, { in: number; out: number }> = {
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
   'gpt-4.1-mini': { in: 0.4, out: 1.6 },
   'gpt-4.1-nano': { in: 0.1, out: 0.4 },
+  // High-value comment drafting uses gpt-4o (~16× mini). Only the comment path
+  // requests it; feed scoring stays on mini, so the free-tier hit is bounded.
+  'gpt-4o': { in: 2.5, out: 10 },
 };
 
 /** Per-token rate limit: max forwarded requests inside RATE_WINDOW_S. */

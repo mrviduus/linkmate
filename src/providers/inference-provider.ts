@@ -12,6 +12,12 @@ export interface InferenceParams {
   system: string;
   /** User prompt — concrete task. */
   user: string;
+  /**
+   * Per-call model override. Falls back to the provider's configured model
+   * when omitted — lets one high-value task (comment drafting) use a stronger
+   * model than the cheap default used for batch work like feed scoring.
+   */
+  model?: string;
   /** Max tokens to generate. Caller-controlled per task type. */
   maxTokens?: number;
   /** Temperature 0..1. Caller-controlled (e.g. 0.4 for positioning, 0.85 for drafts). */

@@ -75,7 +75,7 @@ export class ManagedProvider implements InferenceProvider {
     const url = `${baseUrl}/v1/chat/completions`;
 
     const body = {
-      model: this.cfg.model,
+      model: params.model ?? this.cfg.model,
       messages: [
         { role: 'system', content: params.system },
         { role: 'user', content: params.user },

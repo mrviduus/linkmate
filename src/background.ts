@@ -1156,11 +1156,24 @@ function dedupeEntriesKeepLast<T extends { stem: string }>(entries: T[]): T[] {
 
 // ─── Reply generation (standard + with comments) ────────────────────────────
 
+// Comments are low-volume + high-value, so they get a stronger model than the
+// cheap default used for batch feed scoring. gpt-4o for OpenAI/managed; Groq
+// has no gpt-4o, so keep its configured model there.
+async function commentModel(): Promise<string | undefined> {
+  try {
+    const cfg = await getProviderConfig();
+    return cfg.mode === 'groq' ? undefined : 'gpt-4o';
+  } catch {
+    return undefined;
+  }
+}
+
 async function generateWithRetry(systemPrompt: string, userPrompt: string): Promise<string> {
-  const provider = await getActiveProvider();
+  const [provider, model] = await Promise.all([getActiveProvider(), commentModel()]);
   const raw = await provider.generate({
     system: systemPrompt,
     user: userPrompt,
+    model,
     maxTokens: aiMaxTokens,
     temperature: aiTemperature,
     topP: 0.9,
@@ -1179,6 +1192,7 @@ async function generateWithRetry(systemPrompt: string, userPrompt: string): Prom
   const retry = await provider.generate({
     system: systemPrompt,
     user: userPrompt,
+    model,
     maxTokens: aiMaxTokens,
     temperature: Math.min(1.0, aiTemperature + 0.15),
     topP: 0.9,
