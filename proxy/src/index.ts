@@ -211,8 +211,21 @@ async function getUsed(env: Env, token: string): Promise<number> {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * Sample-based metering to fit the KV free tier (1000 writes/day).
+ *
+ * On each successful request we flip a coin: with probability 1/SAMPLE we write
+ * the accumulated cost back to KV, multiplied by SAMPLE to keep the expectation
+ * correct. In aggregate the stored cumulative spend converges to the true
+ * value; per-token variance is bounded but acceptable for a free allowance.
+ *
+ * Writes per request: 0.2 average (was 1).
+ */
+const SAMPLE = 5;
+
 async function addUsed(env: Env, token: string, deltaUSD: number): Promise<void> {
-  const next = (await getUsed(env, token)) + deltaUSD;
+  if (Math.random() > 1 / SAMPLE) return;
+  const next = (await getUsed(env, token)) + deltaUSD * SAMPLE;
   await env.USAGE.put(usageKey(token), next.toFixed(6));
 }
 
@@ -226,13 +239,30 @@ function priceOf(model: string, usage?: OpenAIUsage): number {
 
 // ─── Rate limiting (KV sliding-ish window) ──────────────────────────────────────
 
-async function underRateLimit(env: Env, token: string): Promise<boolean> {
-  const key = `rate:${token}`;
-  const raw = await env.USAGE.get(key);
-  const count = raw ? parseInt(raw, 10) : 0;
+/**
+ * Per-token sliding-ish window rate limit using the Cloudflare Cache API.
+ *
+ * Why Cache and not KV: Cache reads/writes do not count against the KV free
+ * tier (1000 writes/day), and the rate limiter was the dominant write source.
+ * Cache is per-edge-colo rather than global, so a determined attacker could
+ * fan out across colos and exceed RATE_LIMIT × colos — that's a fair trade
+ * for "stays free under normal traffic". Quota gating in addUsed still caps
+ * total spend per token at QUOTA_USD.
+ */
+async function underRateLimit(_env: Env, token: string): Promise<boolean> {
+  const cache = await caches.open('linkmate-ratelimit-v1');
+  const cacheKey = new Request(`https://rate.linkmate.invalid/${token}`);
+  const cached = await cache.match(cacheKey);
+  const count = cached ? parseInt(await cached.text(), 10) : 0;
   if (count >= RATE_LIMIT) return false;
-  // TTL-based window: first request in the window sets the expiry.
-  await env.USAGE.put(key, String(count + 1), { expirationTtl: RATE_WINDOW_S });
+  // Cache-Control max-age = sliding window TTL; first request in the window
+  // sets the expiry, subsequent requests refresh the count.
+  await cache.put(
+    cacheKey,
+    new Response(String(count + 1), {
+      headers: { 'Cache-Control': `public, max-age=${RATE_WINDOW_S}` },
+    }),
+  );
   return true;
 }
 
