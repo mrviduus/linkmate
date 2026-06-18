@@ -11,109 +11,112 @@
       <header class="popup-hdr">
         <img id="logo" src="icons/icon-32.png" width="32" height="32" />
         <h1 class="brand">LinkMate</h1>
-        <div id="streakBadge" class="streak-badge" title="Consecutive weeks all quotas hit">
-          <i class="fa fa-fire"></i>
-          <span id="streakCount">0</span>
-        </div>
+        <!-- Compact pause/resume switch — label + icon synced by renderPauseButton(). -->
+        <button type="button" id="pauseToggle" class="lm-pause" aria-pressed="false" title="Pause LinkMate">
+          <svg class="lm-pause__icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+            <path d="M8 5h3v14H8zM13 5h3v14h-3z" />
+          </svg>
+          <span class="lm-pause__label">Pause</span>
+        </button>
       </header>
 
       <div id="settings-content" class="settings-main">
-        <!-- AI Provider key + model — first action user must take -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-key"></i>
-            AI Provider
-          </h3>
-          <p class="settings-description">
-            LinkMate uses AI for all generation. Bring your own key — stored locally in this browser only, never synced.
-          </p>
-
-          <div class="provider-openai-config">
-            <label class="provider-field">
-              <span>Provider</span>
-              <select id="providerMode">
-                <option value="openai">OpenAI</option>
-                <option value="groq">Groq</option>
-              </select>
-            </label>
-
-            <label class="provider-field">
-              <span>API Key</span>
-              <input
-                type="password"
-                id="providerOpenAIKey"
-                placeholder="sk-..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <small class="provider-field__hint" id="providerKeyHint"> Get one at platform.openai.com/api-keys </small>
-            </label>
-
-            <label class="provider-field">
-              <span>Model</span>
-              <select id="providerOpenAIModel">
-                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
-                <option value="gpt-4o">gpt-4o (best quality)</option>
-                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                <option value="gpt-4.1">gpt-4.1</option>
-                <option value="o4-mini">o4-mini (reasoning)</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="provider-actions">
-            <button id="providerSave" class="btn btn-primary">
-              <i class="fa fa-save"></i>
-              Save
+        <!-- First-scrape progress — pinned to the top so it's obvious during capture. -->
+        <div id="deepScrapeProgress" class="deep-scrape-progress deep-scrape-progress--top" style="display: none">
+          <div class="deep-scrape-progress__head">
+            <i class="fa fa-circle-notch fa-spin deep-scrape-progress__spinner" aria-hidden="true"></i>
+            <span id="deepScrapeProgressText" class="deep-scrape-progress__title"
+              >Setting up your workspace…</span
+            >
+            <button id="deepScrapeCancelBtn" type="button" class="deep-scrape-progress__cancel">
+              Cancel
             </button>
           </div>
-
-          <div id="providerStatus" class="status-message" style="display: none"></div>
+          <div class="deep-scrape-progress__bar"><div class="deep-scrape-progress__fill"></div></div>
+          <div class="deep-scrape-progress__steps">
+            <span data-phase="profile">Profile</span>
+            <span data-phase="posts">Posts</span>
+            <span data-phase="comments">Comments</span>
+          </div>
         </div>
 
-        <!-- Capture Hero: status + stats. First thing the user sees. -->
-        <section id="captureHero" class="capture-hero capture-hero--empty">
-          <div class="capture-hero__head">
-            <span id="captureHeroIcon" class="capture-hero__icon">○</span>
-            <div class="capture-hero__title-wrap">
-              <h2 id="captureHeroTitle" class="capture-hero__title">No profile captured yet</h2>
-              <div id="captureHeroSubtitle" class="capture-hero__subtitle">
-                Click below to scan your LinkedIn profile.
+        <!-- Quota-exhausted → switch to own key. Hidden unless free tier is spent. -->
+        <div id="byokBanner" class="byok-banner" style="display: none" role="alert">
+          <div class="byok-banner__text">
+            <strong>Free AI used up.</strong>
+            <span>Add your own OpenAI key to keep generating — unlimited.</span>
+          </div>
+          <button id="byokBannerSwitch" class="btn btn-primary">Use my own key</button>
+        </div>
+
+        <!-- AI free-tier balance stays visible; full provider controls live in Advanced. -->
+        <div id="providerQuota" class="provider-quota provider-quota--top" style="display: none"></div>
+
+        <!-- SSI Tracker — collapsible, collapsed by default, pinned near the top after tokens. -->
+        <details class="settings-section settings-section--collapsible">
+          <summary>
+            <i class="fa fa-chart-line"></i>
+            SSI Tracker
+          </summary>
+          <p class="settings-description">Daily snapshot of your LinkedIn Social Selling Index.</p>
+
+          <div id="ssiStatus">
+            <div id="ssiNoneState" class="ssi-none">
+              <i class="fa fa-info-circle"></i>
+              <span>No SSI captured yet.</span>
+            </div>
+            <div id="ssiCapturedState" class="ssi-captured" style="display: none">
+              <div class="ssi-total-row">
+                <span class="ssi-total" id="ssiTotal">—</span>
+                <span class="ssi-total-max">/ 100</span>
               </div>
+              <div class="ssi-rank-row">
+                Industry: <strong id="ssiIndustry">—</strong> · Network:
+                <strong id="ssiNetwork">—</strong>
+              </div>
+              <div class="ssi-donut-wrapper">
+                <canvas id="ssiDonutCanvas" width="160" height="160" aria-label="SSI components breakdown"></canvas>
+                <div class="ssi-donut-center">
+                  <div class="ssi-donut-center__total" id="ssiDonutTotal">—</div>
+                  <div class="ssi-donut-center__label">/ 100</div>
+                </div>
+              </div>
+              <div class="ssi-components-grid">
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Brand</span>
+                  <span class="ssi-component-value" id="ssiCompBrand">—</span>
+                </div>
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Find people</span>
+                  <span class="ssi-component-value" id="ssiCompFind">—</span>
+                </div>
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Engage</span>
+                  <span class="ssi-component-value" id="ssiCompEngage">—</span>
+                </div>
+                <div class="ssi-component">
+                  <span class="ssi-component-label">Build</span>
+                  <span class="ssi-component-value" id="ssiCompBuild">—</span>
+                </div>
+              </div>
+              <div class="ssi-meta">Captured <span id="ssiCapturedAt">—</span></div>
+              <div class="ssi-canvas-wrapper">
+                <canvas id="ssiTrendCanvas" height="120"></canvas>
+              </div>
+              <div id="ssiInsight" class="ssi-insight"></div>
+              <div id="ssiErrorChip" class="ssi-error-chip" style="display: none"></div>
             </div>
           </div>
-          <div id="captureHeroStats" class="capture-hero__stats" style="display: none">
-            <div class="capture-hero__stat">
-              <span id="statExp" class="capture-hero__stat-num">0</span>
-              <span class="capture-hero__stat-label">experience</span>
-            </div>
-            <div class="capture-hero__stat">
-              <span id="statEdu" class="capture-hero__stat-num">0</span>
-              <span class="capture-hero__stat-label">education</span>
-            </div>
-            <div class="capture-hero__stat">
-              <span id="statSkl" class="capture-hero__stat-num">0</span>
-              <span class="capture-hero__stat-label">skills</span>
-            </div>
-            <div class="capture-hero__stat">
-              <span id="statPst" class="capture-hero__stat-num">0</span>
-              <span class="capture-hero__stat-label">posts</span>
-            </div>
-            <div class="capture-hero__stat">
-              <span id="statCmt" class="capture-hero__stat-num">0</span>
-              <span class="capture-hero__stat-label">comments</span>
-            </div>
-          </div>
-          <div class="capture-hero__actions">
-            <button id="heroRefresh" class="btn btn-primary capture-hero__btn">
-              <i class="fa fa-camera"></i> Capture profile
+
+          <div class="ssi-actions">
+            <button id="ssiRefresh" class="btn btn-primary"><i class="fa fa-sync"></i> Refresh now</button>
+            <button id="ssiOpenPage" class="btn btn-secondary">
+              <i class="fa fa-external-link-alt"></i> Open SSI page
             </button>
-            <button id="heroCopyJson" class="btn btn-secondary capture-hero__btn" style="display: none">
-              <i class="fa fa-copy"></i> Copy JSON
-            </button>
           </div>
-          <div id="captureHeroMessage" class="capture-hero__message" style="display: none"></div>
-        </section>
+
+          <div id="ssiMessage" class="status-message" style="display: none"></div>
+        </details>
 
         <!-- Profile Improvement Plan: 6 essentials + 4 activity signals + AI rewrites -->
         <details id="profileAudit" class="profile-audit" open style="display: none">
@@ -182,72 +185,6 @@
           </details>
         </details>
 
-        <!-- SSI Tracker (moved up for visual completion indicator after capture) -->
-        <div class="settings-section">
-          <h3>
-            <i class="fa fa-chart-line"></i>
-            SSI Tracker
-          </h3>
-          <p class="settings-description">Daily snapshot of your LinkedIn Social Selling Index.</p>
-
-          <div id="ssiStatus">
-            <div id="ssiNoneState" class="ssi-none">
-              <i class="fa fa-info-circle"></i>
-              <span>No SSI captured yet.</span>
-            </div>
-            <div id="ssiCapturedState" class="ssi-captured" style="display: none">
-              <div class="ssi-total-row">
-                <span class="ssi-total" id="ssiTotal">—</span>
-                <span class="ssi-total-max">/ 100</span>
-              </div>
-              <div class="ssi-rank-row">
-                Industry: <strong id="ssiIndustry">—</strong> · Network:
-                <strong id="ssiNetwork">—</strong>
-              </div>
-              <div class="ssi-donut-wrapper">
-                <canvas id="ssiDonutCanvas" width="160" height="160" aria-label="SSI components breakdown"></canvas>
-                <div class="ssi-donut-center">
-                  <div class="ssi-donut-center__total" id="ssiDonutTotal">—</div>
-                  <div class="ssi-donut-center__label">/ 100</div>
-                </div>
-              </div>
-              <div class="ssi-components-grid">
-                <div class="ssi-component">
-                  <span class="ssi-component-label">Brand</span>
-                  <span class="ssi-component-value" id="ssiCompBrand">—</span>
-                </div>
-                <div class="ssi-component">
-                  <span class="ssi-component-label">Find people</span>
-                  <span class="ssi-component-value" id="ssiCompFind">—</span>
-                </div>
-                <div class="ssi-component">
-                  <span class="ssi-component-label">Engage</span>
-                  <span class="ssi-component-value" id="ssiCompEngage">—</span>
-                </div>
-                <div class="ssi-component">
-                  <span class="ssi-component-label">Build</span>
-                  <span class="ssi-component-value" id="ssiCompBuild">—</span>
-                </div>
-              </div>
-              <div class="ssi-meta">Captured <span id="ssiCapturedAt">—</span></div>
-              <div class="ssi-canvas-wrapper">
-                <canvas id="ssiTrendCanvas" height="120"></canvas>
-              </div>
-              <div id="ssiInsight" class="ssi-insight"></div>
-              <div id="ssiErrorChip" class="ssi-error-chip" style="display: none"></div>
-            </div>
-          </div>
-
-          <div class="ssi-actions">
-            <button id="ssiRefresh" class="btn btn-primary"><i class="fa fa-sync"></i> Refresh now</button>
-            <button id="ssiOpenPage" class="btn btn-secondary">
-              <i class="fa fa-external-link-alt"></i> Open SSI page
-            </button>
-          </div>
-
-          <div id="ssiMessage" class="status-message" style="display: none"></div>
-        </div>
-
         <!-- Goals override (issue #18) — drives AI feed scoring + Analyze Feed -->
         <details class="settings-section settings-section--collapsible">
           <summary>
@@ -277,86 +214,99 @@
           <div id="goalsOverrideStatus" class="status-message" style="display: none"></div>
         </details>
 
-        <!-- Weekly cadence targets -->
-        <details class="settings-section settings-section--collapsible">
+
+        <!-- Advanced (developer) — hidden from end users. Markup stays so the
+             loaders/defaults (provider=managed free AI, auto profile capture,
+             AI params) keep working under the hood; flip display to re-expose. -->
+        <details class="settings-section settings-section--collapsible advanced-group" style="display: none">
           <summary>
-            <i class="fa fa-calendar-week"></i>
-            Weekly Targets
+            <i class="fa fa-wrench"></i>
+            Advanced
           </summary>
-          <p class="settings-description">How many actions per rolling 7d. Defaults follow LinkedIn's growth recipe.</p>
-          <div class="cadence-targets-form">
-            <label class="provider-field">
-              <span>Posts (Brand)</span>
-              <input type="number" id="targetBrand" min="0" max="20" value="1" />
+          <p class="settings-description">Developer settings — most people never need these.</p>
+
+          <!-- Profile capture (status + capture/refresh action) -->
+          <details class="settings-section settings-section--collapsible">
+            <summary>
+              <i class="fa fa-user-circle"></i>
+              Profile capture
+            </summary>
+            <section id="captureHero" class="capture-hero capture-hero--empty">
+              <div class="capture-hero__head">
+                <span id="captureHeroIcon" class="capture-hero__icon">○</span>
+                <div class="capture-hero__title-wrap">
+                  <h2 id="captureHeroTitle" class="capture-hero__title">No profile captured yet</h2>
+                  <div id="captureHeroSubtitle" class="capture-hero__subtitle">
+                    Capture your LinkedIn profile to power AI drafts + the audit.
+                  </div>
+                </div>
+              </div>
+              <div class="capture-hero__actions">
+                <button id="heroRefresh" class="btn btn-primary capture-hero__btn">
+                  <i class="fa fa-camera"></i> Capture profile
+                </button>
+              </div>
+              <div id="captureHeroMessage" class="capture-hero__message" style="display: none"></div>
+            </section>
+            <label class="profile-toggle-row" for="captureFullProfile">
+              <input type="checkbox" id="captureFullProfile" checked />
+              <span>Capture full LinkedIn profile and activity</span>
             </label>
+          </details>
+
+          <!-- AI Provider (managed free AI by default; switch to your own key here) -->
+          <details class="settings-section settings-section--collapsible">
+          <summary>
+            <i class="fa fa-key"></i>
+            AI Provider
+          </summary>
+          <p class="settings-description">
+            LinkMate includes free AI — no key needed. Switch to your own key for unlimited use. Keys are stored locally in this browser only, never synced.
+          </p>
+          <div class="provider-openai-config">
             <label class="provider-field">
-              <span>Invites (Finding)</span>
-              <input type="number" id="targetFinding" min="0" max="50" value="5" />
+              <span>Provider</span>
+              <select id="providerMode">
+                <option value="managed">LinkMate Free AI (no key)</option>
+                <option value="openai">My own OpenAI key (unlimited)</option>
+                <option value="groq">My own Groq key (unlimited)</option>
+              </select>
             </label>
-            <label class="provider-field">
-              <span>Comments (Engaging)</span>
-              <input type="number" id="targetEngaging" min="0" max="30" value="3" />
+
+            <label class="provider-field" id="providerKeyField">
+              <span>API Key</span>
+              <input
+                type="password"
+                id="providerOpenAIKey"
+                placeholder="sk-..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <small class="provider-field__hint" id="providerKeyHint"> Get one at platform.openai.com/api-keys </small>
             </label>
+
             <label class="provider-field">
-              <span>Replies (Building)</span>
-              <input type="number" id="targetBuilding" min="0" max="20" value="2" />
+              <span>Model</span>
+              <select id="providerOpenAIModel">
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                <option value="gpt-4o">gpt-4o (best quality)</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="o4-mini">o4-mini (reasoning)</option>
+              </select>
             </label>
           </div>
           <div class="provider-actions">
-            <button id="cadenceSaveBtn" class="btn btn-primary"><i class="fa fa-save"></i> Save targets</button>
-          </div>
-          <div id="cadenceStatus" class="status-message" style="display: none"></div>
-        </details>
-
-        <!-- Profile Context (legacy AI summary view — also holds capture-full toggle) -->
-        <details class="settings-section settings-section--collapsible">
-          <summary>
-            <i class="fa fa-user-circle"></i>
-            Profile Context
-          </summary>
-          <p class="settings-description">
-            Capture your LinkedIn profile so AI drafts read in your voice. Open your own profile page, then click
-            Capture below.
-          </p>
-
-          <div id="profileStatus" class="profile-status">
-            <div id="profileNoneState" class="profile-none">
-              <i class="fa fa-info-circle"></i>
-              <span>No profile captured yet.</span>
-            </div>
-            <div id="profileCapturedState" class="profile-captured" style="display: none">
-              <div class="profile-row"><strong id="profileFullName">-</strong></div>
-              <div class="profile-row profile-headline" id="profileHeadline">-</div>
-              <div class="profile-row profile-positioning" id="profilePositioning">-</div>
-              <div class="profile-meta">
-                Captured <span id="profileCapturedAt">-</span> · <span id="profileSkillsCount">0</span> skills
-                <span id="profileStaleChip" class="profile-stale-chip" style="display: none">stale</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="profile-actions">
-            <button id="captureProfile" class="btn btn-primary">
-              <i class="fa fa-camera"></i>
-              Capture Profile
+            <button id="providerSave" class="btn btn-primary">
+              <i class="fa fa-save"></i>
+              Save
             </button>
           </div>
+          <div id="providerStatus" class="status-message" style="display: none"></div>
+          </details>
 
-          <label class="profile-toggle-row" for="captureFullProfile">
-            <input type="checkbox" id="captureFullProfile" checked />
-            <span>Capture full LinkedIn profile and activity</span>
-          </label>
-
-          <div id="deepScrapeProgress" class="deep-scrape-progress" style="display: none">
-            <span id="deepScrapeProgressText">Scraping…</span>
-            <button id="deepScrapeCancelBtn" type="button" class="btn btn-secondary btn-sm">Cancel</button>
-          </div>
-
-          <div id="profileMessage" class="status-message" style="display: none"></div>
-        </details>
-
-        <!-- AI Generation Parameters -->
-        <details class="settings-section settings-section--collapsible">
+          <!-- AI Generation Parameters -->
+          <details class="settings-section settings-section--collapsible">
           <summary>
             <i class="fa fa-sliders-h"></i>
             AI Generation Parameters
@@ -465,6 +415,7 @@
 
             <div id="settingsStatus" class="status-message" style="display: none"></div>
           </div>
+          </details>
         </details>
       </div>
     </div>

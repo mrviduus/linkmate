@@ -488,18 +488,23 @@ export function parseUserProfile(
 // Recent-activity parsers — operate on /in/<handle>/recent-activity/{all,comments}/
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Deterministic djb2 hash → stable fallback id from post/comment text. */
+function hashString(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 function extractUrn(el: Element): string {
   const direct = el.getAttribute('data-urn') ?? el.getAttribute('data-id');
   if (direct) return direct;
   const child = el.querySelector('[data-urn], [data-id]');
-  if (child) {
-    return (
-      child.getAttribute('data-urn') ??
-      child.getAttribute('data-id') ??
-      `gen:${Math.random().toString(36).slice(2, 10)}`
-    );
-  }
-  return `gen:${Math.random().toString(36).slice(2, 10)}`;
+  const childUrn = child?.getAttribute('data-urn') ?? child?.getAttribute('data-id');
+  if (childUrn) return childUrn;
+  // No stable URN — derive a DETERMINISTIC id from the element's text so the
+  // same item yields the same id across captures. Random ids defeated the
+  // dedup check and made mergeById accumulate duplicates on every recapture.
+  return `gen:${hashString((el.textContent ?? '').trim().slice(0, 200))}`;
 }
 
 function parseEngagement(
@@ -704,11 +709,17 @@ export function parseRecentComments(
       if (normalizedSelfHandle && authorHandle.toLowerCase() !== normalizedSelfHandle.toLowerCase())
         continue;
 
-      const id = art.getAttribute('data-id') ?? art.getAttribute('data-urn') ?? '';
-      if (!id || seenIds.has(id)) continue;
-
       const text = pickLongestDirLtr(art);
       if (!text) continue;
+
+      // Prefer the real comment URN; if LinkedIn omits it, derive a DETERMINISTIC
+      // id from author+text instead of dropping the comment. Dropping silently
+      // undercounted comments30d (the activity signal the user relies on).
+      const id =
+        art.getAttribute('data-id') ??
+        art.getAttribute('data-urn') ??
+        `gen:comment:${hashString((originalAuthor + '|' + text).slice(0, 200))}`;
+      if (seenIds.has(id)) continue;
 
       seenIds.add(id);
       out.push({

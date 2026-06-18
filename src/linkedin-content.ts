@@ -5,6 +5,7 @@ import { FeedPostOverlay } from './feed-post-overlay';
 import { scanPostForOutcome } from './outcome-scanner';
 import type { AiScoreFeedResult, AiScoredPostDTO } from './feed-post-overlay';
 import type { ParsedPost } from './storage-schema';
+import { STORAGE_KEYS, getPaused } from './storage-schema';
 
 console.log('LinkMate LinkedIn content script loaded');
 
@@ -30,6 +31,8 @@ class LinkedInLinkMate {
   private feedPostOverlay: FeedPostOverlay | null = null;
   private currentPath: string = '';
   private routePollIntervalId: ReturnType<typeof setInterval> | null = null;
+  private paused = false;
+  private lastDismissPing = 0;
 
   constructor() {
     this.showComplianceWarning();
@@ -38,6 +41,14 @@ class LinkedInLinkMate {
 
   private showComplianceWarning(): void {
     // T130 — extended for SSI Growth Mode (Phase B, US1).
+    // Print once per tab: the content script re-inits across LinkedIn's frames
+    // / reloads, which otherwise floods the console with this same notice.
+    try {
+      if (sessionStorage.getItem('linkmate.complianceWarned') === '1') return;
+      sessionStorage.setItem('linkmate.complianceWarned', '1');
+    } catch {
+      /* sessionStorage unavailable (sandboxed frame) — fall through and warn */
+    }
     console.warn(
       '⚠️ LinkMate Extension Notice (SSI Growth Mode):\n' +
         '• AI-drafted comments are SUGGESTIONS only — you must edit, paste, and submit them yourself.\n' +
@@ -49,13 +60,21 @@ class LinkedInLinkMate {
   }
 
   /**
-   * Mount the per-post inline relevance overlay on /feed/. Each visible post
-   * gets a chip showing the AI score. Drafts still happen via the in-post
-   * Reply button — handled separately, and doesn't depend on this overlay.
+   * Mount the per-post inline relevance overlay on eligible surfaces (the feed
+   * and profile/recent-activity pages). Each visible post gets a chip showing
+   * the AI score. Drafts still happen via the in-post Reply button — handled
+   * separately, and doesn't depend on this overlay.
    */
-  private mountEngagementQueueIfOnFeed(): void {
-    const onFeed = location.pathname.startsWith('/feed');
-    if (onFeed && !this.feedPostOverlay) {
+  private async mountOverlayIfEligible(): Promise<void> {
+    // Score posts on the feed AND on profile pages (/in/<handle>/…, incl.
+    // recent-activity) — that's where the user's own posts live, so they get
+    // chips too. The AI path doesn't skip own posts; only the surface gated it.
+    const onScoredSurface =
+      location.pathname.startsWith('/feed') || /^\/in\//.test(location.pathname);
+    // Global pause is the master switch. Mount only on a scored surface AND not
+    // paused; otherwise tear the overlay down.
+    const paused = await getPaused();
+    if (onScoredSurface && !paused && !this.feedPostOverlay) {
       this.feedPostOverlay = new FeedPostOverlay({
         aiScoreFeed: async (posts: ParsedPost[]): Promise<AiScoreFeedResult> => {
           const resp = await this.sendQueueMessage<{
@@ -74,7 +93,7 @@ class LinkedInLinkMate {
         },
       });
       this.feedPostOverlay.mount();
-    } else if (!onFeed && this.feedPostOverlay) {
+    } else if ((!onScoredSurface || paused) && this.feedPostOverlay) {
       this.feedPostOverlay.unmount();
       this.feedPostOverlay = null;
     }
@@ -108,7 +127,7 @@ class LinkedInLinkMate {
     const checkAndRemount = () => {
       if (location.pathname !== this.currentPath) {
         this.currentPath = location.pathname;
-        this.mountEngagementQueueIfOnFeed();
+        void this.mountOverlayIfEligible();
       }
     };
 
@@ -151,25 +170,26 @@ class LinkedInLinkMate {
   private init(): void {
     // Initialize when DOM is ready
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => this.setup());
+      document.addEventListener('DOMContentLoaded', () => void this.setup());
     } else {
-      this.setup();
+      void this.setup();
     }
   }
 
-  private setup(): void {
+  private async setup(): Promise<void> {
     // Notify background that LinkedIn content script is ready
     this.notifyBackgroundReady();
 
-    // Start observing for posts
-    this.observePosts();
-
-    // Process existing posts
-    this.processVisiblePosts();
-
-    // T123 — mount Engagement Queue if currently on /feed/ + watch SPA route changes.
-    this.mountEngagementQueueIfOnFeed();
+    this.paused = await getPaused();
     this.watchRouteChanges();
+    this.watchForPanelDismiss();
+
+    // Global pause is the master switch — flip all on-page features live.
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && STORAGE_KEYS.paused in changes) {
+        this.applyPaused(Boolean(changes[STORAGE_KEYS.paused].newValue));
+      }
+    });
 
     // Listen for messages from background/popup
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -186,6 +206,74 @@ class LinkedInLinkMate {
         port.postMessage({ contents: document.body.innerText });
       });
     });
+
+    // Only spin up the feature machinery when not paused.
+    if (!this.paused) this.activateFeatures();
+  }
+
+  /** Start post detection + the feed overlay. Idempotent-ish via observePosts guard. */
+  private activateFeatures(): void {
+    this.observePosts();
+    this.processVisiblePosts();
+    void this.mountOverlayIfEligible();
+  }
+
+  /** Master switch handler: pause tears every injected UI down; resume rebuilds it. */
+  private applyPaused(paused: boolean): void {
+    if (paused === this.paused) return;
+    this.paused = paused;
+    if (paused) {
+      this.observer?.disconnect();
+      this.observer = null;
+      this.feedPostOverlay?.unmount();
+      this.feedPostOverlay = null;
+      this.removeInjectedUi();
+      this.posts.clear();
+    } else {
+      this.activateFeatures();
+    }
+  }
+
+  /** Remove every LinkMate element we injected into the page (reply buttons,
+   *  panels, toasts). Chips + FAB are handled by FeedPostOverlay.unmount(). */
+  private removeInjectedUi(): void {
+    // Each AI-reply button sits in a wrapper created solely for it.
+    document.querySelectorAll('.linkmate-generate-btn').forEach((b) => b.parentElement?.remove());
+    document.querySelectorAll('.linkmate-panel, .linkmate-toast').forEach((el) => el.remove());
+  }
+
+  /**
+   * When the user starts working with the LinkedIn page (a real click that
+   * isn't on LinkMate's own injected UI), ping the side panel so it fades out.
+   * Throttled; harmless no-op when the panel isn't open. The panel ignores
+   * pings within its open grace window so the gesture that opened it doesn't
+   * immediately close it.
+   */
+  private watchForPanelDismiss(): void {
+    document.addEventListener(
+      'click',
+      (e) => {
+        const target = e.target as HTMLElement | null;
+        if (
+          target?.closest?.(
+            '.linkmate-fab-container, .linkmate-generate-btn, .linkmate-panel, .linkmate-post-chip, .linkmate-toast'
+          )
+        ) {
+          return; // clicks on our own UI shouldn't dismiss the panel
+        }
+        const now = Date.now();
+        if (now - this.lastDismissPing < 800) return; // throttle bursts
+        this.lastDismissPing = now;
+        try {
+          chrome.runtime.sendMessage({ action: 'sidepanel.dismiss' }, () => {
+            void chrome.runtime.lastError; // swallow "no receiver" when panel is closed
+          });
+        } catch {
+          /* extension context reloaded — ignore */
+        }
+      },
+      true
+    );
   }
 
   private observePosts(): void {
@@ -486,23 +574,24 @@ class LinkedInLinkMate {
   /**
    * v0.5.8 — Find the action bar (Like/Comment/Repost/Send toolbar) inside a post.
    *
-   * REAL DOM findings — verified via Chrome MCP on live linkedin.com/feed/:
-   *   - Like button:    aria-label="Reaction button state: <state>"  +  text="Like"
+   * REAL DOM findings — re-verified via Chrome MCP on live linkedin.com/feed/
+   * after the 2026 SDUI redesign:
+   *   - Like button:    aria-label="Reaction button state: <state>"  +  text=COUNT ("40")
    *   - Reactions menu: aria-label="Open reactions menu"             +  text=""
-   *   - Comment button: aria-label=NULL                              +  text="Comment"  ← !
-   *   - Repost button:  aria-label=NULL                              +  text="Repost"
+   *   - Comment button: aria-label="Comment"                         +  text=COUNT ("63")
+   *   - Repost button:  aria-label="Repost"                          +  text=COUNT ("1")
    *
-   * That's why v0.5.7's `aria-label*="omment"` matched only kebab menus on
-   * existing comments ("View more options for X's comment"), NOT the actual
-   * Comment action button — Comment has NO aria-label in 2026, only inner text.
+   * Note the flip from earlier builds: Comment/Repost now DO carry aria-labels,
+   * and the buttons' inner text is the engagement count, not the word
+   * "Comment"/"Repost". So a textContent==="Comment" match no longer works —
+   * we anchor on aria-labels instead.
    *
    * Strategy:
    *   1. Anchor on the Reaction button via its stable a11y label
    *      `aria-label^="Reaction button state"` (LinkedIn ships per-state labels
    *      so screen readers can announce "Like", "Celebrate", etc.)
    *   2. Walk up to the parent containing 3-8 sibling buttons (action bar)
-   *   3. Fallback: find a button whose textContent === "Comment" (exact),
-   *      walk up the same way.
+   *   3. Fallback: anchor on the Comment button via aria-label="Comment".
    */
   private findActionContainer(post: HTMLElement): Element | null {
     // Legacy class selectors — cheap to check, harmless if absent
@@ -540,15 +629,13 @@ class LinkedInLinkMate {
       if (bar) return bar;
     }
 
-    // Strategy B: button with exact textContent === "Comment" (Comment button
-    // has no aria-label in 2026 LinkedIn).
-    const allButtons = post.querySelectorAll('button');
-    for (const btn of Array.from(allButtons)) {
-      if ((btn.textContent ?? '').trim() === 'Comment') {
-        const bar = walkUpToActionBar(btn as HTMLElement);
-        if (bar) return bar;
-        return btn.parentElement;
-      }
+    // Strategy B: anchor on the Comment button. 2026 SDUI gives it
+    // aria-label="Comment" (its text is the count now, not the word).
+    const commentBtn = post.querySelector('button[aria-label="Comment" i]');
+    if (commentBtn) {
+      const bar = walkUpToActionBar(commentBtn as HTMLElement);
+      if (bar) return bar;
+      return commentBtn.parentElement;
     }
 
     return null;
@@ -570,7 +657,7 @@ class LinkedInLinkMate {
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
       </svg>
       <span class="artdeco-button__text">
-        <span class="artdeco-button__text social-action-button__text linkmate-button-text">Reply</span>
+        <span class="artdeco-button__text social-action-button__text linkmate-button-text">AI reply</span>
       </span>
     `;
 
@@ -989,52 +1076,84 @@ class LinkedInLinkMate {
       });
   }
 
-  private insertIntoCommentBox(post: LinkedInPost, reply: string): void {
-    // First, try to find and click the comment button to open the comment box
-    const commentButton = post.element.querySelector(
-      'button[aria-label*="Comment"], button[aria-label*="comment"]'
-    ) as HTMLButtonElement;
+  /**
+   * Find the Comment action button. In 2026 LinkedIn this button has NO
+   * aria-label — only inner text "Comment" (same finding as findActionContainer).
+   * The old `aria-label*="Comment"` selector matched nothing here, which is why
+   * Insert reported "Could not find comment button". Fall back to legacy
+   * aria-label forms, but exclude per-comment kebab menus ("View more options…").
+   */
+  private findCommentButton(post: HTMLElement): HTMLButtonElement | null {
+    const buttons = Array.from(post.querySelectorAll('button'));
+    const byText = buttons.find((b) => (b.textContent ?? '').trim() === 'Comment');
+    if (byText) return byText as HTMLButtonElement;
+    const byAria = buttons.find((b) => {
+      const label = (b.getAttribute('aria-label') ?? '').toLowerCase();
+      return label.includes('comment') && !/(more|options|view|delete|edit|report)/.test(label);
+    });
+    return (byAria as HTMLButtonElement) ?? null;
+  }
 
-    if (commentButton) {
-      commentButton.click();
-
-      // Wait for comment box to appear and then insert text
-      setTimeout(() => {
-        const commentSelectors = [
-          '.ql-editor[contenteditable="true"]',
-          '[contenteditable="true"][role="textbox"]',
-          'textarea[placeholder*="comment"]',
-          'textarea[placeholder*="Comment"]',
-          '.mentions-texteditor__contenteditable',
-        ];
-
-        let commentBox: HTMLElement | null = null;
-        for (const selector of commentSelectors) {
-          commentBox = post.element.querySelector(selector) as HTMLElement;
-          if (commentBox) break;
-        }
-
-        if (commentBox) {
-          if (commentBox.tagName === 'TEXTAREA') {
-            (commentBox as HTMLTextAreaElement).value = reply;
-            commentBox.dispatchEvent(new Event('input', { bubbles: true }));
-            commentBox.dispatchEvent(new Event('change', { bubbles: true }));
-          } else {
-            commentBox.textContent = reply;
-            commentBox.dispatchEvent(new Event('input', { bubbles: true }));
-            commentBox.dispatchEvent(new Event('blur', { bubbles: true }));
-          }
-
-          // Focus the comment box
-          commentBox.focus();
-          this.showToast('Reply inserted! You can edit before posting.', 'success');
-        } else {
-          this.showToast('Could not find comment box. Try clicking comment first.', 'error');
-        }
-      }, 800); // Wait a bit longer for LinkedIn's UI to load
-    } else {
-      this.showToast('Could not find comment button', 'error');
+  private findCommentBox(post: HTMLElement): HTMLElement | null {
+    const commentSelectors = [
+      '.ql-editor[contenteditable="true"]',
+      '[contenteditable="true"][role="textbox"]',
+      '.comments-comment-box__form [contenteditable="true"]',
+      '.mentions-texteditor__contenteditable',
+      'textarea[placeholder*="omment" i]',
+    ];
+    for (const selector of commentSelectors) {
+      const el = post.querySelector(selector) as HTMLElement | null;
+      if (el) return el;
     }
+    return null;
+  }
+
+  private fillCommentBox(box: HTMLElement, reply: string): void {
+    if (box.tagName === 'TEXTAREA') {
+      (box as HTMLTextAreaElement).value = reply;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      box.focus();
+      box.textContent = reply;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      box.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
+    box.focus();
+    this.showToast('Reply inserted! You can edit before posting.', 'success');
+  }
+
+  private insertIntoCommentBox(post: LinkedInPost, reply: string): void {
+    // If the comment box is already open, fill it directly — re-clicking the
+    // Comment button would toggle it closed.
+    const existing = this.findCommentBox(post.element);
+    if (existing) {
+      this.fillCommentBox(existing, reply);
+      return;
+    }
+
+    const commentButton = this.findCommentButton(post.element);
+    if (!commentButton) {
+      this.showToast('Could not find comment button', 'error');
+      return;
+    }
+    commentButton.click();
+
+    // LinkedIn mounts the editor asynchronously — poll for it instead of a
+    // single fixed timeout that raced on slower loads.
+    let tries = 0;
+    const maxTries = 20; // ~3s at 150ms
+    const poll = window.setInterval(() => {
+      const box = this.findCommentBox(post.element);
+      if (box) {
+        window.clearInterval(poll);
+        this.fillCommentBox(box, reply);
+      } else if (++tries >= maxTries) {
+        window.clearInterval(poll);
+        this.showToast('Could not find comment box. Try clicking comment first.', 'error');
+      }
+    }, 150);
   }
 
   private showToast(message: string, type: 'success' | 'error' = 'success'): void {

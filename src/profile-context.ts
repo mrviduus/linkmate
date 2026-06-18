@@ -116,6 +116,19 @@ export type CaptureProgress =
 export interface CaptureOptions {
   /** Optional progress reporter; called as the capture moves through substeps. */
   onProgress?: (step: CaptureProgress) => void;
+  /**
+   * Scrape the user's CURRENT active tab (navigate it to the profile) instead of
+   * opening a dedicated capture tab. Keeps everything in ONE tab — no second tab
+   * appears. The tab is NOT closed afterwards (it's the user's). Trade-off: data
+   * can be slightly less complete than a clean dedicated tab.
+   */
+  useActiveTab?: boolean;
+  /**
+   * Skip the <24h IDB cache short-circuit and always do a fresh DOM grab. Set by
+   * the manual "Refresh capture" button so the user can force-update on demand;
+   * auto/onboarding captures leave it false to keep the cache fast-path.
+   */
+  force?: boolean;
 }
 
 const HIDDEN_PROFILE_TAB_URL = 'https://www.linkedin.com/in/me/';
@@ -199,6 +212,52 @@ async function closeHiddenTab(tabId: number): Promise<void> {
   }
 }
 
+/**
+ * Single-tab capture: navigate the user's CURRENT active tab to /in/me and
+ * resolve with its tabId once LinkedIn lands on a real /in/<handle> URL. A
+ * top-level `tabs.update({url})` is a full document navigation (not an SPA
+ * route change), so it loads clean — no extra tab, the caller must NOT close it.
+ */
+async function navigateActiveTabToProfile(): Promise<number> {
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const tabId = active?.id;
+  if (tabId === undefined) {
+    throw new Error('No active tab available to capture from.');
+  }
+  await chrome.tabs.update(tabId, { url: HIDDEN_PROFILE_TAB_URL, active: true });
+
+  let listener: ((id: number, info: chrome.tabs.TabChangeInfo, t: chrome.tabs.Tab) => void) | null =
+    null;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      if (listener) chrome.tabs.onUpdated.removeListener(listener);
+      listener = null;
+    };
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Profile tab did not load within ${HIDDEN_TAB_LOAD_TIMEOUT_MS / 1000}s`));
+    }, HIDDEN_TAB_LOAD_TIMEOUT_MS);
+    listener = (id, info, t) => {
+      if (id !== tabId) return;
+      const u = info.url ?? t.url ?? '';
+      if (u && LOGIN_URL_FRAGMENTS.some((f) => u.includes(f))) {
+        clearTimeout(timeoutId);
+        cleanup();
+        reject(new Error('not-signed-in'));
+        return;
+      }
+      const stillOnAlias = /\/in\/me\/?(\?.*)?$/i.test(t.url ?? '');
+      if (info.status === 'complete' && PROFILE_URL_PATTERN.test(t.url ?? '') && !stillOnAlias) {
+        clearTimeout(timeoutId);
+        cleanup();
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+  return tabId;
+}
+
 interface ProfileCaptureResponse {
   ok: boolean;
   positioningSummary?: string;
@@ -215,7 +274,7 @@ export class ProfileContextService {
     // some service-worker contexts) we just proceed with the regular flow.
     progress('cache-check');
     const fullProfileEnabled = await getCaptureFullProfile();
-    if (fullProfileEnabled) {
+    if (fullProfileEnabled && !opts.force) {
       try {
         const cached = await getUserProfile();
         if (cached && isFresh(cached)) {
@@ -257,10 +316,16 @@ export class ProfileContextService {
     }
     try {
       progress('opening-tab');
-      hiddenTabId = await openHiddenProfileTab();
+      if (opts.useActiveTab) {
+        // Single-tab mode: reuse the user's current tab. hiddenTabId stays
+        // undefined so the finally never closes it.
+        tabId = await navigateActiveTabToProfile();
+      } else {
+        hiddenTabId = await openHiddenProfileTab();
+        tabId = hiddenTabId;
+      }
       progress('waiting-profile-load');
-      const t = await chrome.tabs.get(hiddenTabId);
-      tabId = hiddenTabId;
+      const t = await chrome.tabs.get(tabId);
       url = t.url ?? '';
     } catch (err) {
       const message = String(err instanceof Error ? err.message : err);
@@ -314,7 +379,10 @@ export class ProfileContextService {
       // recent-activity scrape can poll them. The main-profile inject below
       // intentionally does NOT use deep/cancel/progress — byte-for-byte v0.4.0.
       await setDeepScrapeCancel(false);
-      await setDeepScrapeProgress(null);
+      // Show the "profile" phase immediately (instead of clearing) so the popup
+      // bar is visible during the main-profile scrape too — otherwise there's a
+      // dead 1-2s gap before the first posts-phase progress event.
+      await setDeepScrapeProgress({ phase: 'profile', iter: 0, items: 0, height: 0, ts: Date.now() });
       let html: string | null = null;
       try {
         // INTENTIONAL: this inject is byte-for-byte the v0.4.0 main-profile
@@ -517,13 +585,17 @@ export class ProfileContextService {
       let providerKeyConfigured = true;
       try {
         const cfg = await getProviderConfig();
-        providerKeyConfigured = Boolean(cfg.openai?.apiKey?.trim());
+        // Managed mode needs no key; BYOK needs its key. Either enables the call.
+        providerKeyConfigured =
+          cfg.mode === 'managed' ||
+          Boolean(cfg.openai?.apiKey?.trim()) ||
+          Boolean(cfg.groq?.apiKey?.trim());
       } catch {
-        /* read failure → assume no key, skip the call */
+        /* read failure → assume no provider, skip the call */
         providerKeyConfigured = false;
       }
       if (!providerKeyConfigured) {
-        summaryError = 'No OpenAI API key configured — positioning summary skipped.';
+        summaryError = 'No AI provider configured — positioning summary skipped.';
       } else {
         try {
           const response = (await chrome.runtime.sendMessage({

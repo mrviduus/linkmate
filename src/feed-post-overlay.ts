@@ -3,7 +3,7 @@
  *
  * For EVERY post visible in the feed, injects a floating chip in the top-right
  * showing:
- *   - 🤖 <ai>/10 — batched OpenAI call, lazy, cached
+ *   - 🎯 <ai>/10 — batched OpenAI call, lazy, cached
  *   - Why for you — tooltip with the AI narrative
  *
  * Reuses the `queue.aiScoreFeed` background handler via deps, so it benefits
@@ -73,6 +73,7 @@ export class FeedPostOverlay {
   private fabContainer: HTMLElement | null = null;
   private focusBtn: HTMLButtonElement | null = null;
   private skipBtn: HTMLButtonElement | null = null;
+  private collapseBtn: HTMLButtonElement | null = null;
   private skippedPostIds = new Set<string>();
   private lastFocusedPostId: string | null = null;
   private rescanTimer: ReturnType<typeof setTimeout> | null = null;
@@ -200,8 +201,26 @@ export class FeedPostOverlay {
     }, effectiveDelay);
   }
 
+  /**
+   * True once the extension has been reloaded/updated under us — `chrome.runtime`
+   * loses its `id`. Any further runtime call from this orphaned content script
+   * resolves resources to `chrome-extension://invalid/` and floods the console
+   * with ERR_FAILED. We tear ourselves down on the first detection instead.
+   */
+  private contextInvalidated(): boolean {
+    try {
+      return !chrome.runtime?.id;
+    } catch {
+      return true;
+    }
+  }
+
   private async scanAndScore(): Promise<void> {
     if (this.inFlight) return;
+    if (this.contextInvalidated()) {
+      this.unmount();
+      return;
+    }
     // Phase 1 — inject placeholder chips for every visible post we don't know about.
     const roots = findFeedPostRoots();
     let injectedNew = false;
@@ -315,14 +334,14 @@ export class FeedPostOverlay {
     const chip = document.createElement('div');
     chip.className = CHIP_CLASS;
     chip.setAttribute('data-post-id', id);
-    // Use both `title` (a11y, screen readers, slow native tooltip) AND
-    // `data-tooltip` (used by our CSS ::after pseudo-tooltip that appears
-    // instantly on hover — see linkedin-styles.css).
+    // `data-tooltip` drives our styled CSS ::after tooltip; `aria-label` covers
+    // screen readers. We deliberately avoid `title` — it adds a SECOND native
+    // browser tooltip on hover (double tooltip bug).
     const initialAiTip = this.aiUnavailable
       ? 'AI score unavailable — check OpenAI key in Settings'
       : 'AI relevance — uses OpenAI + your profile + goals';
     chip.innerHTML = `
-      <span class="${CHIP_CLASS}__ai" data-state="${this.aiUnavailable ? 'na' : 'loading'}" data-tooltip="${esc(initialAiTip)}" title="${esc(initialAiTip)}">${this.aiUnavailable ? '🤖 —' : '🤖 …'}</span>
+      <span class="${CHIP_CLASS}__ai" data-state="${this.aiUnavailable ? 'na' : 'loading'}" data-tooltip="${esc(initialAiTip)}" aria-label="${esc(initialAiTip)}">${this.aiUnavailable ? '🎯 —' : '🎯 …'}</span>
     `;
     element.appendChild(chip);
   }
@@ -335,9 +354,9 @@ export class FeedPostOverlay {
       const ai = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__ai`);
       if (!ai) continue;
       ai.setAttribute('data-state', state);
-      ai.textContent = '🤖 —';
+      ai.textContent = '🎯 —';
       if (title) {
-        ai.setAttribute('title', title);
+        ai.setAttribute('aria-label', title);
         ai.setAttribute('data-tooltip', title);
       }
     }
@@ -350,11 +369,12 @@ export class FeedPostOverlay {
       const span = chip.querySelector<HTMLElement>(`.${CHIP_CLASS}__ai`);
       if (!span) continue;
       span.setAttribute('data-state', 'ready');
-      span.textContent = `🤖 ${r.aiScore}/10`;
-      if (r.whyForYou) {
-        span.setAttribute('title', r.whyForYou);
-        span.setAttribute('data-tooltip', r.whyForYou);
-      }
+      span.textContent = `🎯 ${r.aiScore}/10`;
+      // Prefer the AI's reason; otherwise a plain explainer so the score isn't
+      // a cryptic number floating on the post.
+      const tip = r.whyForYou || `Relevance ${r.aiScore}/10 — higher = more worth engaging`;
+      span.setAttribute('aria-label', tip);
+      span.setAttribute('data-tooltip', tip);
     }
   }
 
@@ -362,8 +382,8 @@ export class FeedPostOverlay {
     const tip = 'AI score unavailable — check OpenAI key in Settings';
     document.querySelectorAll<HTMLElement>(`.${CHIP_CLASS}__ai`).forEach((el) => {
       el.setAttribute('data-state', 'na');
-      el.textContent = '🤖 —';
-      el.setAttribute('title', tip);
+      el.textContent = '🎯 —';
+      el.setAttribute('aria-label', tip);
       el.setAttribute('data-tooltip', tip);
     });
   }
@@ -429,14 +449,28 @@ export class FeedPostOverlay {
     `;
     skipBtn.addEventListener('click', () => this.handleSkipClick());
 
+    // Collapse toggle — shrinks the bar to a small puck so it never nags.
+    const collapseBtn = document.createElement('button');
+    collapseBtn.className = 'linkmate-fab-collapse';
+    collapseBtn.type = 'button';
+    collapseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleFabCollapsed();
+    });
+
     container.appendChild(dragHandle);
     container.appendChild(focusBtn);
     container.appendChild(skipBtn);
+    container.appendChild(collapseBtn);
     document.body.appendChild(container);
 
     this.fabContainer = container;
     this.focusBtn = focusBtn;
     this.skipBtn = skipBtn;
+    this.collapseBtn = collapseBtn;
+
+    // Restore collapsed state (persisted across reloads).
+    this.applyFabCollapsed(localStorage.getItem('linkmate-fab-collapsed') === '1');
 
     // Draggable functionality
     let isDragging = false;
@@ -521,6 +555,24 @@ export class FeedPostOverlay {
 
     dragHandle.addEventListener('mousedown', onMouseDown);
     dragHandle.addEventListener('touchstart', onTouchStart, { passive: true });
+  }
+
+  private toggleFabCollapsed(): void {
+    const next = !this.fabContainer?.classList.contains('linkmate-fab--collapsed');
+    this.applyFabCollapsed(next);
+    localStorage.setItem('linkmate-fab-collapsed', next ? '1' : '0');
+  }
+
+  /** Collapsed = a small puck (just the toggle); expanded = the full bar. */
+  private applyFabCollapsed(collapsed: boolean): void {
+    if (!this.fabContainer || !this.collapseBtn) return;
+    this.fabContainer.classList.toggle('linkmate-fab--collapsed', collapsed);
+    this.collapseBtn.setAttribute('aria-label', collapsed ? 'Expand LinkMate' : 'Collapse');
+    this.collapseBtn.title = collapsed ? 'Expand LinkMate' : 'Collapse';
+    // Bolt when collapsed (invites expand), chevron-right when expanded.
+    this.collapseBtn.innerHTML = collapsed
+      ? '<span aria-hidden="true">⚡</span>'
+      : `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>`;
   }
 
   private handleSkipClick(): void {
@@ -638,12 +690,31 @@ export class FeedPostOverlay {
 }
 
 /**
- * Mirrors feed-parser.ts Strategy B but returns the DOM element alongside the
- * synthesized post id, so the overlay can attach chips to real elements.
+ * Mirrors feed-parser.ts post detection (both strategies) and returns the DOM
+ * element alongside the post id, so the overlay can attach chips to real
+ * elements. IDs must match parseFeedDom so chip scores line up:
+ *   - SDUI feed:        id = `urn:li:component:<componentkey>`
+ *   - legacy / profile: id = the post's `data-urn`
  */
 export function findFeedPostRoots(): Array<{ element: HTMLElement; id: string }> {
   const out: Array<{ element: HTMLElement; id: string }> = [];
   const seen = new Set<Element>();
+
+  // Strategy A — legacy / profile-activity DOM: posts are
+  // `.feed-shared-update-v2[data-urn]` (no componentkey, Like = "React Like").
+  // This is what /in/<handle>/recent-activity renders, where own posts live.
+  const legacyPosts = document.querySelectorAll<HTMLElement>(
+    '[data-urn^="urn:li:activity"], .feed-shared-update-v2[data-urn]'
+  );
+  for (const el of Array.from(legacyPosts)) {
+    if (seen.has(el)) continue;
+    seen.add(el);
+    const urn = el.getAttribute('data-urn');
+    if (urn) out.push({ element: el, id: urn });
+  }
+
+  // Strategy B — SDUI feed: anchor on the Reaction button, walk up to the
+  // `<div componentkey="…">` post.
   const reactionButtons = document.querySelectorAll(
     'button[aria-label^="Reaction button state" i]'
   );

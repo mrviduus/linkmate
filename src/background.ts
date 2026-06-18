@@ -10,7 +10,9 @@ import { keepAlive } from './keep-alive';
 import { buildPositioningPrompt, buildCommentPrompt } from './prompt-builder';
 import type { RawProfileFields } from './profile-parser';
 import { scoreRelevance } from './relevance-scorer';
-import { getActiveProvider } from './providers';
+import { runCommentGates } from './comment-gates';
+import { getActiveProvider, buildProvider, MANAGED_BASE_URL, QuotaExceededError } from './providers';
+import type { InferenceProvider } from './providers';
 import {
   getProfile,
   getEngagedPosts,
@@ -23,12 +25,17 @@ import {
   clearSsiLastError,
   getProviderConfig,
   setProviderConfig,
+  getInstallToken,
+  ensureInstallToken,
+  migrateIfNeeded,
   getCadenceTargets,
   setCadenceTargets,
   getCadenceStreak,
   getOnboardingCompleted,
   getGoalsOverride,
   setGoalsOverride,
+  getPaused,
+  STORAGE_KEYS,
 } from './storage-schema';
 import { aiScoreBatch, clearAiCache, AiParseError } from './ai-feed-analyzer';
 import { getUserProfile, profileContextFromUserProfile } from './user-profile-store';
@@ -123,14 +130,28 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-// Action icon click → open the side panel automatically (instead of a popup).
-(
-  chrome.sidePanel as unknown as {
-    setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
-  }
-)
+// Side panel: GLOBALLY enabled, opened by Chrome on the toolbar click
+// (openPanelOnActionClick). We deliberately keep NO per-tab enabled/disabled
+// state — that was the bug: a tab disabled while the SW slept (e.g. as a
+// new-tab page) kept a per-tab enabled:false that overrode the global default,
+// so the panel opened only on the original/"main" tab. With a single global
+// enabled:true the toolbar click opens the panel on EVERY tab identically; the
+// popup's own closeIfNotLinkedIn closes it again on non-LinkedIn tabs.
+const sidePanelApi = chrome.sidePanel as unknown as {
+  setPanelBehavior: (o: { openPanelOnActionClick?: boolean }) => Promise<void>;
+  setOptions: (o: { tabId?: number; enabled: boolean }) => Promise<void>;
+};
+
+sidePanelApi
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((err) => console.warn('[LinkMate] setPanelBehavior failed:', err));
+
+// Force the global default ON at every SW startup (sidePanel state persists
+// across extension reloads, so a stale enabled:false from an older build would
+// otherwise keep the panel shut everywhere).
+sidePanelApi
+  .setOptions({ enabled: true })
+  .catch((err) => console.warn('[LinkMate] sidePanel global enable failed:', err));
 
 // Issue #16 — content-script forwards the first user gesture on a LinkedIn
 // profile page so we can open the side panel without the user clicking the
@@ -194,8 +215,11 @@ function validateReplyQuality(reply: string): ValidationResult {
   const trimmedReply = reply.trim();
   const wordCount = trimmedReply.split(/\s+/).length;
 
-  if (wordCount < 10) return { valid: false, reason: 'too_short', score: 20 };
-  if (wordCount > 80) return { valid: false, reason: 'too_long', score: 40 };
+  // Bounds match the comment target (~220-450 chars = ~35-80 words) and the
+  // 200-600 char comment gate. The old 10/80-word window rejected substantive
+  // comments that the gate actually wants.
+  if (wordCount < 25) return { valid: false, reason: 'too_short', score: 20 };
+  if (wordCount > 110) return { valid: false, reason: 'too_long', score: 40 };
   if (!/[.!?]$/.test(trimmedReply)) return { valid: false, reason: 'no_punctuation', score: 50 };
 
   const preamblePatterns = [
@@ -221,88 +245,68 @@ function validateReplyQuality(reply: string): ValidationResult {
 
   let score = 70;
   if (trimmedReply.includes('?')) score += 10;
-  if (/\d+(%|x|\s+(percent|times|increase|decrease))/i.test(trimmedReply)) score += 10;
-  if (wordCount >= 15 && wordCount <= 40) score += 10;
+  // No bonus for numbers/percentages: the scorer can't tell a real figure from
+  // a hallucinated one, and rewarding "X%" biased candidate selection toward
+  // fabricated stats. Credibility of numbers is handled in the prompt instead.
+  if (wordCount >= 35 && wordCount <= 90) score += 10;
   return { valid: true, score: Math.min(100, score) };
 }
 
 // ─── Prompts ────────────────────────────────────────────────────────────────
 
+// Calibration examples — these ARE the quality bar. Every one opens on the
+// substance (no praise), reacts to a single specific point, adds an expert
+// mechanism/number/counter-example, stays 220-450 chars, and punctuates any
+// question. The model should match this depth, not these exact topics.
 const FEW_SHOT_EXAMPLES = `
-EXAMPLE 1:
-Post: "Just launched our new product after 6 months of development!"
-Reply: "The timing couldn't be better given the Q4 market trends. What was the biggest technical challenge your team overcame during development?"
+EXAMPLES OF THE BAR (match the depth and shape, not the topic):
 
-EXAMPLE 2:
+Post: "We cut our CI pipeline from 40 minutes to 9 minutes."
+Comment: Nine minutes is the threshold where behavior actually changes — under ten, people stop context-switching away and wait for the result, which quietly tightens the whole review loop. We hit the same cliff and it's what finally made trunk-based development stick. Did you get there by parallelizing jobs or by cutting test scope?
+
+Post: "AI will replace most junior developers within two years."
+Comment: The hard part of junior work was never typing code — it was judging which problem is worth solving and noticing when an answer is subtly wrong, which is exactly where today's models are weakest. On the teams I see, AI is raising the floor for juniors faster than it raises the ceiling for seniors. The real exposure sits with narrow mid-level roles, not either end.
+
 Post: "Remote work is killing company culture."
-Reply: "Interesting perspective. We've actually seen the opposite—our async standups improved transparency by 40%. What specific cultural elements are you seeing decline?"
-
-EXAMPLE 3:
-Post: "AI will replace 80% of jobs in the next 5 years."
-Reply: "That timeline seems aggressive based on current adoption curves. I've found AI augments rather than replaces roles—what industries are you seeing this happen fastest?"
-
-EXAMPLE 4:
-Post: "Finally hit our Q3 revenue target! Team effort pays off."
-Reply: "Congrats on the milestone! Were there any unexpected strategies that moved the needle more than anticipated?"
-
-EXAMPLE 5:
-Post: "The key to successful leadership is transparency and communication."
-Reply: "This resonates strongly. How do you balance transparency with keeping strategic plans confidential during competitive periods?"
+Comment: Culture didn't leave with the office — the cheap proxies for it did: hallway osmosis, reading the room, overhearing how a decision got made. The remote teams that kept it rebuilt those signals on purpose, with written decisions and default-on recordings. Which signal broke first for you, trust or information flow?
 `;
 
+// Single source of truth for what a strong comment is. Both prompt variants
+// share it so the two generation paths can't drift apart. Mirrors the
+// deterministic comment-gates (length, no agreement opener, no hashtag/emoji/
+// sign-off, punctuated questions) so the model self-complies instead of failing
+// gates and burning a retry.
+const COMMENT_RULES = `WHAT A COMMENT THAT EARNS A REPLY DOES:
+- Reacts to the single most interesting or debatable point in the post — not the whole post.
+- Adds ONE specific, non-obvious idea only someone with your background would surface: a mechanism, a concrete number, a counter-example, or a sharp implication.
+- Reads like a sharp peer thinking out loud — never a fan, never a marketer.
+
+HARD RULES (a comment is rejected if it breaks these):
+- 2 to 4 sentences, between 220 and 450 characters.
+- Open with the substance. NEVER open with praise or agreement — banned openers include "Great post", "Love this", "Spot on", "So true", "This resonates", "Couldn't agree more", "Well said", "Thanks for sharing", "Absolutely".
+- Be concrete: anchor to a real detail from the post; add a mechanism, example, or counter-example. Use a number ONLY if you actually know it is true — NEVER invent statistics, percentages, or "X%" figures. A made-up number destroys credibility with an expert audience.
+- At most ONE question, and only if it genuinely moves the conversation forward. If you ask one, end that sentence with "?".
+- Do not restate or summarize the post — assume the author just wrote it.
+- No hashtags, no emojis, no sign-off, no "—Name".
+- No buzzwords: leverage, synergy, unlock, game-changer, deep dive, circle back.
+- Do not start with "I".`;
+
 const DEFAULT_PROMPTS = {
-  withComments: `You are a LinkedIn engagement expert. Respond DIRECTLY with the reply text only - no preambles, no explanations.
+  withComments: `You write LinkedIn comments in your own professional voice. Output the comment text only — no preamble, no quotes, no explanation.
 
-CRITICAL: Output 1-2 impactful sentences (maximum 40 words total). Start immediately with your response.
+${COMMENT_RULES}
 
-${FEW_SHOT_EXAMPLES}
+THE DISCUSSION SO FAR:
+- The top comments below are what's ALREADY been said. Say something none of them said — find the angle they left open.
+- Do not echo their take or repeat their question.
 
-SMART ANALYSIS:
-- Study the top-performing comments' tone, style, and engagement patterns
-- Identify what makes them successful: specific insights, relatable experiences, thought-provoking questions, or timely perspectives
-- Notice if they use data, personal anecdotes, industry insights, or call-to-action phrases
+${FEW_SHOT_EXAMPLES}`,
 
-YOUR REPLY STRATEGY:
-- Match the energy level of top comments while adding your unique perspective
-- If top comments ask questions → ask a related but different question
-- If top comments share experiences → reference a contrasting or complementary experience
-- If top comments provide insights → add supporting data or a fresh angle
-- Use power words that drive engagement: "Actually...", "Interestingly...", "What if...", "I've found..."
+  standard: `You write LinkedIn comments in your own professional voice. Output the comment text only — no preamble, no quotes, no explanation.
 
-ENGAGEMENT MULTIPLIERS:
-- End with a question when possible (drives responses)
-- Reference specific details from the original post
-- Use "we" language to create community feeling
-- Be conversational but professional`,
+${COMMENT_RULES}
 
-  standard: `You are a LinkedIn expert. Respond DIRECTLY with the reply text only - no preambles, no explanations.
-
-CRITICAL: Output 1-2 impactful sentences (maximum 40 words total). Start immediately with your response.
-
-${FEW_SHOT_EXAMPLES}
-
-HIGH-IMPACT REPLY FORMULA:
-1. Hook: Start with something attention-grabbing ("Actually...", "This reminds me...", "What's interesting...")
-2. Value: Add genuine insight, experience, or perspective
-3. Connection: End with a question or call-to-action when appropriate
-
-PROVEN ENGAGEMENT PATTERNS:
-- Share a micro-insight: "I've seen this approach increase results by 40% in my experience."
-- Ask a strategic question: "What's been your biggest challenge implementing this strategy?"
-- Provide a contrasting view: "While I agree, I'd add that timing is equally crucial here."
-- Reference specific data/experience: "This aligns with the 70% increase we saw after..."
-
-PROFESSIONAL TONE GUIDE:
-- Confident but not arrogant
-- Helpful but not promotional
-- Personal but not oversharing
-- Engaging but not casual
-
-AVOID:
-- Generic praise ("Great post!", "Thanks for sharing!")
-- Multiple sentences or explanations
-- Obvious statements everyone would agree with
-- Self-promotional content`,
+${FEW_SHOT_EXAMPLES}`,
 };
 
 async function getUserPrompt(type: 'withComments' | 'standard'): Promise<string> {
@@ -346,10 +350,29 @@ function cleanReply(text: string): string {
   return contentLines.join(' ').trim();
 }
 
-function trimToTwoSentences(reply: string): string {
-  const sentences = reply.split(/[.!?]+/).filter((s) => s.trim().length > 0);
-  const max = sentences.slice(0, 2).join('. ').trim();
-  return max + (reply.endsWith('?') ? '' : '.');
+/**
+ * Cap a comment to a substantive-but-tight shape: at most 4 sentences and 520
+ * characters (kept under the 600-char comment gate), trimming WHOLE sentences
+ * from the end if it runs long. Sentence split requires whitespace after the
+ * terminator so it never breaks on decimals ("3.5x") or abbreviations ("U.S.").
+ * Unlike the old 2-sentence hard cap, this lets a comment carry real substance.
+ */
+function enforceCommentShape(reply: string): string {
+  const text = reply.trim();
+  const MAX_SENTENCES = 4;
+  const MAX_CHARS = 520;
+  const parts = (text.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) ?? [text])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  let out = '';
+  for (const part of parts.slice(0, MAX_SENTENCES)) {
+    const next = out ? `${out} ${part}` : part;
+    if (next.length > MAX_CHARS && out) break;
+    out = next;
+  }
+  out = (out || parts[0] || text).trim();
+  if (!/[.!?]$/.test(out)) out += '.';
+  return out;
 }
 
 // ─── SSI alarm constant (hoisted; install listener references it below) ────
@@ -373,11 +396,72 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.storage.local.set({ hasUsedExtension: true });
 });
 
+/** Run storage migrations + mint the anonymous install token at every SW
+ *  startup. migrateIfNeeded is idempotent; ensureInstallToken is a no-op once
+ *  set. This guarantees managed mode has a token before any generate() call. */
+migrateIfNeeded()
+  .then(() => ensureInstallToken())
+  .catch((err) => console.warn('[LinkMate] migration/install-token init failed:', err));
+
+// ─── Global pause (master killswitch) ───────────────────────────────────────
+//
+// When paused we block every *active* feature (LLM calls, SSI capture, profile
+// scraping) at this single choke point — content scripts have already torn
+// their UI down, this guards popup-triggered + stray actions too. Pure reads
+// (history/config/audit) stay open so the side panel still shows cached data.
+
+let isPaused = false;
+getPaused()
+  .then((v) => {
+    isPaused = v;
+  })
+  .catch(() => {});
+
+const PAUSED_BLOCKED_ACTIONS = new Set([
+  'generateLinkedInReply',
+  'generateLinkedInReplyWithComments',
+  'queue.scoreFeed',
+  'queue.draftComment',
+  'queue.aiScoreFeed',
+  'profile.audit.rewrite',
+  'recommender.refresh',
+  'recommender.suggestPosts',
+  'ssi.captureNow',
+  'profile.capture',
+]);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !(STORAGE_KEYS.paused in changes)) return;
+  const next = Boolean(changes[STORAGE_KEYS.paused].newValue);
+  const wasPaused = isPaused;
+  isPaused = next;
+  // Resume → auto-refresh: pull a fresh SSI snapshot and re-rank recommendations
+  // immediately so the panel reflects current state without waiting for alarms.
+  if (wasPaused && !next) {
+    startSsiCapture()
+      .then(async (snap) => {
+        await appendSsiSnapshot(snap);
+        await clearSsiLastError();
+        rankDaily().catch((err) => console.warn('Resume recommender refresh failed:', err));
+      })
+      .catch(async (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        await setSsiLastError({ message: msg, capturedAt: Date.now() });
+      });
+  }
+});
+
 // ─── Message router ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.action === 'linkedinContentScriptReady') {
     sendResponse({ engineReady: true, cloudMode: true });
+    return false;
+  }
+
+  // Master killswitch — short-circuit active features while paused.
+  if (isPaused && PAUSED_BLOCKED_ACTIONS.has(request.action)) {
+    sendResponse({ ok: false, paused: true, error: 'LinkMate is paused.' });
     return false;
   }
 
@@ -392,17 +476,33 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 
   if (request.action === 'checkEngineStatus') {
-    getProviderConfig().then((cfg) => {
-      const hasKey = !!cfg.openai?.apiKey;
+    (async () => {
+      const cfg = await getProviderConfig();
+      if (cfg.mode === 'managed') {
+        const token = await ensureInstallToken();
+        const ready = !!token;
+        sendResponse({
+          engineReady: ready,
+          initializing: false,
+          currentModel: cfg.managed?.model ?? 'gpt-4o-mini',
+          healthy: ready,
+          cached: true,
+          cacheMessage: ready ? 'LinkMate free AI ready' : 'Initializing…',
+        });
+        return;
+      }
+      const byokKey = cfg.mode === 'groq' ? cfg.groq?.apiKey : cfg.openai?.apiKey;
+      const hasKey = !!byokKey;
+      const label = cfg.mode === 'groq' ? 'Groq' : 'OpenAI';
       sendResponse({
         engineReady: hasKey,
         initializing: false,
-        currentModel: cfg.openai?.model ?? null,
+        currentModel: (cfg.mode === 'groq' ? cfg.groq?.model : cfg.openai?.model) ?? null,
         healthy: hasKey,
         cached: true,
-        cacheMessage: hasKey ? 'OpenAI configured' : 'Add OpenAI API key in popup',
+        cacheMessage: hasKey ? `${label} configured` : `Add ${label} API key in popup`,
       });
-    });
+    })();
     return true;
   }
 
@@ -511,6 +611,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     setProviderConfig(request.config as ProviderConfig)
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+  if (request.action === 'quota.get') {
+    handleQuotaGet(sendResponse);
     return true;
   }
 
@@ -727,6 +831,11 @@ async function startSsiCapture(): Promise<SsiSnapshot> {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  // Paused = no background work either.
+  if (isPaused) {
+    console.log('⏸ LinkMate paused — skipping alarm', alarm.name);
+    return;
+  }
   if (alarm.name === SSI_ALARM_NAME) {
     console.log('⏰ SSI daily alarm fired');
     startSsiCapture()
@@ -925,7 +1034,12 @@ async function handleProfileAuditGet(
       getSsiHistory().catch(() => []),
     ]);
     const ssi = ssiHistory.length > 0 ? ssiHistory[ssiHistory.length - 1] : null;
-    const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
+    // Don't pair a freshly-captured profile with a stale SSI snapshot — a 2-week-old
+    // score next to today's activity reads as current and misleads the user. Suppress
+    // SSI older than 14d so the signal row drops out rather than showing wrong data.
+    const SSI_STALE_MS = 14 * 24 * 60 * 60 * 1000;
+    const ssiFresh = ssi && Date.now() - ssi.capturedAt <= SSI_STALE_MS ? ssi : null;
+    const activitySignals = computeActivitySignals(up, ssiFresh?.total ?? null);
     const recommendations =
       stored && stored.profileCapturedAt === up.capturedAt ? stored.recommendations : null;
     const recommendationsAt =
@@ -1015,7 +1129,9 @@ async function handleProfileAuditRewrite(
       const activitySignals = computeActivitySignals(up, ssi?.total ?? null);
       sendResponse({ ok: true, state: { ...state, ssi, activitySignals } });
     } catch (err) {
-      if (err instanceof ProfileRecommenderParseError) {
+      if (err instanceof QuotaExceededError) {
+        sendResponse({ ok: false, reason: 'quota', error: err.message });
+      } else if (err instanceof ProfileRecommenderParseError) {
         console.warn('[linkmate] profile.audit.rewrite parse failure:', err.message);
         sendResponse({ ok: false, reason: 'parse' });
       } else {
@@ -1043,34 +1159,255 @@ function dedupeEntriesKeepLast<T extends { stem: string }>(entries: T[]): T[] {
 
 // ─── Reply generation (standard + with comments) ────────────────────────────
 
+// Managed (free) tier bumps comments to gpt-4.1-mini — a big step up from the
+// gpt-4o-mini default used for batch feed scoring, but ~10× cheaper than gpt-4o
+// so it doesn't drain the free-tier budget (whitelisted on the proxy). BYOK
+// (openai/groq) keeps the model the user chose in their own config — we don't
+// silently override their selection (and never force a model their key may
+// lack). Returns a model id, or undefined to keep the provider's configured one.
+function commentModelFor(mode: ProviderConfig['mode']): string | undefined {
+  return mode === 'managed' ? 'gpt-4.1-mini' : undefined;
+}
+
+// Build the provider AND pick the comment model from ONE config read (the old
+// Promise.all([getActiveProvider(), commentModel()]) read provider config twice
+// per call — up to ~6 reads per comment across draft+retry+refine).
+async function getCommentProvider(): Promise<{ provider: InferenceProvider; model?: string }> {
+  const cfg = await getProviderConfig();
+  const installToken = cfg.mode === 'managed' ? await ensureInstallToken() : undefined;
+  return { provider: buildProvider(cfg, installToken), model: commentModelFor(cfg.mode) };
+}
+
 async function generateWithRetry(systemPrompt: string, userPrompt: string): Promise<string> {
-  const provider = await getActiveProvider();
+  const { provider, model } = await getCommentProvider();
   const raw = await provider.generate({
     system: systemPrompt,
     user: userPrompt,
+    model,
     maxTokens: aiMaxTokens,
     temperature: aiTemperature,
     topP: 0.9,
     stop: ['\n\n', '\n\n\n'],
   });
-  const firstReply = trimToTwoSentences(cleanReply(raw));
+  const firstReply = enforceCommentShape(cleanReply(raw));
   const firstValidation = validateReplyQuality(firstReply);
-  if (firstValidation.valid || (firstValidation.score ?? 0) >= 60) return firstReply;
+  const firstGates = runCommentGates(firstReply);
+  const firstOk =
+    (firstValidation.valid || (firstValidation.score ?? 0) >= 60) && firstGates.passed;
+  if (firstOk) return firstReply;
+  if (!firstGates.passed) {
+    console.log('[LinkMate] comment gates failed, retrying:', firstGates.failures.join(', '));
+  }
 
   const retry = await provider.generate({
     system: systemPrompt,
     user: userPrompt,
+    model,
     maxTokens: aiMaxTokens,
     temperature: Math.min(1.0, aiTemperature + 0.15),
     topP: 0.9,
     stop: ['\n\n', '\n\n\n'],
   });
-  const retryReply = trimToTwoSentences(cleanReply(retry));
+  const retryReply = enforceCommentShape(cleanReply(retry));
   const retryValidation = validateReplyQuality(retryReply);
+  const retryGates = runCommentGates(retryReply);
+
+  // Prefer the candidate that passes the deterministic gates; if both or neither
+  // pass, fall back to the higher validation score.
+  if (retryGates.passed && !firstGates.passed) return retryReply;
+  if (firstGates.passed && !retryGates.passed) return firstReply;
   return retryValidation.valid || (retryValidation.score ?? 0) > (firstValidation.score ?? 0)
     ? retryReply
     : firstReply;
 }
+
+// ─── Self-check gate (issue #64 step 3) ─────────────────────────────────────
+//
+// After generating, ask the provider which SPECIFIC claim in the post the
+// comment addresses. If it can't point to one (NONE / not actually in the post),
+// the comment is keyword-matching, not understanding — regenerate once, then
+// surface with a warning flag. Behind a sync pref, default ON. Never auto-submits.
+
+const SELF_CHECK_DEFAULT = true;
+
+async function getCommentSelfCheckEnabled(): Promise<boolean> {
+  try {
+    const r = await chrome.storage.sync.get(['commentSelfCheck']);
+    return r.commentSelfCheck === undefined ? SELF_CHECK_DEFAULT : !!r.commentSelfCheck;
+  } catch {
+    return SELF_CHECK_DEFAULT;
+  }
+}
+
+/** True if at least `min` consecutive words of `quote` appear in `post`. */
+function quoteGroundedInPost(quote: string, post: string, min = 3): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const p = norm(post);
+  const words = norm(quote).split(' ').filter(Boolean);
+  if (words.length === 0) return false;
+  if (words.length <= min) return p.includes(words.join(' '));
+  for (let i = 0; i + min <= words.length; i++) {
+    if (p.includes(words.slice(i, i + min).join(' '))) return true;
+  }
+  return false;
+}
+
+async function selfCheckSpecificity(
+  postContent: string,
+  comment: string
+): Promise<{ addressed: boolean; evidence: string }> {
+  const provider = await getActiveProvider();
+  const raw = await provider.generate({
+    system:
+      'You verify whether a LinkedIn comment engages a specific claim in a post. ' +
+      'Reply with a SHORT exact quote (max 15 words) copied from the POST that the COMMENT directly addresses. ' +
+      'If the comment is generic and addresses no specific claim, reply with the single word NONE. ' +
+      'Output the quote or NONE only — no other text.',
+    user: `POST:\n"""\n${postContent}\n"""\n\nCOMMENT:\n"""\n${comment}\n"""\n\nWhich specific claim from the POST does the COMMENT address?`,
+    maxTokens: 40,
+    temperature: 0,
+    topP: 1,
+  });
+  const ans = raw.trim().replace(/^["']|["']$/g, '');
+  const isNone = ans.length === 0 || /^none\b/i.test(ans);
+  const addressed = !isNone && quoteGroundedInPost(ans, postContent);
+  return { addressed, evidence: ans };
+}
+
+/**
+ * Self-refine pass — the biggest quality lever. Models critique far better than
+ * they one-shot generate, so we hand the draft back and ask for a sharper,
+ * more specific rewrite (grounding folded in: it must react to a real claim in
+ * the post). Accept the rewrite only if it still passes the gates + quality
+ * floor — never regress below the draft. One extra LLM call.
+ */
+async function refineComment(postContent: string, draft: string): Promise<string> {
+  try {
+    const { provider, model } = await getCommentProvider();
+    const raw = await provider.generate({
+      model,
+      system: `You are a ruthless LinkedIn comment editor. You sharpen a draft so it reads like a domain expert thinking out loud, not a bot.
+
+${COMMENT_RULES}
+
+Improve the draft:
+- If the opening sentence just restates or paraphrases the post, cut it and open on a fresh point — the author already knows what they wrote.
+- Cut anything generic — a line that's true of almost any post adds nothing.
+- Add ONE concrete mechanism, counter-example, or specific detail. Do NOT invent statistics or "X%" numbers; remove any fabricated figure from the draft.
+- Make sure it reacts to a SPECIFIC claim in the post, and that any question pushes BEYOND what the post already says (don't ask whether they did the thing they just described).
+- Keep whatever already works; if the draft is already excellent, return it unchanged.
+Output ONLY the improved comment — no critique, no preamble, no quotes.`,
+      user: `POST:\n"""\n${postContent}\n"""\n\nDRAFT COMMENT:\n"""\n${draft}\n"""\n\nReturn the improved comment.`,
+      maxTokens: aiMaxTokens,
+      temperature: aiTemperature,
+      topP: 0.9,
+      stop: ['\n\n', '\n\n\n'],
+    });
+    const improved = enforceCommentShape(cleanReply(raw));
+    const gates = runCommentGates(improved);
+    const val = validateReplyQuality(improved);
+    if (improved && gates.passed && (val.valid || (val.score ?? 0) >= 60)) return improved;
+    return draft; // rewrite regressed — keep the draft
+  } catch (err) {
+    console.warn('[LinkMate] refine skipped:', err);
+    return draft;
+  }
+}
+
+/**
+ * Generate a comment: draft → self-refine → optional specificity self-check.
+ * The refine pass already targets grounding, so an unverified result is just
+ * flagged (no blind regen). Nothing blocks or auto-submits.
+ */
+async function generateComment(
+  systemPrompt: string,
+  userPrompt: string,
+  postContent: string
+): Promise<{ reply: string; warning?: string }> {
+  const draft = await generateWithRetry(systemPrompt, userPrompt);
+  const reply = await refineComment(postContent, draft);
+
+  let enabled = false;
+  try {
+    enabled = await getCommentSelfCheckEnabled();
+  } catch {
+    enabled = false;
+  }
+  if (!enabled) return { reply };
+
+  try {
+    const check = await selfCheckSpecificity(postContent, reply);
+    if (check.addressed) return { reply };
+    return { reply, warning: 'unverified_specificity' };
+  } catch (err) {
+    // Self-check failures must never block the draft.
+    console.warn('[LinkMate] self-check skipped:', err);
+    return { reply };
+  }
+}
+
+/**
+ * Report the managed free-tier balance for the popup. Only meaningful in
+ * managed mode; BYOK is unlimited. Fails soft — UI shows "—" on error rather
+ * than blocking, and never surfaces the install token.
+ */
+async function handleQuotaGet(sendResponse: (response: unknown) => void): Promise<void> {
+  try {
+    const cfg = await getProviderConfig();
+    if (cfg.mode !== 'managed') {
+      sendResponse({ ok: true, unlimited: true });
+      return;
+    }
+    const token = await getInstallToken();
+    if (!token) {
+      sendResponse({ ok: false, error: 'No install token yet' });
+      return;
+    }
+    const baseUrl = cfg.managed?.baseUrl ?? MANAGED_BASE_URL;
+    const res = await fetch(`${baseUrl}/quota`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      sendResponse({ ok: false, error: `Quota check failed (${res.status})` });
+      return;
+    }
+    const data = (await res.json()) as {
+      usedUSD?: number;
+      limitUSD?: number;
+      remainingUSD?: number;
+    };
+    sendResponse({
+      ok: true,
+      unlimited: false,
+      usedUSD: data.usedUSD ?? 0,
+      limitUSD: data.limitUSD ?? 0,
+      remainingUSD: data.remainingUSD ?? 0,
+    });
+  } catch (err) {
+    sendResponse({ ok: false, error: String(err) });
+  }
+}
+
+/**
+ * Voice header injected into every comment user-prompt so the draft sounds like
+ * the user's actual expertise, not a generic engagement bot. Empty when no
+ * profile is captured yet (the comment still works, just without the voice).
+ */
+async function buildVoiceHeader(): Promise<string> {
+  const { profile } = await getProfileOrDerive().catch(() => ({ profile: null }));
+  if (!profile) return '';
+  const lines: string[] = [];
+  if (profile.fullName?.trim()) lines.push(`You are ${profile.fullName.trim()}.`);
+  if (profile.positioningSummary?.trim()) {
+    lines.push(`Your expertise and positioning: ${profile.positioningSummary.trim()}`);
+  }
+  if (lines.length === 0) return '';
+  lines.push('Comment from that expertise, in your own voice.');
+  return `${lines.join('\n')}\n\n`;
+}
+
+const COMMENT_TASK_LINE =
+  'Write ONE comment that follows every rule above: 2-4 sentences, 220-450 characters, open on the substance (no praise), anchor to a specific point in the post, at most one question. Output the comment text only.';
 
 async function handleLinkedInReplyWithComments(
   postContent: string,
@@ -1078,49 +1415,36 @@ async function handleLinkedInReplyWithComments(
   sendResponse: (response: unknown) => void
 ) {
   try {
-    const systemPrompt = await getUserPrompt('withComments');
+    const [systemPrompt, voice] = await Promise.all([
+      getUserPrompt('withComments'),
+      buildVoiceHeader(),
+    ]);
     const topCommentsContext =
       topComments.length > 0
-        ? `\n\nTOP PERFORMING COMMENTS (study these patterns):\n${topComments
+        ? `\n\nWHAT'S ALREADY BEEN SAID (say something none of these did — find the angle they left open, don't repeat their take or their question):\n${topComments
             .slice(0, 5)
-            .map(
-              (c, i) =>
-                `Comment ${i + 1} (${c.likeCount} likes):\n"${c.text}"\nEngagement factor: ${
-                  c.likeCount > 100
-                    ? 'Viral'
-                    : c.likeCount > 50
-                      ? 'High'
-                      : c.likeCount > 20
-                        ? 'Medium'
-                        : 'Standard'
-                }\n`
-            )
-            .join(
-              '\n'
-            )}\nKEY PATTERN: Notice what makes these comments successful and apply similar strategies.`
-        : '\n\nNo high-engagement comments available. Focus on adding unique value and asking thoughtful questions.';
+            .map((c, i) => `${i + 1}. "${c.text}"`)
+            .join('\n')}`
+        : '';
 
-    const userPrompt = `Generate a professional LinkedIn reply to this post:
+    const userPrompt = `${voice}You're commenting on this LinkedIn post:
 
-POST CONTENT:
-"${postContent}"
-${topCommentsContext}
+"""
+${postContent}
+"""${topCommentsContext}
 
-CRITICAL REQUIREMENTS:
-- 1-2 impactful sentences (maximum 40 words total)
-- No introductory phrases like "Great post!"
-- Add genuine value or ask a thoughtful question
-- Be conversational and engaging
-- DO NOT include any preambles like "Here's a reply:" or explanations
-- Start your response immediately with the actual content
+${COMMENT_TASK_LINE}`;
 
-Write your reply directly (no preambles):`;
-
-    const finalReply = await generateWithRetry(systemPrompt, userPrompt);
+    const { reply: finalReply, warning } = await generateComment(
+      systemPrompt,
+      userPrompt,
+      postContent
+    );
     sendResponse({
       reply: finalReply,
       basedOnComments: true,
       commentCount: topComments.length,
+      ...(warning ? { warning } : {}),
     });
   } catch (error) {
     console.error('handleLinkedInReplyWithComments failed:', error);
@@ -1130,47 +1454,35 @@ Write your reply directly (no preambles):`;
 
 async function handleLinkedInReply(postContent: string, sendResponse: (response: unknown) => void) {
   try {
-    const systemPrompt = await getUserPrompt('standard');
+    const [systemPrompt, voice] = await Promise.all([
+      getUserPrompt('standard'),
+      buildVoiceHeader(),
+    ]);
 
-    const postLength = postContent.length;
-    const hasQuestion = postContent.includes('?');
-    const hasData = /\d+%|\d+\s*(million|billion|thousand)|\$\d+/i.test(postContent);
+    const userPrompt = `${voice}You're commenting on this LinkedIn post:
 
-    const contextHints = `
-POST ANALYSIS:
-- Length: ${postLength < 100 ? 'Brief' : postLength < 300 ? 'Medium' : 'Detailed'}
-- Type: ${hasQuestion ? 'Question/Discussion' : hasData ? 'Data/Insights' : 'Thought/Opinion'}
-- Engagement opportunity: ${hasQuestion ? 'Answer the question' : 'Add perspective'}`;
+"""
+${postContent}
+"""
 
-    const userPrompt = `Generate a professional LinkedIn reply to this post:
+${COMMENT_TASK_LINE}`;
 
-"${postContent}"
-${contextHints}
-
-CRITICAL REQUIREMENTS:
-- 1-2 impactful sentences (maximum 40 words total)
-- No introductory phrases like "Great post!"
-- Add genuine value or ask a thoughtful question
-- Be conversational and engaging
-- DO NOT include any preambles like "Here's a reply:" or explanations
-- Start your response immediately with the actual content
-
-Write your reply directly (no preambles):`;
-
-    const finalReply = await generateWithRetry(systemPrompt, userPrompt);
-    sendResponse({ reply: finalReply });
+    const { reply: finalReply, warning } = await generateComment(
+      systemPrompt,
+      userPrompt,
+      postContent
+    );
+    sendResponse({ reply: finalReply, ...(warning ? { warning } : {}) });
   } catch (error) {
     console.error('handleLinkedInReply failed:', error);
-    const fallbackReplies = [
-      "Insightful perspective! What's been your experience with this approach?",
-      "This resonates strongly with what we're seeing in the field.",
-      'Excellent points - particularly about the implementation challenges.',
-      'Appreciate you sharing this data-driven analysis!',
-      'Interesting take - how do you see this evolving in the next year?',
-    ];
+    // Never fabricate a comment on failure. The old fallback returned a canned
+    // platitude as `reply`, which the content script showed as a successful
+    // draft — the user could then post a generic "This resonates…" line, the
+    // exact thing the gates exist to prevent. Surface a real error instead so
+    // the in-page handler shows a retry toast.
     sendResponse({
-      reply: fallbackReplies[Math.floor(Math.random() * fallbackReplies.length)],
       error: error instanceof Error ? error.message : String(error),
+      fallback: true,
     });
   }
 }

@@ -30,6 +30,23 @@
  */
 
 import type { ConnectionDegree, FollowerTier, ParsedPost } from './storage-schema';
+import { resolveTimestampMs } from './lib/relative-time';
+
+/**
+ * Parse a count that may be abbreviated ("1.2K", "5K+", "3.4M") or grouped
+ * ("12,007,340"). LinkedIn renders both; ignoring K/M undercounted by 1000×.
+ */
+function parseAbbrevCount(text: string): number | null {
+  if (!text) return null;
+  const m = text.match(/([\d][\d.,]*)\s*([KMkm])?/);
+  if (!m) return null;
+  const num = parseFloat(m[1].replace(/,/g, ''));
+  if (!Number.isFinite(num)) return null;
+  const suffix = (m[2] || '').toLowerCase();
+  if (suffix === 'k') return Math.round(num * 1_000);
+  if (suffix === 'm') return Math.round(num * 1_000_000);
+  return Math.round(num);
+}
 
 interface ParseOptions {
   /** Defaults to Date.now(). Override for deterministic tests. */
@@ -39,31 +56,24 @@ interface ParseOptions {
 /** Map "X followers" text → tier bucket. Stripping commas before parseInt. */
 export function parseFollowerTier(text: string): FollowerTier {
   if (!text) return 'unknown';
-  const match = text.match(/([\d,]+)\s+followers?/i);
+  // Accept "1.2K followers", "12,007,340 followers", "5K+ followers".
+  const match = text.match(/([\d][\d.,]*\s*[KMkm]?)\s*\+?\s*followers?/i);
   if (!match) return 'unknown';
-  const n = parseInt(match[1].replace(/,/g, ''), 10);
-  if (Number.isNaN(n)) return 'unknown';
+  const n = parseAbbrevCount(match[1]);
+  if (n === null) return 'unknown';
   if (n < 1000) return 'lt_1k';
   if (n < 10_000) return '1k_10k';
   if (n < 100_000) return '10k_100k';
   return 'gt_100k';
 }
 
-/** Convert "30m" / "2h" / "1d" / "2w" → absolute ms timestamp from `now`. */
+/**
+ * Convert a LinkedIn relative time ("30m","2h","1d","2w","7mo","2y") → absolute
+ * ms from `now`. Delegates to the shared resolver so months/years/word-forms are
+ * handled (previously "7mo" parsed as 7 MINUTES and "2y" as "now").
+ */
 export function parseAgoToTimestamp(ago: string, now: number): number {
-  if (!ago) return now;
-  const m = ago.trim().match(/^(\d+)\s*([smhdw])\b/i);
-  if (!m) return now;
-  const value = parseInt(m[1], 10);
-  const unit = m[2].toLowerCase();
-  const multipliers: Record<string, number> = {
-    s: 1000,
-    m: 60 * 1000,
-    h: 60 * 60 * 1000,
-    d: 24 * 60 * 60 * 1000,
-    w: 7 * 24 * 60 * 60 * 1000,
-  };
-  return now - value * (multipliers[unit] ?? 0);
+  return resolveTimestampMs(ago, now) ?? now;
 }
 
 export function parseDegree(text: string): ConnectionDegree {
@@ -81,11 +91,54 @@ function readText(el: Element | null): string {
 }
 
 function parseCount(text: string): number {
-  if (!text) return 0;
-  const m = text.match(/[\d,]+/);
-  if (!m) return 0;
-  const n = parseInt(m[0].replace(/,/g, ''), 10);
-  return Number.isNaN(n) ? 0 : n;
+  return parseAbbrevCount(text) ?? 0;
+}
+
+/**
+ * Reaction + comment counts, robust across every LinkedIn surface. Tries, in
+ * order, until each lands a value:
+ *   1. legacy count classes (older caches)
+ *   2. accessibility labels ("18 reactions", "4 comments on …") — used by the
+ *      profile / recent-activity DOM
+ *   3. SDUI action-button text (the feed renders the count AS the button label:
+ *      Like→"40", Comment→"63")
+ *   4. legacy social-counts container — its leading number is total reactions
+ */
+function extractEngagementCounts(el: Element): { likeCount: number; commentCount: number } {
+  const ariaLabels = (): string[] =>
+    Array.from(el.querySelectorAll('[aria-label]')).map((n) => n.getAttribute('aria-label') ?? '');
+
+  let likeCount = parseCount(readText(el.querySelector('.social-counts-reactions__count')));
+  if (likeCount === 0) {
+    const m = ariaLabels()
+      .find((t) => /\d[\d,]*\s+reactions?/i.test(t))
+      ?.match(/(\d[\d,]*)\s+reactions?/i);
+    if (m) likeCount = parseCount(m[1]);
+  }
+  if (likeCount === 0) {
+    likeCount = parseCount(
+      readText(el.querySelector('button[aria-label^="Reaction button state" i]'))
+    );
+  }
+  if (likeCount === 0) {
+    const m = readText(el.querySelector('.social-details-social-counts')).match(/^(\d[\d,]*)/);
+    if (m) likeCount = parseCount(m[1]);
+  }
+
+  let commentCount = parseCount(
+    readText(el.querySelector('.social-details-social-counts__comments'))
+  );
+  if (commentCount === 0) {
+    const m = ariaLabels()
+      .find((t) => /\d[\d,]*\s+comments?/i.test(t))
+      ?.match(/(\d[\d,]*)\s+comments?/i);
+    if (m) commentCount = parseCount(m[1]);
+  }
+  if (commentCount === 0) {
+    commentCount = parseCount(readText(el.querySelector('button[aria-label="Comment" i]')));
+  }
+
+  return { likeCount, commentCount };
 }
 
 /** Extract "/in/{handle}/" or "/company/{handle}/" → URN string. */
@@ -192,10 +245,7 @@ function parseLegacyPost(el: Element, now: number): ParsedPost | null {
     el.querySelector('.update-components-text');
   const text = readText(textEl);
 
-  const likeCount = parseCount(readText(el.querySelector('.social-counts-reactions__count')));
-  const commentCount = parseCount(
-    readText(el.querySelector('.social-details-social-counts__comments'))
-  );
+  const { likeCount, commentCount } = extractEngagementCounts(el);
 
   return {
     id: dataUrn,
@@ -246,6 +296,22 @@ function parseSduiPost(el: Element, now: number): ParsedPost | null {
     profileLink = candidateLinks[0];
     authorName = readText(profileLink);
   }
+  // 2026 SDUI: the actor link text is now empty — the human/company name only
+  // survives in the avatar's alt, in one of two shapes:
+  //   "View <Name>'s profile"   (person)
+  //   "View company: <Name>"    (company)
+  if (!authorName || /^\d/.test(authorName)) {
+    const avatar = el.querySelector('img[alt^="View " i]');
+    const avatarAlt = avatar?.getAttribute('alt') ?? '';
+    const name =
+      avatarAlt.match(/^View\s+(.+?)[’'`]s\s+profile/i)?.[1] ??
+      avatarAlt.match(/^View company:\s*(.+)$/i)?.[1];
+    if (name) authorName = name.trim();
+    // Tie the handle to the avatar's own link — candidateLinks[0] can be a body
+    // @mention rather than the actual author (e.g. on company posts).
+    const avatarLink = avatar?.closest('a[href*="/in/"], a[href*="/company/"]');
+    if (avatarLink) profileLink = avatarLink;
+  }
   const authorHref = profileLink?.getAttribute('href') ?? '';
   const authorUrn = authorUrnFromHref(authorHref);
 
@@ -294,21 +360,9 @@ function parseSduiPost(el: Element, now: number): ParsedPost | null {
     if (t.length > text.length) text = t;
   }
 
-  // Engagement counts — scan for text patterns
-  let likeCount = 0;
-  let commentCount = 0;
-  for (const span of allTexts) {
-    const txt = readText(span);
-    if (likeCount === 0) {
-      const m = txt.match(/(\d[\d,]*)\s+reactions?/i);
-      if (m) likeCount = parseCount(m[1]);
-    }
-    if (commentCount === 0) {
-      const m = txt.match(/(\d[\d,]*)\s+comments?/i);
-      if (m) commentCount = parseCount(m[1]);
-    }
-    if (likeCount && commentCount) break;
-  }
+  // Engagement counts — shared extractor handles SDUI buttons, a11y labels,
+  // and legacy containers across every surface.
+  const { likeCount, commentCount } = extractEngagementCounts(el);
 
   const isOwn = degree === 'unknown' && /\byou\b/i.test(readText(el).slice(0, 200));
 

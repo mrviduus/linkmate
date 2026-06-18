@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 580" width="100%" height="100%">
+  <defs>
+    <!-- Arrow marker definitions for crisp, perfect lines -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#64748b" />
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0a66c2" />
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#16a34a" />
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#7c3aed" />
+    </marker>
+
+    <style>
+      .canvas { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
+      .header-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 700; fill: #64748b; letter-spacing: 0.05em; text-transform: uppercase; }
+      .node-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #0f172a; }
+      .node-desc { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; fill: #475569; }
+      .code-font { font-family: "JetBrains Mono", monospace; font-size: 11px; fill: #097da0; }
+      .badge-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; font-weight: 700; fill: #ffffff; }
+      .tech-badge { font-family: "JetBrains Mono", monospace; font-size: 9px; font-weight: 600; fill: #ea580c; }
+    </style>
+  </defs>
+
+  <!-- Clean Canvas -->
+  <rect width="100%" height="100%" class="canvas" rx="12" />
+
+  <text x="30" y="35" class="header-text">Profile Audit &amp; Concept-Rotation Flow</text>
+
+  <!-- ==================== FLOW BLOCKS ==================== -->
+
+  <!-- Node 1: LinkedIn DOM (Start) -->
+  <g transform="translate(290, 60)">
+    <rect width="220" height="60" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1" />
+    <text x="20" y="24" class="node-title">LinkedIn Profile DOM</text>
+    <text x="20" y="42" class="node-desc">Scraped fields &amp; SSI snapshots</text>
+  </g>
+
+  <!-- Arrow 1 to Node 2 -->
+  <path d="M 400 120 L 400 150" stroke="#0a66c2" stroke-width="1.5" fill="none" marker-end="url(#arrow-blue)" />
+  <text x="410" y="140" class="node-desc" style="font-size:10px;">Scrape &amp; Save</text>
+
+  <!-- Node 2: Local Rule Engine -->
+  <g transform="translate(210, 150)">
+    <rect width="380" height="80" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5" />
+    <text x="20" y="26" class="node-title" style="fill:#166534">Deterministic Rule Engine (Local)</text>
+    <text x="20" y="46" class="code-font">auditProfile() <tspan fill="#64748b">→ 6 completeness checks</tspan></text>
+    <text x="20" y="62" class="code-font">computeActivitySignals() <tspan fill="#64748b">→ 4 metric checks</tspan></text>
+  </g>
+
+  <!-- Arrow 2 to Node 3 -->
+  <path d="M 400 230 L 400 260" stroke="#16a34a" stroke-width="1.5" fill="none" marker-end="url(#arrow-green)" />
+  <text x="412" y="250" class="node-desc" style="font-size:10px; fill:#16a34a; font-weight: 500;">Instant, Free (No LLM Calls)</text>
+
+  <!-- Node 3: Renders Instant Metrics -->
+  <g transform="translate(250, 260)">
+    <rect width="300" height="50" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+    <text x="20" y="22" class="node-title">Renders metrics in Popup</text>
+    <text x="20" y="38" class="node-desc">Score progress bar &amp; checklist cards</text>
+  </g>
+
+  <!-- Action Arrow: Click AI rewrites -->
+  <path d="M 400 310 L 400 365" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow-purple)" />
+  
+  <g transform="translate(300, 323)">
+    <rect width="200" height="22" rx="11" fill="#7c3aed" />
+    <text x="100" y="14" class="badge-text" text-anchor="middle">⚡ Click "Get AI rewrites"</text>
+  </g>
+
+  <!-- Parallel split paths -->
+  <path d="M 400 365 L 225 390" stroke="#7c3aed" stroke-width="1.5" fill="none" marker-end="url(#arrow-purple)" />
+  <path d="M 400 365 L 575 390" stroke="#7c3aed" stroke-width="1.5" fill="none" marker-end="url(#arrow-purple)" />
+
+
+  <!-- Node 4a: Copy Editor LLM -->
+  <g transform="translate(80, 390)">
+    <rect width="290" height="90" rx="10" fill="#faf5ff" stroke="#e9d5ff" stroke-width="1.5" />
+    <text x="20" y="26" class="node-title" style="fill:#6b21a8">📝 Copy Editor Prompt</text>
+    <text x="20" y="46" class="node-desc">Headline, About, Experience rewrites</text>
+    <text x="20" y="60" class="node-desc">Outputs standard positioning layout</text>
+    <text x="20" y="75" class="code-font" style="font-size:10px; fill:#7c3aed">Avoids concepts in avoidStems[]</text>
+  </g>
+
+  <!-- Node 4b: SSI Strategist LLM -->
+  <g transform="translate(430, 390)">
+    <rect width="290" height="90" rx="10" fill="#faf5ff" stroke="#e9d5ff" stroke-width="1.5" />
+    <text x="20" y="26" class="node-title" style="fill:#6b21a8">🧭 SSI Strategist Prompt</text>
+    <text x="20" y="46" class="node-desc">Weak-pillar tactical custom suggestions</text>
+    <text x="20" y="60" class="node-desc">Engagement and networking insights</text>
+    <text x="20" y="75" class="code-font" style="font-size:10px; fill:#7c3aed">Avoids concepts in avoidStems[]</text>
+  </g>
+
+
+  <!-- ==================== ROTATION LOOPBACK (PERFECT FLAT PATH - NO CLIPPING) ==================== -->
+
+  <!-- Boxy, flat-bottom feedback loop that stays strictly below the text -->
+  <path d="M 225 480 L 225 552 L 575 552 L 575 480" stroke="#ea580c" stroke-width="1.5" fill="none" stroke-dasharray="2 2" marker-end="url(#arrow)" />
+  
+  <!-- Concept Rotation Badge Box -->
+  <g transform="translate(275, 492)">
+    <rect width="250" height="24" rx="4" fill="#fff7ed" stroke="#ffedd5" stroke-width="1" />
+    <text x="125" y="16" class="tech-badge" text-anchor="middle">🧠 CONCEPT ROTATION: avoidStems[]</text>
+  </g>
+
+  <!-- Spaced perfectly: Badge ends at 516, Text at 534, Flat line sits far below at 552 -->
+  <text x="400" y="534" class="node-desc" style="font-size:10px; fill:#c2410c; font-weight: 500;" text-anchor="middle">Prevents duplicate AI output themes on click-cycle iterations</text>
+
+</svg>

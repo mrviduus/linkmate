@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LinkMate — Stop working for LinkedIn</title>
+<meta name="description" content="LinkMate is a Chrome extension that audits your LinkedIn profile + feed and tells you what to fix, who to engage, and what to post next. Built for TMLS Agentic Hackathon." />
+<meta property="og:title" content="LinkMate — Stop working for LinkedIn" />
+<meta property="og:description" content="AI agent that makes LinkedIn work for you. Chrome MV3 · BYOK · 477 tests · 5 days." />
+<meta property="og:image" content="icon.png" />
+<link rel="icon" href="icon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#05060a;
+  --bg-2:#0a0d14;
+  --surface:#0f131c;
+  --surface-2:#161b27;
+  --border:rgba(255,255,255,.08);
+  --border-2:rgba(255,255,255,.14);
+  --text:#e8ecf3;
+  --muted:#8a93a6;
+  --dim:#5a6479;
+  --li:#0a66c2;
+  --li-2:#378fe9;
+  --accent:#a78bfa;
+  --accent-2:#22d3ee;
+  --good:#22c55e;
+  --warn:#f59e0b;
+  --bad:#ef4444;
+  --r:14px;
+  --r-lg:22px;
+  --shadow:0 30px 80px -20px rgba(0,0,0,.6),0 8px 24px -8px rgba(0,0,0,.4);
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+img{display:block;max-width:100%}
+
+/* ───── animated mesh background ───── */
+.mesh{
+  position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(60vw 60vw at 12% 8%,rgba(10,102,194,.45),transparent 60%),
+    radial-gradient(50vw 50vw at 92% 22%,rgba(167,139,250,.32),transparent 60%),
+    radial-gradient(70vw 70vw at 50% 110%,rgba(34,211,238,.18),transparent 60%),
+    var(--bg);
+  filter:saturate(1.05);
+}
+.grain{
+  position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ───── nav ───── */
+nav{
+  position:sticky;top:0;z-index:50;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 24px;
+  background:rgba(5,6,10,.6);
+  backdrop-filter:saturate(1.4) blur(14px);
+  -webkit-backdrop-filter:saturate(1.4) blur(14px);
+  border-bottom:1px solid var(--border);
+}
+nav .brand{display:flex;align-items:center;gap:10px;font-weight:700}
+nav .brand img{width:28px;height:28px;border-radius:8px}
+nav ul{display:flex;gap:22px;list-style:none}
+nav ul a{color:var(--muted);font-size:14px;transition:color .2s}
+nav ul a:hover{color:var(--text)}
+nav .cta{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:9px 16px;border-radius:999px;
+  background:linear-gradient(135deg,var(--li),var(--li-2));
+  color:#fff;font-weight:600;font-size:14px;
+  box-shadow:0 6px 22px -8px rgba(10,102,194,.7);
+  transition:transform .15s,box-shadow .2s;
+}
+nav .cta:hover{transform:translateY(-1px);box-shadow:0 12px 28px -8px rgba(10,102,194,.85)}
+@media(max-width:680px){nav ul{display:none}}
+
+/* ───── layout ───── */
+section{padding:120px 24px;position:relative}
+.wrap{max-width:1180px;margin:0 auto}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 12px;border-radius:999px;
+  background:rgba(255,255,255,.04);border:1px solid var(--border);
+  font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;
+}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 12px var(--good)}
+h1,h2,h3{letter-spacing:-.02em;line-height:1.05}
+h1{font-size:clamp(40px,7.4vw,84px);font-weight:800}
+h2{font-size:clamp(30px,4.4vw,52px);font-weight:800;margin-bottom:18px}
+h3{font-size:22px;font-weight:700;margin-bottom:8px}
+.lede{color:var(--muted);font-size:clamp(16px,1.6vw,19px);max-width:62ch}
+
+.gradient-text{
+  background:linear-gradient(115deg,#e8ecf3 0%,#9ec5ff 40%,#c4b5fd 70%,#67e8f9 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  background-size:200% 100%;
+  animation:slide 8s linear infinite;
+}
+@keyframes slide{from{background-position:0 50%}to{background-position:200% 50%}}
+
+/* ───── hero ───── */
+.hero{padding:80px 24px 80px;min-height:88vh;display:flex;align-items:center}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:60px;align-items:center;width:100%}
+@media(max-width:980px){.hero-grid{grid-template-columns:1fr;gap:36px}}
+.hero h1 strike{text-decoration:none;position:relative;display:inline-block;color:var(--muted)}
+.hero h1 strike::after{
+  content:'';position:absolute;left:-2%;right:-2%;top:50%;height:.08em;
+  background:var(--li-2);transform:scaleX(0);transform-origin:left;
+  animation:strike 1.1s cubic-bezier(.6,.0,.0,1) .6s forwards;
+  border-radius:2px;
+}
+@keyframes strike{to{transform:scaleX(1)}}
+.hero p.lede{margin:22px 0 32px}
+.hero-ctas{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:36px}
+.btn{
+  display:inline-flex;align-items:center;gap:10px;
+  padding:14px 22px;border-radius:12px;font-weight:600;font-size:15px;
+  transition:transform .15s,box-shadow .2s,background .2s,border-color .2s;
+}
+.btn.primary{
+  background:linear-gradient(135deg,var(--li),var(--li-2));color:#fff;
+  box-shadow:0 12px 30px -10px rgba(10,102,194,.7);
+}
+.btn.primary:hover{transform:translateY(-2px);box-shadow:0 18px 40px -10px rgba(10,102,194,.85)}
+.btn.ghost{background:rgba(255,255,255,.04);border:1px solid var(--border-2);color:var(--text)}
+.btn.ghost:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.22)}
+.hero-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;max-width:520px}
+.hero-stats .s{display:flex;flex-direction:column}
+.hero-stats b{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.hero-stats span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+@media(max-width:540px){.hero-stats{grid-template-columns:repeat(2,1fr)}}
+
+/* ───── floating extension mock ───── */
+.mock-stage{
+  position:relative;perspective:1800px;
+  height:560px;display:flex;align-items:center;justify-content:center;
+}
+.mock{
+  width:360px;border-radius:22px;
+  background:linear-gradient(180deg,var(--surface) 0%,var(--surface-2) 100%);
+  border:1px solid var(--border-2);
+  box-shadow:var(--shadow);
+  overflow:hidden;
+  transform:rotateX(8deg) rotateY(-12deg) rotateZ(2deg);
+  animation:float 7s ease-in-out infinite;
+}
+@keyframes float{0%,100%{transform:rotateX(8deg) rotateY(-12deg) rotateZ(2deg) translateY(0)}50%{transform:rotateX(6deg) rotateY(-10deg) rotateZ(1deg) translateY(-14px)}}
+.mock .titlebar{display:flex;align-items:center;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border)}
+.mock .titlebar i{width:10px;height:10px;border-radius:50%;background:#3a3f4d;display:block}
+.mock .titlebar i:nth-child(1){background:#ff5f57}
+.mock .titlebar i:nth-child(2){background:#febc2e}
+.mock .titlebar i:nth-child(3){background:#28c840}
+.mock .titlebar span{margin-left:auto;font-size:11px;color:var(--dim)}
+.mock-body{padding:18px}
+.mock-tabs{display:flex;gap:4px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:14px}
+.mock-tabs span{flex:1;text-align:center;font-size:12px;padding:7px 0;border-radius:7px;color:var(--muted);font-weight:600}
+.mock-tabs span.active{background:linear-gradient(135deg,var(--li),var(--li-2));color:#fff}
+.score-row{display:flex;gap:14px;align-items:center;padding:14px;background:rgba(10,102,194,.08);border:1px solid rgba(10,102,194,.25);border-radius:14px;margin-bottom:14px}
+.donut{
+  --pct:73;
+  width:64px;height:64px;border-radius:50%;
+  background:conic-gradient(var(--li-2) calc(var(--pct)*1%),rgba(255,255,255,.08) 0);
+  display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0;
+}
+.donut::after{
+  content:'';position:absolute;inset:7px;border-radius:50%;background:var(--surface);
+}
+.donut b{position:relative;z-index:1;font-size:18px;font-weight:800}
+.score-row .meta{display:flex;flex-direction:column}
+.score-row .meta i{font-style:normal;font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.score-row .meta b{font-size:16px;font-weight:700}
+.score-row .meta small{font-size:12px;color:var(--good)}
+.check{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
+.check:last-child{border-bottom:none}
+.check .b{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
+.check .ok{background:rgba(34,197,94,.15);color:var(--good)}
+.check .ng{background:rgba(239,68,68,.15);color:var(--bad)}
+.check .lbl{flex:1;color:var(--muted)}
+.check .v{font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace}
+.glow-ring{
+  position:absolute;width:480px;height:480px;border-radius:50%;
+  background:radial-gradient(circle,rgba(10,102,194,.35),transparent 60%);
+  filter:blur(40px);z-index:-1;
+}
+
+/* tiny floating cards around the mock */
+.float-card{
+  position:absolute;background:var(--surface);border:1px solid var(--border-2);
+  border-radius:12px;padding:10px 14px;box-shadow:var(--shadow);
+  display:flex;align-items:center;gap:10px;font-size:13px;
+  animation:bob 5s ease-in-out infinite;
+}
+.float-card .ico{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px}
+.fc-1{top:8%;left:-2%;animation-delay:.3s}
+.fc-2{top:64%;left:-12%;animation-delay:1.1s}
+.fc-3{top:18%;right:-6%;animation-delay:.7s}
+.fc-4{bottom:8%;right:-2%;animation-delay:1.5s}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.ico.b1{background:rgba(34,197,94,.15);color:var(--good)}
+.ico.b2{background:rgba(245,158,11,.15);color:var(--warn)}
+.ico.b3{background:rgba(167,139,250,.15);color:var(--accent)}
+.ico.b4{background:rgba(34,211,238,.15);color:var(--accent-2)}
+@media(max-width:980px){.mock-stage{height:auto;padding:40px 0}.float-card{display:none}}
+
+/* ───── feature grid ───── */
+.section-head{margin-bottom:48px;max-width:780px}
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+@media(max-width:900px){.features{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.features{grid-template-columns:1fr}}
+.card{
+  background:linear-gradient(180deg,rgba(22,27,39,.7),rgba(15,19,28,.7));
+  border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:28px;position:relative;overflow:hidden;
+  transition:transform .25s,border-color .25s,background .25s;
+}
+.card::before{
+  content:'';position:absolute;inset:0;border-radius:var(--r-lg);
+  background:radial-gradient(400px at var(--mx,50%) var(--my,0%),rgba(167,139,250,.18),transparent 60%);
+  opacity:0;transition:opacity .35s;pointer-events:none;
+}
+.card:hover::before{opacity:1}
+.card:hover{transform:translateY(-4px);border-color:var(--border-2)}
+.card .ico{
+  width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,rgba(10,102,194,.25),rgba(167,139,250,.25));
+  border:1px solid var(--border-2);font-size:22px;margin-bottom:16px;
+}
+.card p{color:var(--muted);font-size:14.5px}
+
+/* ───── demo steps ───── */
+.steps{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+@media(max-width:760px){.steps{grid-template-columns:1fr}}
+.step{
+  background:linear-gradient(180deg,rgba(22,27,39,.55),rgba(15,19,28,.55));
+  border:1px solid var(--border);border-radius:18px;padding:22px 24px;
+  position:relative;overflow:hidden;
+}
+.step .num{
+  position:absolute;top:14px;right:16px;font-family:'JetBrains Mono',monospace;
+  font-size:48px;font-weight:700;color:rgba(255,255,255,.04);letter-spacing:-.04em;line-height:1;
+}
+.step h4{font-size:16px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.step .tag{
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--li-2);
+  background:rgba(10,102,194,.12);border:1px solid rgba(10,102,194,.25);
+  padding:2px 8px;border-radius:6px;
+}
+.step p{color:var(--muted);font-size:14px}
+
+/* ───── architecture ───── */
+.arch{
+  background:linear-gradient(180deg,rgba(22,27,39,.4),rgba(15,19,28,.4));
+  border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:28px;overflow:auto;
+}
+.arch pre{
+  font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted);
+  line-height:1.7;white-space:pre;
+}
+.tech{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:28px}
+@media(max-width:760px){.tech{grid-template-columns:repeat(2,1fr)}}
+.tech .pill{
+  display:flex;align-items:center;gap:10px;
+  padding:14px 16px;border-radius:12px;
+  background:rgba(255,255,255,.03);border:1px solid var(--border);
+  font-size:14px;font-weight:600;
+}
+.tech .pill i{font-style:normal;font-size:18px}
+
+/* ───── reveal animation ───── */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .8s ease,transform .8s ease}
+.reveal.in{opacity:1;transform:translateY(0)}
+
+/* ───── ai output mock ───── */
+.demo-split{display:grid;grid-template-columns:1.05fr 1fr;gap:36px;align-items:start}
+@media(max-width:900px){.demo-split{grid-template-columns:1fr}}
+.ai-card{
+  background:linear-gradient(180deg,rgba(22,27,39,.7),rgba(15,19,28,.7));
+  border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:22px;box-shadow:var(--shadow);
+}
+.ai-card .hd{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.ai-card .hd .led{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 14px var(--accent);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+.ai-card .label{font-size:12px;color:var(--li-2);font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.ai-card .body{font-size:15px;line-height:1.6;color:var(--text);padding:14px;border:1px dashed var(--border-2);border-radius:12px;background:rgba(0,0,0,.2);min-height:120px}
+.ai-card .actions{display:flex;gap:8px;margin-top:12px}
+.ai-card .actions button{
+  background:rgba(255,255,255,.04);border:1px solid var(--border-2);
+  color:var(--text);padding:8px 14px;border-radius:9px;font:600 13px Inter;cursor:pointer;
+  transition:background .2s,transform .15s;
+}
+.ai-card .actions button:hover{background:rgba(255,255,255,.08);transform:translateY(-1px)}
+.ai-card .actions button.regen{color:var(--accent)}
+.caret{display:inline-block;width:2px;height:1.1em;background:var(--li-2);vertical-align:-2px;animation:caret 1s steps(2) infinite}
+@keyframes caret{50%{opacity:0}}
+
+/* ───── final CTA ───── */
+.final{
+  text-align:center;
+  background:radial-gradient(60% 80% at 50% 0%,rgba(10,102,194,.25),transparent 70%);
+  border-top:1px solid var(--border);
+}
+.final h2{margin-bottom:18px}
+.final .lede{margin:0 auto 32px}
+footer{padding:36px 24px;border-top:1px solid var(--border);text-align:center;color:var(--dim);font-size:13px}
+footer a{color:var(--muted)}footer a:hover{color:var(--text)}
+
+/* ───── kbd ───── */
+kbd{font-family:'JetBrains Mono',monospace;font-size:12px;background:rgba(255,255,255,.05);border:1px solid var(--border-2);border-bottom-width:2px;padding:2px 7px;border-radius:6px;color:var(--text)}
+
+/* ───── agent loop ───── */
+.agent-loop{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:stretch;
+  position:relative;margin-top:28px;
+}
+.agent-stage{
+  position:relative;padding:22px 20px 20px;border-radius:18px;
+  background:linear-gradient(180deg,rgba(22,27,39,.7),rgba(15,19,28,.7));
+  border:1px solid var(--border);
+  transition:border-color .25s,transform .25s;
+  overflow:hidden;
+}
+.agent-stage:hover{border-color:var(--border-2);transform:translateY(-3px)}
+.agent-stage::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--li-2),var(--accent));opacity:.85;
+}
+.agent-stage .step-num{
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--li-2);
+  background:rgba(10,102,194,.12);border:1px solid rgba(10,102,194,.25);
+  padding:2px 8px;border-radius:6px;display:inline-block;margin-bottom:10px;
+  letter-spacing:.06em;
+}
+.agent-stage h4{font-size:17px;font-weight:700;margin-bottom:8px;letter-spacing:-.01em}
+.agent-stage .what{font-size:13.5px;color:var(--text);margin-bottom:8px;line-height:1.45}
+.agent-stage .why{font-size:12.5px;color:var(--muted);line-height:1.5;border-top:1px dashed var(--border);padding-top:8px}
+.agent-stage .why b{color:var(--accent);font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:10.5px;display:block;margin-bottom:3px}
+.agent-stage .arrow{
+  position:absolute;right:-18px;top:50%;transform:translateY(-50%);
+  width:24px;height:24px;border-radius:50%;
+  background:var(--bg-2);border:1px solid var(--border-2);
+  display:flex;align-items:center;justify-content:center;z-index:2;
+  color:var(--li-2);font-weight:800;font-size:13px;
+}
+.agent-stage:last-child .arrow{display:none}
+.agent-loop-wrap{position:relative}
+.agent-loop-back{
+  position:absolute;left:14px;right:14px;bottom:-44px;height:30px;
+  border-left:2px dashed rgba(167,139,250,.35);
+  border-right:2px dashed rgba(167,139,250,.35);
+  border-bottom:2px dashed rgba(167,139,250,.35);
+  border-radius:0 0 18px 18px;
+  pointer-events:none;
+}
+.agent-loop-back::after{
+  content:'reflection → tomorrow\'s prompt';
+  position:absolute;left:50%;bottom:-22px;transform:translateX(-50%);
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent);
+  background:var(--bg);padding:2px 12px;border-radius:999px;
+  border:1px solid rgba(167,139,250,.35);letter-spacing:.04em;white-space:nowrap;
+}
+@media(max-width:880px){
+  .agent-loop{grid-template-columns:1fr;gap:14px}
+  .agent-stage .arrow{display:none}
+  .agent-loop-back{display:none}
+}
+
+/* ───── demo modal ───── */
+.demo-modal{
+  position:fixed;inset:0;z-index:100;display:none;
+  align-items:center;justify-content:center;
+  background:rgba(2,4,8,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  padding:32px;animation:demoFade .18s ease;
+}
+.demo-modal.open{display:flex}
+@keyframes demoFade{from{opacity:0}to{opacity:1}}
+.demo-modal .demo-shell{
+  position:relative;width:min(1100px,100%);max-height:88vh;
+  border-radius:18px;overflow:hidden;background:#000;
+  border:1px solid var(--border-2);box-shadow:var(--shadow);
+  animation:demoPop .25s cubic-bezier(.2,.9,.2,1);
+}
+@keyframes demoPop{from{transform:scale(.96);opacity:.6}to{transform:scale(1);opacity:1}}
+.demo-modal video,.demo-modal img{width:100%;height:auto;max-height:88vh;display:block;background:#000}
+.demo-modal .demo-close{
+  position:absolute;top:12px;right:12px;z-index:2;
+  width:36px;height:36px;border-radius:50%;border:1px solid var(--border-2);
+  background:rgba(0,0,0,.55);color:#fff;font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .2s,transform .15s;
+}
+.demo-modal .demo-close:hover{background:rgba(0,0,0,.85);transform:scale(1.05)}
+@media(max-width:680px){
+  .demo-modal{padding:0}
+  .demo-modal .demo-shell{width:100%;height:100%;max-height:100%;border-radius:0;border:none;display:flex;align-items:center;justify-content:center}
+  .demo-modal video,.demo-modal img{max-height:100%}
+}
+
+/* ───── conf badge ───── */
+.conf{
+  display:inline-flex;align-items:center;gap:8px;padding:5px 11px;border-radius:999px;
+  background:linear-gradient(135deg,rgba(167,139,250,.18),rgba(34,211,238,.18));
+  border:1px solid rgba(167,139,250,.3);font-size:12px;letter-spacing:.06em;
+  font-weight:600;text-transform:uppercase;margin-bottom:18px;
+}
+.conf .star{width:14px;height:14px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="mesh"></div>
+<div class="grain"></div>
+
+<nav>
+  <a class="brand" href="#top"><img src="icon.png" alt="LinkMate logo" /> LinkMate</a>
+  <ul>
+    <li><a href="#agent">Agent</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#demo">Demo</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#install">Install</a></li>
+  </ul>
+  <a class="cta" href="https://github.com/mrviduus/linkmate/releases" target="_blank" rel="noopener">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-1.95c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.04 0 0 .98-.31 3.2 1.18.93-.26 1.93-.39 2.92-.4 1 .01 2 .14 2.93.4 2.22-1.49 3.19-1.18 3.19-1.18.64 1.58.24 2.75.12 3.04.74.81 1.19 1.84 1.19 3.1 0 4.44-2.7 5.41-5.27 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.55C20.21 21.38 23.5 17.07 23.5 12 23.5 5.65 18.35.5 12 .5Z"/></svg>
+    Download
+  </a>
+</nav>
+
+<section id="top" class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="conf">
+        <svg class="star" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7h7.6l-6.2 4.5 2.4 7.5L12 16.5 5.8 21l2.4-7.5L2 9h7.6Z"/></svg>
+        TMLS Agentic Hackathon · live demo
+      </div>
+      <h1>
+        Stop working<br/>
+        for <strike>LinkedIn.</strike><br/>
+        <span class="gradient-text">Make it work for you.</span>
+      </h1>
+      <p class="lede">
+        A Chrome extension + AI agent that audits your LinkedIn profile and feed, then tells you what to fix,
+        who to engage, and what to post next. <b style="color:var(--text)">Your OpenAI key and data stay in your browser — only the prompts go to OpenAI.</b>
+      </p>
+      <div class="hero-ctas">
+        <a class="btn primary" href="#demo" id="watchDemoBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          Watch the demo
+        </a>
+        <a class="btn ghost" href="https://github.com/mrviduus/linkmate" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-1.95c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.04 0 0 .98-.31 3.2 1.18.93-.26 1.93-.39 2.92-.4 1 .01 2 .14 2.93.4 2.22-1.49 3.19-1.18 3.19-1.18.64 1.58.24 2.75.12 3.04.74.81 1.19 1.84 1.19 3.1 0 4.44-2.7 5.41-5.27 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.55C20.21 21.38 23.5 17.07 23.5 12 23.5 5.65 18.35.5 12 .5Z"/></svg>
+          Source on GitHub
+        </a>
+      </div>
+      <div class="hero-stats">
+        <div class="s"><b id="kpi-1">5</b><span>days to build</span></div>
+        <div class="s"><b id="kpi-2">477</b><span>unit tests</span></div>
+        <div class="s"><b id="kpi-3">34</b><span>test suites</span></div>
+        <div class="s"><b id="kpi-4">0</b><span>backend cost</span></div>
+      </div>
+    </div>
+    <div class="mock-stage">
+      <div class="glow-ring"></div>
+
+      <div class="float-card fc-1"><div class="ico b1">✓</div><div><b>SSI 73</b><div style="color:var(--muted);font-size:11px">+8 vs last week</div></div></div>
+      <div class="float-card fc-2"><div class="ico b3">✦</div><div><b>AI rewrite ready</b><div style="color:var(--muted);font-size:11px">headline · 2 variants</div></div></div>
+      <div class="float-card fc-3"><div class="ico b4">⚡</div><div><b>3 actions today</b><div style="color:var(--muted);font-size:11px">biased to weakest pillar</div></div></div>
+      <div class="float-card fc-4"><div class="ico b2">★</div><div><b>Streak · 4 wks</b><div style="color:var(--muted);font-size:11px">full quota</div></div></div>
+
+      <div class="mock">
+        <div class="titlebar"><i></i><i></i><i></i><span>linkmate · popup</span></div>
+        <div class="mock-body">
+          <div class="mock-tabs">
+            <span class="active">Today</span><span>SSI</span><span>Profile</span><span>Settings</span>
+          </div>
+          <div class="score-row">
+            <div class="donut" id="donut"><b id="donutNum">73</b></div>
+            <div class="meta">
+              <i>SSI · this week</i>
+              <b>Top 5% of industry</b>
+              <small>↑ +8 vs last week</small>
+            </div>
+          </div>
+          <div>
+            <div class="check"><div class="b ok">✓</div><div class="lbl">Current position</div><div class="v">PASS</div></div>
+            <div class="check"><div class="b ok">✓</div><div class="lbl">Skills ≥ 5</div><div class="v">12</div></div>
+            <div class="check"><div class="b ng">!</div><div class="lbl">About ≥ 50 chars</div><div class="v">28</div></div>
+            <div class="check"><div class="b ok">✓</div><div class="lbl">Connections ≥ 50</div><div class="v">812</div></div>
+            <div class="check"><div class="b ng">!</div><div class="lbl">Posts last 30d ≥ 4</div><div class="v">1</div></div>
+            <div class="check"><div class="b ok">✓</div><div class="lbl">Comments last 30d ≥ 8</div><div class="v">14</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="agent" style="padding:80px 24px 100px">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow"><span class="dot" style="background:var(--accent);box-shadow:0 0 12px var(--accent)"></span> where's the agent</div>
+      <h2 style="margin-top:14px">How LinkMate works as an agent.</h2>
+      <p class="lede">A four‑stage loop, not a chatbot. Each click closes the loop — yesterday's outcome shapes tomorrow's prompt.</p>
+    </div>
+
+    <div class="agent-loop-wrap reveal">
+      <div class="agent-loop">
+        <div class="agent-stage">
+          <span class="step-num">01 · perception</span>
+          <h4>Perception</h4>
+          <div class="what">Scrapes SSI score + your profile + feed posts from LinkedIn DOM.</div>
+          <div class="why"><b>What</b>Content scripts on <span class="mono">/in/*</span>, <span class="mono">/sales/ssi</span>, <span class="mono">/feed/*</span>. SW writes to <span class="mono">chrome.storage</span> + IndexedDB.</div>
+          <div class="arrow">→</div>
+        </div>
+        <div class="agent-stage">
+          <span class="step-num">02 · planner</span>
+          <h4>Planner</h4>
+          <div class="what">Parallel LLM calls via <span class="mono">Promise.allSettled</span> — copy editor + SSI strategist.</div>
+          <div class="why"><b>Why parallel</b>Partial success allowed: one prompt failing never blocks the other. Each result dedup'd by <span class="mono">checkId</span>.</div>
+          <div class="arrow">→</div>
+        </div>
+        <div class="agent-stage">
+          <span class="step-num">03 · actuator</span>
+          <h4>Actuator</h4>
+          <div class="what">Paste‑ready replies, headlines, posts. Human always in the loop.</div>
+          <div class="why"><b>Why human</b>LinkedIn ToS forbids auto‑submit. We pre‑fill the composer; you press send. No background tabs, no polling.</div>
+          <div class="arrow">→</div>
+        </div>
+        <div class="agent-stage">
+          <span class="step-num">04 · reflection</span>
+          <h4>Reflection</h4>
+          <div class="what">Lazy outcome scanner reads engagement on yesterday's comments → tomorrow's prompt.</div>
+          <div class="why"><b>Why lazy</b>Piggy‑backs on natural revisits — no extra navigation, no scheduled polling. Outcomes feed <span class="mono">avoidStems</span> + concept rotation.</div>
+          <div class="arrow">↺</div>
+        </div>
+      </div>
+      <div class="agent-loop-back"></div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow"><span class="dot"></span> what it does</div>
+      <h2 style="margin-top:14px">An AI agent for the platform that <em style="font-style:normal;background:linear-gradient(135deg,var(--li),var(--accent));-webkit-background-clip:text;color:transparent">never tells you why</em>.</h2>
+      <p class="lede">LinkedIn's SSI ranks you 0–100 across four pillars — Brand, Find People, Engage, Build Relationships — but never tells you which lever to pull. LinkMate translates the score into <b style="color:var(--text)">paste‑ready actions</b>.</p>
+    </div>
+
+    <div class="features">
+      <div class="card reveal"><div class="ico">📊</div><h3>Reads your SSI</h3><p>Daily scrape of <span class="mono">/sales/ssi</span>. Total + 4 pillar gauges + week‑over‑week trendline. 90‑day ring buffer in <span class="mono">chrome.storage</span>.</p></div>
+      <div class="card reveal"><div class="ico">🩺</div><h3>Audits your profile</h3><p>6 LinkedIn All‑Star checks + 4 activity signals. Pure deterministic rule engine — instant, free, no API call.</p></div>
+      <div class="card reveal"><div class="ico">✨</div><h3>Generates rewrites</h3><p>Two parallel LLM calls: a copy editor (headline/about/experience) and an SSI strategist (pillar action + engagement angle). Paste‑ready, regeneratable.</p></div>
+      <div class="card reveal"><div class="ico">🎯</div><h3>Daily quotas</h3><p>Weekly cadence mapped to each SSI pillar (1 post / 5 invites / 3 comments / 2 thread replies). Streak counter makes it visceral.</p></div>
+      <div class="card reveal"><div class="ico">💬</div><h3>Drafts replies in your voice</h3><p>✨ Reply button on every post · uses captured profile context + topic distribution + reading the thread comments.</p></div>
+      <div class="card reveal"><div class="ico">🔁</div><h3>Closes the loop</h3><p>Lazy outcome scanner reads likes/replies on your comments next time you revisit. Yesterday's outcome shapes tomorrow's prompt.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow"><span class="dot" style="background:var(--accent);box-shadow:0 0 12px var(--accent)"></span> 3‑minute demo</div>
+      <h2 style="margin-top:14px">How to drive it.</h2>
+      <p class="lede">Eight clicks from <kbd>Load unpacked</kbd> to LinkMate ranking your feed and drafting your posts.</p>
+    </div>
+
+    <div class="demo-split" style="margin-bottom:48px">
+      <div class="ai-card reveal">
+        <div class="hd"><span class="led"></span> AI rewrite · live</div>
+        <div class="label">Headline rewrite</div>
+        <div class="body" id="aiBody"></div>
+        <div class="actions">
+          <button id="copyBtn">Copy</button>
+          <button class="regen" id="regenBtn">⟳ Regenerate</button>
+        </div>
+      </div>
+      <div class="reveal">
+        <h3 style="margin-bottom:12px">Two prompts. One click.</h3>
+        <p style="color:var(--muted);font-size:15px;margin-bottom:14px">When you press <b style="color:var(--text)">Get AI rewrites</b>, LinkMate fires two parallel calls via <span class="mono">Promise.allSettled</span>:</p>
+        <ul style="list-style:none;display:flex;flex-direction:column;gap:10px;color:var(--muted);font-size:14.5px">
+          <li>📝 <b style="color:var(--text)">Copy editor</b> — headline, about, experience, photo banner, openToWork.</li>
+          <li>🧭 <b style="color:var(--text)">SSI strategist</b> — weakest‑pillar action + engagement angle + network growth tactic.</li>
+          <li>🧠 <b style="color:var(--text)">Concept rotation</b> — each click stores <span class="mono">{checkId, stem}</span>; regenerate avoids repeating ideas.</li>
+          <li>🛡️ <b style="color:var(--text)">Partial success allowed</b> — one prompt failing never blocks the other.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal"><div class="num">01</div><h4><span class="tag">setup</span></h4><p>Load unpacked, paste your OpenAI API key in <b>Settings</b>. BYOK — never leaves your machine.</p></div>
+      <div class="step reveal"><div class="num">02</div><h4><span class="tag">/in/&lt;you&gt;</span></h4><p>Open your own profile → click <b>Capture Profile</b>. Parser extracts headline / about / skills / themes → AI synthesizes a 2‑sentence positioning summary.</p></div>
+      <div class="step reveal"><div class="num">03</div><h4><span class="tag">audit</span></h4><p>Popup shows progress bar of 6 essentials + activity signals (SSI, posts/30d, comments/30d, network). Instant. Zero API calls.</p></div>
+      <div class="step reveal"><div class="num">04</div><h4><span class="tag">✨ rewrites</span></h4><p>Click <b>Get AI rewrites for N gaps</b>. Paste‑ready copy lands under each failed check + SSI tactical action + engagement angle. Each card has a <b>Copy</b> button.</p></div>
+      <div class="step reveal"><div class="num">05</div><h4><span class="tag">/sales/ssi</span></h4><p>Refresh now → total score + 4 pillar gauges + donut chart populate. Daily alarm captures it automatically going forward.</p></div>
+      <div class="step reveal"><div class="num">06</div><h4><span class="tag">/feed/</span></h4><p>✨ Reply on every post · sidebar <b>Engagement Queue</b> ranks the feed by relevance to your profile (topic 40% / tier 20% / degree 15% / recency 10% / engagement 10% / diversity 5%).</p></div>
+      <div class="step reveal"><div class="num">07</div><h4><span class="tag">today</span></h4><p>Popup → <b>Today</b>: 3 AI cards biased to weakest pillar + cadence bars + streak. Each card opens the right LinkedIn page in one click.</p></div>
+      <div class="step reveal"><div class="num">08</div><h4><span class="tag">post</span></h4><p>Click <b>Suggest a post</b> → modal with 3 distinct drafts (story / hot take / lesson) tuned to your <em>underweight</em> topics.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow"><span class="dot" style="background:var(--accent-2);box-shadow:0 0 12px var(--accent-2)"></span> under the hood</div>
+      <h2 style="margin-top:14px">Zero backend. Three storage layers, by data shape.</h2>
+      <p class="lede">MV3 service worker as sole writer. Content scripts only message. <span class="mono">chrome.storage.local</span> for hot state · <span class="mono">chrome.storage.sync</span> for settings · IndexedDB for the action ledger.</p>
+    </div>
+
+    <div class="arch reveal">
+<pre>LinkedIn tabs                Extension SW                 Popup UI
+─────────────               ──────────────               ──────────
+linkedin.com/*       ─┐
+linkedin.com/in/*    ─┼─► content scripts ─► background.ts ─► popup.html
+linkedin.com/feed/*  ─┘   (scrape + inject)  (orchestrator)    (Today / SSI /
+                               │                  │             Profile / Settings)
+                               │                  │
+                               ▼                  ▼
+                       chrome.storage.local    OpenAI API
+                       (profile, settings,     (BYOK · gpt‑4o‑mini)
+                        SSI snapshots)
+                               +
+                           IndexedDB
+                          (action log, outcomes)</pre>
+    </div>
+
+    <div class="tech">
+      <div class="pill reveal"><i>⚙️</i> Chrome MV3 · TypeScript</div>
+      <div class="pill reveal"><i>🤖</i> OpenAI gpt‑4o‑mini · BYOK</div>
+      <div class="pill reveal"><i>🗃️</i> IndexedDB action ledger</div>
+      <div class="pill reveal"><i>📦</i> Parcel · no SDK · raw fetch</div>
+      <div class="pill reveal"><i>🧪</i> 477 Jest tests · CI on every push</div>
+      <div class="pill reveal"><i>📈</i> Chart.js tree‑shaken (566 KB gz)</div>
+      <div class="pill reveal"><i>🚀</i> Tag‑push → GH Release zip</div>
+      <div class="pill reveal"><i>🔐</i> Key + data in browser · no server</div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="final">
+  <div class="wrap reveal">
+    <h2>Ready to demo?</h2>
+    <p class="lede">Clone, build, load unpacked, paste your key. ~60 seconds.</p>
+    <div class="arch" style="text-align:left;max-width:640px;margin:0 auto 28px">
+<pre>$ git clone https://github.com/mrviduus/linkmate.git
+$ cd linkmate
+$ npm install &amp;&amp; npm run build
+
+# chrome://extensions → Developer mode → Load unpacked → pick dist/
+# Click LinkMate icon → paste your OpenAI key → Save</pre>
+    </div>
+    <div class="hero-ctas" style="justify-content:center">
+      <a class="btn primary" href="https://github.com/mrviduus/linkmate/releases" target="_blank" rel="noopener">⬇ Download latest zip</a>
+      <a class="btn ghost" href="https://github.com/mrviduus/linkmate" target="_blank" rel="noopener">View source</a>
+    </div>
+  </div>
+</section>
+
+<div class="demo-modal" id="demoModal" role="dialog" aria-modal="true" aria-label="LinkMate demo video">
+  <div class="demo-shell">
+    <button class="demo-close" id="demoCloseBtn" aria-label="Close demo">✕</button>
+    <iframe id="demoVideo" src="" title="LinkMate demo on YouTube" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="width:100%;aspect-ratio:16/9;max-height:88vh;background:#000;display:block"></iframe>
+  </div>
+</div>
+
+<footer>
+  Built in ~5 days for TMLS Agentic Hackathon · <a href="https://github.com/mrviduus/linkmate" target="_blank" rel="noopener">mrviduus/linkmate</a> · ISC
+</footer>
+
+<script>
+// ───── scroll reveals ─────
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{rootMargin:'0px 0px -10% 0px',threshold:.05});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+// ───── card hover spotlight ─────
+document.querySelectorAll('.card').forEach(c=>{
+  c.addEventListener('mousemove',(e)=>{
+    const r=c.getBoundingClientRect();
+    c.style.setProperty('--mx',((e.clientX-r.left)/r.width*100)+'%');
+    c.style.setProperty('--my',((e.clientY-r.top)/r.height*100)+'%');
+  });
+});
+
+// ───── kpi count-up ─────
+const counts=[{el:'kpi-1',to:5},{el:'kpi-2',to:477},{el:'kpi-3',to:34},{el:'kpi-4',to:0,suffix:'$'}];
+function animateCount(node,to,suffix){
+  const dur=1200,start=performance.now();
+  function tick(t){
+    const p=Math.min(1,(t-start)/dur);
+    const v=Math.round(to*(1-(1-p)*(1-p)*(1-p)));
+    node.textContent=(suffix||'')+v;
+    if(p<1)requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+const kpiObs=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){counts.forEach(c=>animateCount(document.getElementById(c.el),c.to,c.suffix));kpiObs.disconnect()}})},{threshold:.4});
+kpiObs.observe(document.querySelector('.hero-stats'));
+
+// ───── donut count-up + ring fill ─────
+const donut=document.getElementById('donut'),donutNum=document.getElementById('donutNum');
+let from=0,to=73;function donutTick(){from++;if(from<=to){donut.style.setProperty('--pct',from);donutNum.textContent=from;requestAnimationFrame(donutTick)}}
+setTimeout(donutTick,500);
+
+// ───── AI rewrite typewriter ─────
+const variants=[
+  "Senior Backend Engineer scaling distributed systems at $REVENUE → led migration of 3 services to event‑driven, cut p99 latency 38%. Mentoring 4 ICs. Open to staff‑level roles.",
+  "I build event‑driven backends that don't wake you up at 3am — last platform shipped, traffic 4×'d, on‑call calmed down. Mentor · ex‑$BIGCO · open to staff IC.",
+  "Backend tech‑lead → I'd rather delete a service than scale a bad one. Currently: payments reliability, RFCs, mentoring. Looking for staff IC roles where the bar is high and the org is sane."
+];
+const aiBody=document.getElementById('aiBody');
+let vi=0;
+function typeText(text){
+  aiBody.innerHTML='';
+  const span=document.createElement('span');aiBody.appendChild(span);
+  const caret=document.createElement('span');caret.className='caret';aiBody.appendChild(caret);
+  let i=0;
+  function step(){
+    if(i<=text.length){span.textContent=text.slice(0,i);i++;setTimeout(step,14+Math.random()*22)}
+    else{caret.style.animation='caret 1s steps(2) infinite'}
+  }
+  step();
+}
+function nextVariant(){vi=(vi+1)%variants.length;typeText(variants[vi])}
+typeText(variants[0]);
+document.getElementById('regenBtn').addEventListener('click',nextVariant);
+document.getElementById('copyBtn').addEventListener('click',(e)=>{
+  navigator.clipboard?.writeText(variants[vi]);
+  const b=e.currentTarget,t=b.textContent;b.textContent='✓ Copied';setTimeout(()=>b.textContent=t,1400);
+});
+
+// ───── parallax on mock ─────
+const stage=document.querySelector('.mock-stage');
+stage?.addEventListener('mousemove',(e)=>{
+  const r=stage.getBoundingClientRect();
+  const x=(e.clientX-r.left-r.width/2)/r.width;
+  const y=(e.clientY-r.top-r.height/2)/r.height;
+  stage.querySelector('.mock').style.transform=`rotateX(${8-y*10}deg) rotateY(${-12+x*16}deg) rotateZ(2deg) translateY(0)`;
+});
+stage?.addEventListener('mouseleave',()=>{stage.querySelector('.mock').style.transform=''});
+
+// ───── demo modal ─────
+const demoModal=document.getElementById('demoModal');
+const demoVideo=document.getElementById('demoVideo');
+const demoBtn=document.getElementById('watchDemoBtn');
+const demoClose=document.getElementById('demoCloseBtn');
+const YT_EMBED='https://www.youtube.com/embed/Qyz9MoaPe-U?autoplay=1&rel=0&modestbranding=1';
+function openDemo(){
+  demoModal.classList.add('open');
+  document.body.style.overflow='hidden';
+  try{demoVideo.src=YT_EMBED}catch(e){}
+}
+function closeDemo(){
+  demoModal.classList.remove('open');
+  document.body.style.overflow='';
+  try{demoVideo.src=''}catch(e){}
+}
+demoBtn?.addEventListener('click',(e)=>{e.preventDefault();openDemo()});
+demoClose?.addEventListener('click',closeDemo);
+demoModal?.addEventListener('click',(e)=>{if(e.target===demoModal)closeDemo()});
+
+// ───── keyboard shortcuts ─────
+document.addEventListener('keydown',(e)=>{
+  if(e.key==='Escape'&&demoModal.classList.contains('open')){closeDemo();return}
+  if((e.key==='d'||e.key==='D')&&!demoModal.classList.contains('open'))document.getElementById('demo')?.scrollIntoView({behavior:'smooth'});
+});
+</script>
+</body>
+</html>

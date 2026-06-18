@@ -255,6 +255,27 @@ describe('computeActivitySignals', () => {
     expect(findSignal(computeActivitySignals(p, null, NOW), 'posts30d').status).toBe('ok');
   });
 
+  it('parses LinkedIn RELATIVE timestamps ("3d", "1w", "7mo") — not just ISO', () => {
+    // Real scraped data uses relative strings; Date.parse returns NaN for these,
+    // which previously zeroed the counts even when activity existed.
+    const p = profile({
+      recentPosts: [
+        { id: 'a', text: 't', timestamp: '3d', isRepost: false },
+        { id: 'b', text: 't', timestamp: '1w', isRepost: false },
+        { id: 'c', text: 't', timestamp: '2w', isRepost: false },
+        { id: 'd', text: 't', timestamp: '7mo', isRepost: false }, // outside 30d
+      ],
+      recentComments: [
+        { id: 'c1', text: 't', timestamp: '5h', originalPostText: 'op', originalAuthor: 'a' },
+        { id: 'c2', text: 't', timestamp: '2d', originalPostText: 'op', originalAuthor: 'a' },
+        { id: 'c3', text: 't', timestamp: '1y', originalPostText: 'op', originalAuthor: 'a' }, // outside
+      ],
+    });
+    const signals = computeActivitySignals(p, null, NOW);
+    expect(findSignal(signals, 'posts30d').detail).toContain('3 '); // 3d, 1w, 2w
+    expect(findSignal(signals, 'comments30d').detail).toContain('2 '); // 5h, 2d
+  });
+
   it('counts comments within 30d window', () => {
     const p = profile({
       recentComments: [

@@ -7,7 +7,11 @@
  * first-gesture on profile page, popup auto-fire) are gated behind that flag.
  */
 
-import { setCaptureFullProfile, setOnboardingCompleted } from './storage-schema';
+import {
+  ensureInstallToken,
+  setCaptureFullProfile,
+  setOnboardingCompleted,
+} from './storage-schema';
 
 const captureFull = document.getElementById('captureFull') as HTMLInputElement | null;
 const getStartedBtn = document.getElementById('getStarted') as HTMLButtonElement | null;
@@ -21,6 +25,8 @@ async function handleGetStarted(): Promise<void> {
   getStartedBtn.textContent = 'Opening LinkedIn…';
   await setCaptureFullProfile(captureFull?.checked ?? true);
   await setOnboardingCompleted(true);
+  // Mint the anonymous install token so the free managed tier works immediately.
+  await ensureInstallToken();
   // One-shot signal to the side panel: kick off a capture on the very next
   // open. Subsequent opens won't re-capture (the panel consumes this flag).
   await chrome.storage.local.set({ [PENDING_CAPTURE_KEY]: true });
@@ -50,7 +56,11 @@ async function handleGetStarted(): Promise<void> {
     console.warn('[LinkMate] welcome → sidePanel.open failed:', err);
   }
 
-  window.location.assign('https://www.linkedin.com/in/me/');
+  // Navigate to the feed (the dashboard's home), NOT /in/me — the capture opens
+  // its own fresh profile tab anyway, so sending the welcome tab to /in/me too
+  // just left a redundant duplicate profile tab. Now: one persistent feed tab +
+  // the capture's temporary scrape tab (which auto-closes).
+  window.location.assign('https://www.linkedin.com/feed/');
 }
 
 async function handleSkip(): Promise<void> {

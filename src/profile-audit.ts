@@ -12,6 +12,7 @@
  */
 
 import type { UserProfile } from './lib/idb';
+import { resolveTimestampMs } from './lib/relative-time';
 
 export type AuditStatus = 'pass' | 'fail';
 export type AuditSeverity = 'high' | 'med';
@@ -189,6 +190,7 @@ export function computeActivitySignals(
     profile.recentPosts ?? [],
     (p) => (p.isRepost ? null : p.timestamp),
     threshold,
+    now,
   );
   out.push({
     id: 'posts30d',
@@ -205,6 +207,7 @@ export function computeActivitySignals(
     profile.recentComments ?? [],
     (c) => c.timestamp,
     threshold,
+    now,
   );
   out.push({
     id: 'comments30d',
@@ -238,13 +241,14 @@ function countSinceTimestamp<T>(
   items: T[],
   getTs: (item: T) => string | null | undefined,
   thresholdMs: number,
+  now: number,
 ): number {
   let n = 0;
   for (const it of items) {
     const ts = getTs(it);
     if (!ts) continue;
-    const t = Date.parse(ts);
-    if (Number.isFinite(t) && t >= thresholdMs) n++;
+    const t = resolveTimestampMs(ts, now);
+    if (t !== null && t >= thresholdMs) n++;
   }
   return n;
 }

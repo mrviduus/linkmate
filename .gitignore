@@ -25,3 +25,6 @@ eslint-report.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Demo source — only the compressed mp4 ships
+docs/demo.mov
