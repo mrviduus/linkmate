@@ -33,6 +33,12 @@ jobs:
           # when triggered manually.
           fetch-depth: 0
           ref: main
+          # main is a protected branch (require PR + required "build" check).
+          # The default GITHUB_TOKEN is not an admin and gets rejected on the
+          # bump commit push. RELEASE_PAT is an admin PAT; since enforce_admins
+          # is off, its push bypasses protection. Falls back to GITHUB_TOKEN for
+          # plain tag-push runs (which never push to main). Setup: docs/RELEASE.md
+          token: ${{ secrets.RELEASE_PAT || github.token }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
