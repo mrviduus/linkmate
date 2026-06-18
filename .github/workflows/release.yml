@@ -54,6 +54,11 @@ jobs:
       - name: Bump version + tag (manual dispatch)
         id: bump
         if: github.event_name == 'workflow_dispatch'
+        env:
+          # Tag is pushed under GITHUB_TOKEN (see below) so it does NOT
+          # re-trigger the `push: tags` job — a PAT push would, causing a
+          # duplicate run that fails CWS upload with ITEM_NOT_UPDATABLE.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           CUR=$(node -p "require('./package.json').version")
@@ -67,8 +72,10 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git commit -am "release: v$NEXT"
           git tag -a "v$NEXT" -m "v$NEXT"
+          # Commit goes to protected main under the checkout token (admin PAT).
           git push origin HEAD:main
-          git push origin "v$NEXT"
+          # Tag goes under GITHUB_TOKEN so the push does NOT spawn a second run.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "v$NEXT"
           echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
 
       # Tag for the GitHub Release: the pushed ref on a tag run, the freshly
