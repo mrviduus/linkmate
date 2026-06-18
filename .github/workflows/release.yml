@@ -3,6 +3,19 @@ name: release
 on:
   push:
     tags: ['v*.*.*']
+  # One-click release from the Actions tab: pick a bump level and Run workflow.
+  # The job computes the next version from package.json, bumps both manifests,
+  # commits + tags + pushes, then builds and publishes (same steps as a tag push).
+  # Note: the tag pushed here uses GITHUB_TOKEN, which does NOT re-trigger the
+  # push-tags run above, so there is no double publish.
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+        required: true
 
 permissions:
   contents: write
@@ -15,6 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history + main ref so we can compute, commit and push a tag
+          # when triggered manually.
+          fetch-depth: 0
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -23,11 +41,47 @@ jobs:
       - run: npm run type-check
       - run: npm run lint
       - run: npm test
+
+      # Manual dispatch only: bump version, commit, tag, push. Checks above have
+      # already passed, so we only tag a known-good build. Exposes the new tag
+      # via steps.bump.outputs.tag for the GitHub Release step below.
+      - name: Bump version + tag (manual dispatch)
+        id: bump
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          CUR=$(node -p "require('./package.json').version")
+          NEXT=$(node -e "const [a,b,c]='$CUR'.split('.').map(Number); const l='${{ inputs.bump }}'; console.log(l==='major'?(a+1)+'.0.0':l==='minor'?a+'.'+(b+1)+'.0':a+'.'+b+'.'+(c+1))")
+          echo "Bumping $CUR -> $NEXT (${{ inputs.bump }})"
+          if git ls-remote --tags origin "refs/tags/v$NEXT" | grep -q .; then
+            echo "::error::tag v$NEXT already exists on origin"; exit 1
+          fi
+          node -e "for (const f of ['package.json','src/manifest.json']) { const fs=require('fs'); const j=JSON.parse(fs.readFileSync(f,'utf8')); j.version='$NEXT'; fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n'); }"
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git commit -am "release: v$NEXT"
+          git tag -a "v$NEXT" -m "v$NEXT"
+          git push origin HEAD:main
+          git push origin "v$NEXT"
+          echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
+
+      # Tag for the GitHub Release: the pushed ref on a tag run, the freshly
+      # computed tag on a manual run.
+      - name: Resolve release tag
+        id: rel
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ steps.bump.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Package (npm run zip → linkmate.zip)
         run: npm run zip
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.rel.outputs.tag }}
           files: linkmate.zip
           generate_release_notes: true
           # Overwrite (don't append) on tag re-push — softprops appends body
